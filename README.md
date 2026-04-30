@@ -143,6 +143,152 @@ Open:
 MyProject.uproject
 ```
 
+## Deployment Guide / 部署指南
+
+This project is an Unreal Editor plugin workflow rather than a packaged game/server deployment. A normal deployment means cloning the repository, pulling LFS assets, opening the project in Unreal Engine, compiling the editor modules, and verifying that the local MCP endpoint is available.
+
+### 1. Prepare The Machine
+
+Install:
+
+- Unreal Engine 5.7.
+- Xcode command line tools on macOS.
+- Git.
+- Git LFS.
+
+Verify Git LFS:
+
+```bash
+git lfs install
+git lfs version
+```
+
+### 2. Clone And Pull Assets
+
+```bash
+git clone https://github.com/edwinmeng163-oss/UEMCP.git
+cd UEMCP
+git lfs install
+git lfs pull
+```
+
+If binary assets look very small or fail to load in Unreal, run `git lfs pull` again.
+
+### 3. Open Or Build The Project
+
+Open `MyProject.uproject` directly in Unreal Engine 5.7.
+
+For a command-line editor build on macOS:
+
+```bash
+"/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh" \
+  MyProjectEditor Mac Development \
+  -Project="$(pwd)/MyProject.uproject" \
+  -WaitMutex
+```
+
+If the editor asks to rebuild modules on first open, allow it to rebuild.
+
+### 4. Confirm Plugin Settings
+
+In Unreal Editor, open:
+
+```text
+Edit > Project Settings > Plugins > Unreal MCP
+```
+
+Recommended defaults:
+
+- MCP server enabled.
+- Host: `127.0.0.1`
+- Port: `8765`
+- Endpoint path: `/mcp`
+- Auth token: empty for local-only testing, or configured if another app will connect.
+
+The plugin is editor-focused. Keep the endpoint bound to localhost unless you intentionally know how you want to secure remote access.
+
+### 5. Verify The MCP Endpoint
+
+With the Unreal Editor running, test from a terminal:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' \
+  http://127.0.0.1:8765/mcp
+```
+
+List available tools:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  http://127.0.0.1:8765/mcp
+```
+
+Call a basic status tool:
+
+```bash
+curl -s \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"unreal.editor_status","arguments":{}}}' \
+  http://127.0.0.1:8765/mcp
+```
+
+### 6. Use The In-Editor Chat
+
+Open:
+
+```text
+Window > Unreal MCP Chat
+```
+
+Try direct commands:
+
+```text
+/status
+/maps
+/assets /Game/TopDown
+/map_check
+```
+
+Try a direct tool call:
+
+```text
+/tool unreal.editor_status {}
+```
+
+### 7. Optional AI Assistant Setup
+
+To use natural-language AI requests from the chat panel, configure:
+
+```text
+Project Settings > Plugins > Unreal MCP > AI
+```
+
+Set:
+
+- Enable AI Assistant.
+- OpenAI Responses URL.
+- OpenAI API Key.
+- OpenAI Model.
+- AI Max Tool Rounds.
+- AI Request Timeout Seconds.
+
+Keep API keys local. Do not commit editor user settings or key files.
+
+### 8. Troubleshooting
+
+- If `/status` works but AI requests fail, check the AI settings and API key.
+- If `curl` cannot connect, confirm the Unreal Editor is open and the plugin is enabled.
+- If tools time out during heavy editor work, increase the AI request/activity timeout settings.
+- If assets are missing, run `git lfs pull`.
+- If the plugin does not compile, rebuild `MyProjectEditor` from the command line and inspect the UnrealBuildTool log.
+
 ## Git / Repository Notes
 
 This repository uses Git LFS for Unreal binary assets:
