@@ -95,6 +95,7 @@ Unreal MCP currently supports:
   - `unreal.mcp_rollback_last_extension`
   - `unreal.mcp_build_editor`
   - `unreal.mcp_run_tool_test`
+  - `unreal.mcp_extension_pipeline`
   - `unreal.mcp_tool_audit`
 - Restart-resilient project memory:
   - `unreal.project_memory_write`
@@ -167,6 +168,7 @@ Useful first-stage extension checks:
 /tool unreal.mcp_rollback_last_extension {"dryRun":true}
 /tool unreal.mcp_build_editor {"toolName":"unreal.my_custom_tool","scaffoldDir":"Tools/UnrealMcpToolScaffolds/my_custom_tool","writeProjectMemory":true}
 /tool unreal.mcp_run_tool_test {"memoryKey":"mcp.extension.build_test","readProjectMemory":true}
+/tool unreal.mcp_extension_pipeline {"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}
 /tool unreal.mcp_tool_audit {}
 /tool unreal.project_memory_write {"key":"mcp_extension","summary":"Resume MCP extension work after editor restart.","status":"in_progress","nextStep":"Run schema validation and tool audit after rebuilding.","contentJson":"{\"target\":\"self-extension\"}","tags":["mcp","restart"]}
 /tool unreal.project_memory_read {"key":"mcp_extension","includeContent":true}
@@ -177,6 +179,18 @@ Build/test handoff note:
 - `unreal.mcp_build_editor` runs Unreal Build Tool for `MyProjectEditor`, captures a build log under `Saved/UnrealMcp/BuildLogs`, parses key error lines, and writes restart handoff state into project memory.
 - Because the tool is invoked from a running editor, newly compiled plugin code is not loaded until Unreal Editor is restarted.
 - After restart, `unreal.mcp_run_tool_test` can read the memory entry, locate the generated `TestRequest.json`, confirm the tool appears in `tools/list`, and execute the recorded `tools/call` request through the in-editor MCP handlers.
+- `unreal.mcp_extension_pipeline` orchestrates validate, apply dry run, apply, memory write, build, restart handoff, and post-restart test resume.
+
+External supervisor:
+
+```bash
+python3 Tools/unreal_mcp_supervisor.py wait
+python3 Tools/unreal_mcp_supervisor.py restart
+python3 Tools/unreal_mcp_supervisor.py resume-test --memory-key mcp.extension.pipeline --pipeline
+python3 Tools/unreal_mcp_supervisor.py pipeline --auto-restart --args-json '{"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}'
+```
+
+The supervisor runs outside Unreal Editor, so it can close/reopen the editor and resume MCP tests after plugin code reloads.
 
 ## Opening The Project
 

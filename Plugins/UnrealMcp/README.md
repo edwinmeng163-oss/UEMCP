@@ -71,6 +71,7 @@ Editor action tools:
 - `unreal.mcp_rollback_last_extension`
 - `unreal.mcp_build_editor`
 - `unreal.mcp_run_tool_test`
+- `unreal.mcp_extension_pipeline`
 - `unreal.mcp_tool_audit`
 - `unreal.project_memory_write`
 - `unreal.project_memory_read`
@@ -292,6 +293,31 @@ After restart, run the generated test request:
 ```
 
 The test runner resolves `TestRequest.json`, verifies the tool is listed, executes the recorded `tools/call` through the in-editor MCP handlers, and records the result back into project memory.
+
+Run the high-level extension pipeline:
+
+```text
+/tool unreal.mcp_extension_pipeline {"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}
+```
+
+The pipeline resolves the scaffold, validates the requested schema when available, runs `mcp_apply_scaffold` in dry-run mode, applies snippets with backup support, writes project memory, builds the editor, and either runs the test immediately or returns `requiresRestart=true` with a resume command.
+
+After an editor restart:
+
+```text
+/tool unreal.mcp_extension_pipeline {"mode":"resume_test","memoryKey":"mcp.extension.pipeline"}
+```
+
+External restart supervisor:
+
+```bash
+python3 Tools/unreal_mcp_supervisor.py wait
+python3 Tools/unreal_mcp_supervisor.py restart
+python3 Tools/unreal_mcp_supervisor.py resume-test --memory-key mcp.extension.pipeline --pipeline
+python3 Tools/unreal_mcp_supervisor.py pipeline --auto-restart --args-json '{"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}'
+```
+
+The supervisor script runs outside Unreal Editor, so it can close/reopen the editor and resume MCP tests after plugin code reloads. This is the safe path for strict self-extension; the in-editor Chat can request a restart, but it cannot keep executing while its own host process is closed.
 
 ```text
 /tool unreal.mcp_rollback_last_extension {"dryRun":true}
