@@ -203,47 +203,47 @@ Use the returned `nodeGuid` values with `unreal.bp_connect_pins`, then call `unr
 UMG Widget Blueprint editing example:
 
 ```text
-/tool unreal.widget_build_template {"widgetBlueprintPath":"/Game/ImperialTavern/Blueprints/UI/WBP_IT_HUD","templateName":"imperial_tavern_mvp","title":"Imperial Tavern","replaceRoot":true,"compile":false,"savePackage":false}
+/tool unreal.widget_build_template {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","templateName":"mcp_demo_hud","title":"MCP Demo","replaceRoot":true,"compile":false,"savePackage":false}
 ```
 
 Then call `unreal.bp_compile_save` for the Widget Blueprint when the hierarchy edits are done.
 
 ```text
-/tool unreal.widget_add {"widgetBlueprintPath":"/Game/ImperialTavern/Blueprints/UI/WBP_IT_HUD","parentWidgetName":"RootCanvas","widgetName":"DebugText","widgetClass":"TextBlock","isVariable":true}
+/tool unreal.widget_add {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","parentWidgetName":"RootCanvas","widgetName":"DebugText","widgetClass":"TextBlock","isVariable":true}
 ```
 
 ```text
-/tool unreal.widget_set_property {"widgetBlueprintPath":"/Game/ImperialTavern/Blueprints/UI/WBP_IT_HUD","widgetName":"DebugText","propertyName":"Text","value":"Round 1: Preparation"}
+/tool unreal.widget_set_property {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","widgetName":"DebugText","propertyName":"Text","value":"Round 1: Preparation"}
 ```
 
 ```text
-/tool unreal.widget_set_slot_layout {"widgetBlueprintPath":"/Game/ImperialTavern/Blueprints/UI/WBP_IT_HUD","widgetName":"DebugText","x":32,"y":92,"width":420,"height":40}
+/tool unreal.widget_set_slot_layout {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","widgetName":"DebugText","x":32,"y":92,"width":420,"height":40}
 ```
 
 ```text
-/tool unreal.widget_bind_event {"widgetBlueprintPath":"/Game/ImperialTavern/Blueprints/UI/WBP_IT_HUD","widgetName":"RefreshButton","eventName":"OnClicked","compile":true}
+/tool unreal.widget_bind_event {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","widgetName":"RefreshButton","eventName":"OnClicked","compile":true}
 ```
 
 Playable system scaffold examples:
 
 ```text
-/tool unreal.scaffold_round_system {"rootPath":"/Game/ImperialTavern","compile":true,"savePackage":true}
+/tool unreal.scaffold_round_system {"rootPath":"/Game/MCPDemo","compile":true,"savePackage":true}
 ```
 
 ```text
-/tool unreal.scaffold_shop_system {"rootPath":"/Game/ImperialTavern","compile":true,"savePackage":true,"replaceWidgetRoot":true}
+/tool unreal.scaffold_shop_system {"rootPath":"/Game/MCPDemo","compile":true,"savePackage":true,"replaceWidgetRoot":true}
 ```
 
 ```text
-/tool unreal.scaffold_economy_system {"rootPath":"/Game/ImperialTavern","compile":true,"savePackage":true}
+/tool unreal.scaffold_economy_system {"rootPath":"/Game/MCPDemo","compile":true,"savePackage":true}
 ```
 
 ```text
-/tool unreal.scaffold_autobattler_ai {"rootPath":"/Game/ImperialTavern","compile":true,"savePackage":true}
+/tool unreal.scaffold_autobattler_ai {"rootPath":"/Game/MCPDemo","compile":true,"savePackage":true}
 ```
 
 ```text
-/tool unreal.scaffold_result_ui {"rootPath":"/Game/ImperialTavern","compile":true,"savePackage":true,"replaceWidgetRoot":true}
+/tool unreal.scaffold_result_ui {"rootPath":"/Game/MCPDemo","compile":true,"savePackage":true,"replaceWidgetRoot":true}
 ```
 
 ## Quick Test

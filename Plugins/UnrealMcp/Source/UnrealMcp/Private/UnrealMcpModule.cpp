@@ -2463,14 +2463,14 @@ namespace UnrealMcp
 		UTextBlock* Title = Cast<UTextBlock>(AddTemplateWidget(WidgetBlueprint, RootCanvas, UTextBlock::StaticClass(), TEXT("TitleText")));
 		if (Title)
 		{
-			Title->SetText(FText::FromString(TitleText.IsEmpty() ? TEXT("Imperial Tavern") : TitleText));
+			Title->SetText(FText::FromString(TitleText.IsEmpty() ? TEXT("MCP Demo") : TitleText));
 			SetCanvasLayout(Title, 32.0, 24.0, 760.0, 56.0, 1);
 		}
 
 		UTextBlock* Economy = Cast<UTextBlock>(AddTemplateWidget(WidgetBlueprint, RootCanvas, UTextBlock::StaticClass(), TEXT("EconomyText")));
 		if (Economy)
 		{
-			Economy->SetText(FText::FromString(TEXT("Food 3/10    Gold 1    Tavern Lv.1")));
+			Economy->SetText(FText::FromString(TEXT("Food 3/10    Gold 1    Hub Lv.1")));
 			SetCanvasLayout(Economy, 820.0, 32.0, 420.0, 40.0, 1);
 			Economy->bIsVariable = true;
 			EnsureWidgetBlueprintGuid(WidgetBlueprint, Economy);
@@ -2569,7 +2569,7 @@ namespace UnrealMcp
 
 			const FButtonSpec Buttons[] = {
 				{ TEXT("RefreshButton"), TEXT("Refresh") },
-				{ TEXT("UpgradeTavernButton"), TEXT("Upgrade Tavern") },
+				{ TEXT("UpgradeHubButton"), TEXT("Upgrade Hub") },
 				{ TEXT("ReadyButton"), TEXT("Ready For Combat") },
 			};
 
@@ -2631,7 +2631,7 @@ namespace UnrealMcp
 		UTextBlock* HeaderText = Cast<UTextBlock>(AddTemplateWidget(WidgetBlueprint, ShopPanel, UTextBlock::StaticClass(), TEXT("ShopHeaderText")));
 		if (HeaderText)
 		{
-			HeaderText->SetText(FText::FromString(TitleText.IsEmpty() ? TEXT("Tavern Shop") : TitleText));
+			HeaderText->SetText(FText::FromString(TitleText.IsEmpty() ? TEXT("Demo Shop") : TitleText));
 			SetBoxSlotPadding(HeaderText, FMargin(0.0f, 0.0f, 0.0f, 12.0f));
 		}
 
@@ -2771,7 +2771,7 @@ namespace UnrealMcp
 		FString RootPath = RequestedRootPath.TrimStartAndEnd();
 		if (RootPath.IsEmpty())
 		{
-			RootPath = TEXT("/Game/ImperialTavern");
+			RootPath = TEXT("/Game/MCPDemo");
 		}
 		while (RootPath.EndsWith(TEXT("/")))
 		{
@@ -3183,10 +3183,10 @@ namespace UnrealMcp
 		}
 
 		AddNextStep(NextSteps, TEXT("Attach BP_IT_RoundManagerComponent to BP_IT_GameMode or a dedicated arena actor, then implement phase transition logic in the generated function graphs."));
-		AddNextStep(NextSteps, TEXT("Set LVL_ImperialTavern_MVP World Settings to BP_IT_GameMode if it is not already selected."));
+		AddNextStep(NextSteps, TEXT("Set the prototype map World Settings to BP_IT_GameMode if it is not already selected."));
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeScaffoldStructuredContent(TEXT("scaffold_round_system"), RootPath, Directories, Assets, Variables, Functions, Defaults, Finalized, NextSteps);
-		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded Imperial Tavern round system under %s."), *RootPath), StructuredContent, false);
+		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded round system under %s."), *RootPath), StructuredContent, false);
 	}
 
 	FUnrealMcpExecutionResult ScaffoldShopSystem(UEditorAssetSubsystem* EditorAssetSubsystem, const FJsonObject& Arguments)
@@ -3269,7 +3269,7 @@ namespace UnrealMcp
 		AddScaffoldRecord(Assets, TEXT("widget_blueprint"), WidgetObjectPath, bWidgetCreated);
 		if (bReplaceWidgetRoot || !ShopWidget->WidgetTree || !ShopWidget->WidgetTree->RootWidget)
 		{
-			if (!BuildShopWidgetTemplate(ShopWidget, TEXT("Tavern Shop"), FailureReason))
+			if (!BuildShopWidgetTemplate(ShopWidget, TEXT("Demo Shop"), FailureReason))
 			{
 				return MakeExecutionResult(FailureReason, nullptr, true);
 			}
@@ -3281,7 +3281,7 @@ namespace UnrealMcp
 		AddNextStep(NextSteps, TEXT("Replace Name arrays with FCardInstanceData/FCardData structs once the C++ or Blueprint struct layer exists."));
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeScaffoldStructuredContent(TEXT("scaffold_shop_system"), RootPath, Directories, Assets, Variables, Functions, Defaults, Finalized, NextSteps);
-		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded Imperial Tavern shop system under %s."), *RootPath), StructuredContent, false);
+		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded shop system under %s."), *RootPath), StructuredContent, false);
 	}
 
 	FUnrealMcpExecutionResult ScaffoldEconomySystem(UEditorAssetSubsystem* EditorAssetSubsystem, const FJsonObject& Arguments)
@@ -3331,7 +3331,7 @@ namespace UnrealMcp
 			EnsureBlueprintScaffoldVariable(Target, TEXT("CurrentFood"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("3"), Variables, FailureReason);
 			EnsureBlueprintScaffoldVariable(Target, TEXT("MaxFood"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("10"), Variables, FailureReason);
 			EnsureBlueprintScaffoldVariable(Target, TEXT("CurrentGold"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("1"), Variables, FailureReason);
-			EnsureBlueprintScaffoldVariable(Target, TEXT("TavernLevel"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("1"), Variables, FailureReason);
+			EnsureBlueprintScaffoldVariable(Target, TEXT("HubLevel"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("1"), Variables, FailureReason);
 			EnsureBlueprintScaffoldVariable(Target, TEXT("WinStreak"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("0"), Variables, FailureReason);
 			EnsureBlueprintScaffoldVariable(Target, TEXT("LossStreak"), MakeScaffoldPinType(UEdGraphSchema_K2::PC_Int), TEXT("0"), Variables, FailureReason);
 		}
@@ -3344,7 +3344,7 @@ namespace UnrealMcp
 			TEXT("SpendGold"),
 			TEXT("AddFood"),
 			TEXT("AddGold"),
-			TEXT("UpgradeTavern"),
+			TEXT("UpgradeHub"),
 			TEXT("ApplyStreakBonus"),
 		};
 		for (const FString& FunctionName : EconomyFunctions)
@@ -3362,7 +3362,7 @@ namespace UnrealMcp
 		AddNextStep(NextSteps, TEXT("Move server validation into PlayerController RPCs after the resource functions have Blueprint bodies."));
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeScaffoldStructuredContent(TEXT("scaffold_economy_system"), RootPath, Directories, Assets, Variables, Functions, Defaults, Finalized, NextSteps);
-		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded Imperial Tavern economy system under %s."), *RootPath), StructuredContent, false);
+		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded economy system under %s."), *RootPath), StructuredContent, false);
 	}
 
 	FUnrealMcpExecutionResult ScaffoldAutobattlerAi(UEditorAssetSubsystem* EditorAssetSubsystem, const FJsonObject& Arguments)
@@ -3462,7 +3462,7 @@ namespace UnrealMcp
 		AddNextStep(NextSteps, TEXT("Keep spawned unit counts small until combat rules are proven; move to pooling or Mass later if needed."));
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeScaffoldStructuredContent(TEXT("scaffold_autobattler_ai"), RootPath, Directories, Assets, Variables, Functions, Defaults, Finalized, NextSteps);
-		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded Imperial Tavern autobattler AI under %s."), *RootPath), StructuredContent, false);
+		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded autobattler AI under %s."), *RootPath), StructuredContent, false);
 	}
 
 	FUnrealMcpExecutionResult ScaffoldResultUi(UEditorAssetSubsystem* EditorAssetSubsystem, const FJsonObject& Arguments)
@@ -3549,7 +3549,7 @@ namespace UnrealMcp
 		AddNextStep(NextSteps, TEXT("Feed OutcomeText and DamageText from combat resolution data once the result struct exists."));
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeScaffoldStructuredContent(TEXT("scaffold_result_ui"), RootPath, Directories, Assets, Variables, Functions, Defaults, Finalized, NextSteps);
-		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded Imperial Tavern result UI under %s."), *RootPath), StructuredContent, false);
+		return MakeExecutionResult(FString::Printf(TEXT("Scaffolded result UI under %s."), *RootPath), StructuredContent, false);
 	}
 
 	FString GetCommandRemainder(const FString& Input, const FString& Command)
@@ -5835,8 +5835,8 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
 			PropertiesObject->SetObjectField(TEXT("widgetBlueprintPath"), UnrealMcp::MakeStringProperty(TEXT("Widget Blueprint asset path to create or rebuild.")));
-			PropertiesObject->SetObjectField(TEXT("templateName"), UnrealMcp::MakeStringProperty(TEXT("Template preset name. Currently supports imperial_tavern_mvp."), TEXT("imperial_tavern_mvp")));
-			PropertiesObject->SetObjectField(TEXT("title"), UnrealMcp::MakeStringProperty(TEXT("Title text for the generated template."), TEXT("Imperial Tavern")));
+			PropertiesObject->SetObjectField(TEXT("templateName"), UnrealMcp::MakeStringProperty(TEXT("Template preset name. Currently supports mcp_demo_hud."), TEXT("mcp_demo_hud")));
+			PropertiesObject->SetObjectField(TEXT("title"), UnrealMcp::MakeStringProperty(TEXT("Title text for the generated template."), TEXT("MCP Demo")));
 			PropertiesObject->SetObjectField(TEXT("replaceRoot"), UnrealMcp::MakeBoolProperty(TEXT("Whether to replace the existing root widget tree."), true));
 			PropertiesObject->SetObjectField(TEXT("compile"), UnrealMcp::MakeBoolProperty(TEXT("Whether to compile after building the template. For large first-time templates, prefer false then call unreal.bp_compile_save."), false));
 			PropertiesObject->SetObjectField(TEXT("savePackage"), UnrealMcp::MakeBoolProperty(TEXT("Whether to save the Widget Blueprint package after building. For large first-time templates, prefer false then call unreal.bp_compile_save."), false));
@@ -5848,13 +5848,13 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				ToolsArray,
 				TEXT("unreal.widget_build_template"),
 				TEXT("Widget Build Template"),
-				TEXT("Creates or rebuilds a Widget Blueprint with a practical Imperial Tavern MVP HUD hierarchy."),
+				TEXT("Creates or rebuilds a Widget Blueprint with a practical demo HUD hierarchy."),
 				InputSchema);
 		}
 
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
-			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/ImperialTavern")));
+			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/MCPDemo")));
 			PropertiesObject->SetObjectField(TEXT("compile"), UnrealMcp::MakeBoolProperty(TEXT("Whether to compile scaffolded Blueprints."), true));
 			PropertiesObject->SetObjectField(TEXT("savePackage"), UnrealMcp::MakeBoolProperty(TEXT("Whether to save scaffolded packages."), true));
 
@@ -5865,13 +5865,13 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				ToolsArray,
 				TEXT("unreal.scaffold_round_system"),
 				TEXT("Scaffold Round System"),
-				TEXT("Creates or updates high-level Imperial Tavern round-flow Blueprint scaffolding: GameMode, GameState, PlayerState, PlayerController, and RoundManagerComponent."),
+				TEXT("Creates or updates high-level round-flow Blueprint scaffolding: GameMode, GameState, PlayerState, PlayerController, and RoundManagerComponent."),
 				InputSchema);
 		}
 
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
-			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/ImperialTavern")));
+			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/MCPDemo")));
 			PropertiesObject->SetObjectField(TEXT("compile"), UnrealMcp::MakeBoolProperty(TEXT("Whether to compile scaffolded Blueprints."), true));
 			PropertiesObject->SetObjectField(TEXT("savePackage"), UnrealMcp::MakeBoolProperty(TEXT("Whether to save scaffolded packages."), true));
 			PropertiesObject->SetObjectField(TEXT("replaceWidgetRoot"), UnrealMcp::MakeBoolProperty(TEXT("Whether to rebuild the generated shop Widget Blueprint hierarchy."), true));
@@ -5889,7 +5889,7 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
-			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/ImperialTavern")));
+			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/MCPDemo")));
 			PropertiesObject->SetObjectField(TEXT("compile"), UnrealMcp::MakeBoolProperty(TEXT("Whether to compile scaffolded Blueprints."), true));
 			PropertiesObject->SetObjectField(TEXT("savePackage"), UnrealMcp::MakeBoolProperty(TEXT("Whether to save scaffolded packages."), true));
 
@@ -5900,13 +5900,13 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				ToolsArray,
 				TEXT("unreal.scaffold_economy_system"),
 				TEXT("Scaffold Economy System"),
-				TEXT("Creates or updates food/gold/tavern-level economy Blueprint component scaffolding and matching PlayerState variables."),
+				TEXT("Creates or updates food/gold/level economy Blueprint component scaffolding and matching PlayerState variables."),
 				InputSchema);
 		}
 
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
-			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/ImperialTavern")));
+			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/MCPDemo")));
 			PropertiesObject->SetObjectField(TEXT("compile"), UnrealMcp::MakeBoolProperty(TEXT("Whether to compile scaffolded Blueprints."), true));
 			PropertiesObject->SetObjectField(TEXT("savePackage"), UnrealMcp::MakeBoolProperty(TEXT("Whether to save scaffolded packages."), true));
 
@@ -5923,7 +5923,7 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
-			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/ImperialTavern")));
+			PropertiesObject->SetObjectField(TEXT("rootPath"), UnrealMcp::MakeStringProperty(TEXT("Feature root content path."), TEXT("/Game/MCPDemo")));
 			PropertiesObject->SetObjectField(TEXT("compile"), UnrealMcp::MakeBoolProperty(TEXT("Whether to compile scaffolded Blueprints."), true));
 			PropertiesObject->SetObjectField(TEXT("savePackage"), UnrealMcp::MakeBoolProperty(TEXT("Whether to save scaffolded packages."), true));
 			PropertiesObject->SetObjectField(TEXT("replaceWidgetRoot"), UnrealMcp::MakeBoolProperty(TEXT("Whether to rebuild the generated result Widget Blueprint hierarchy."), true));
@@ -9651,8 +9651,8 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 		}
 
 		FString WidgetBlueprintPath;
-		FString TemplateName = TEXT("imperial_tavern_mvp");
-		FString TitleText = TEXT("Imperial Tavern");
+		FString TemplateName = TEXT("mcp_demo_hud");
+		FString TitleText = TEXT("MCP Demo");
 		bool bReplaceRoot = true;
 		bool bCompile = false;
 		bool bSavePackage = false;
@@ -9666,9 +9666,9 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 		Arguments.TryGetBoolField(TEXT("compile"), bCompile);
 		Arguments.TryGetBoolField(TEXT("savePackage"), bSavePackage);
 
-		if (!TemplateName.TrimStartAndEnd().Equals(TEXT("imperial_tavern_mvp"), ESearchCase::IgnoreCase))
+		if (!TemplateName.TrimStartAndEnd().Equals(TEXT("mcp_demo_hud"), ESearchCase::IgnoreCase))
 		{
-			return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("Unsupported widget template '%s'. Currently supported: imperial_tavern_mvp."), *TemplateName), nullptr, true);
+			return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("Unsupported widget template '%s'. Currently supported: mcp_demo_hud."), *TemplateName), nullptr, true);
 		}
 
 		FString ObjectPath;
