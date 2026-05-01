@@ -73,8 +73,10 @@ Editor action tools:
 - `unreal.mcp_validate_tool_schema`
 - `unreal.mcp_apply_scaffold`
 - `unreal.mcp_rollback_last_extension`
+- `unreal.mcp_generate_tests`
 - `unreal.mcp_build_editor`
 - `unreal.mcp_run_tool_test`
+- `unreal.mcp_run_test_suite`
 - `unreal.mcp_extension_pipeline`
 - `unreal.mcp_pipeline_status`
 - `unreal.mcp_diff_last_apply`
@@ -307,6 +309,14 @@ Validate or patch generated snippets before applying them:
 
 `unreal.mcp_validate_cpp_snippet` checks generated C++ snippets for risky patterns such as process execution, destructive file operations, external path literals, recursive pipeline calls, obvious infinite loops, missing handler returns, and flexible schema warnings. `unreal.mcp_patch_scaffold_snippet` can edit `ToolDefinition.cpp.snippet`, `ExecuteToolHandler.cpp.snippet`, or `ChatCommand.cpp.snippet` with dry-run diff previews, idempotence checks, backups, and the same static validation gate.
 
+Generate a schema-derived test suite:
+
+```text
+/tool unreal.mcp_generate_tests {"toolName":"unreal.my_custom_tool","scaffoldDir":"Tools/UnrealMcpToolScaffolds/my_custom_tool"}
+```
+
+This writes `Tests/valid_basic.json`, `Tests/missing_required.json`, `Tests/boundary_values.json`, and `Tests/wrong_type.json`. Test files can wrap a JSON-RPC `tools/call` request with metadata such as `name`, `description`, `expectToolListed`, `executeTool`, and `expectToolCallError`.
+
 Build the editor after applying snippets:
 
 ```text
@@ -321,7 +331,15 @@ After restart, run the generated test request:
 /tool unreal.mcp_run_tool_test {"memoryKey":"mcp.extension.build_test","readProjectMemory":true}
 ```
 
-The test runner resolves `TestRequest.json`, verifies the tool is listed, executes the recorded `tools/call` through the in-editor MCP handlers, and records the result back into project memory.
+The single test runner resolves `TestRequest.json` or a wrapped test case, verifies the tool is listed, executes the recorded `tools/call` through the in-editor MCP handlers, compares expected error state, and records the result back into project memory.
+
+Run the full generated suite:
+
+```text
+/tool unreal.mcp_run_test_suite {"memoryKey":"mcp.extension.build_test","readProjectMemory":true}
+```
+
+The suite runner executes all `Tests/*.json` files, reports pass rate, failed cases, failure text, and failed `structuredContent`.
 
 Run the high-level extension pipeline:
 
@@ -329,7 +347,7 @@ Run the high-level extension pipeline:
 /tool unreal.mcp_extension_pipeline {"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}
 ```
 
-The pipeline resolves the scaffold, validates the requested schema when available, runs `mcp_apply_scaffold` in dry-run mode, applies snippets with backup support, writes project memory, builds the editor, and either runs the test immediately or returns `requiresRestart=true` with a resume command.
+The pipeline resolves the scaffold, validates the requested schema when available, generates or refreshes `Tests/*.json`, runs `mcp_apply_scaffold` in dry-run mode, applies snippets with backup support, writes project memory, builds the editor, and either runs the test suite immediately or returns `requiresRestart=true` with a resume command.
 
 After an editor restart:
 
