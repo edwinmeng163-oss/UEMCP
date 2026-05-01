@@ -8255,6 +8255,184 @@ namespace UnrealMcp
 			return MakeExecutionResult(Text, StructuredContent, !bSucceeded);
 		}
 
+		FString GetMcpSupervisorScriptPath()
+		{
+			return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/unreal_mcp_supervisor.py")));
+		}
+
+		FString MakeSupervisorDefaultArgsJson(const FString& MemoryKey)
+		{
+			FString EscapedMemoryKey = MemoryKey;
+			EscapedMemoryKey.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
+			EscapedMemoryKey.ReplaceInline(TEXT("\""), TEXT("\\\""));
+			return FString::Printf(TEXT("{\"memoryKey\":\"%s\"}"), *EscapedMemoryKey);
+		}
+
+		FUnrealMcpExecutionResult SupervisorInstall(const FJsonObject& Arguments)
+		{
+			FString Platform = TEXT("all");
+			FString OutputDir = TEXT("Tools/UnrealMcpSupervisor");
+			FString Label = FString::Printf(TEXT("com.unrealmcp.%s"), *SanitizeMcpToolIdForPath(FApp::GetProjectName()).ToLower());
+			FString MemoryKey = TEXT("mcp.extension.pipeline");
+			FString ArgsJson;
+			FString EndpointUrl = TEXT("http://127.0.0.1:8765/mcp");
+			FString SupervisorLogDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp/SupervisorLogs"));
+			FString EditorCmd;
+			bool bInstallLaunchAgent = false;
+			bool bLaunchAtLoad = false;
+			bool bAutoRestart = true;
+			bool bOverwrite = true;
+			bool bDryRun = false;
+
+			Arguments.TryGetStringField(TEXT("platform"), Platform);
+			Arguments.TryGetStringField(TEXT("outputDir"), OutputDir);
+			Arguments.TryGetStringField(TEXT("label"), Label);
+			Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
+			Arguments.TryGetStringField(TEXT("argsJson"), ArgsJson);
+			Arguments.TryGetStringField(TEXT("endpointUrl"), EndpointUrl);
+			Arguments.TryGetStringField(TEXT("supervisorLogDir"), SupervisorLogDir);
+			Arguments.TryGetStringField(TEXT("editorCmd"), EditorCmd);
+			Arguments.TryGetBoolField(TEXT("installLaunchAgent"), bInstallLaunchAgent);
+			Arguments.TryGetBoolField(TEXT("launchAtLoad"), bLaunchAtLoad);
+			Arguments.TryGetBoolField(TEXT("autoRestart"), bAutoRestart);
+			Arguments.TryGetBoolField(TEXT("overwrite"), bOverwrite);
+			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
+
+			Platform = Platform.TrimStartAndEnd().ToLower();
+			if (Platform.IsEmpty())
+			{
+				Platform = TEXT("all");
+			}
+			if (MemoryKey.TrimStartAndEnd().IsEmpty())
+			{
+				MemoryKey = TEXT("mcp.extension.pipeline");
+			}
+			if (ArgsJson.TrimStartAndEnd().IsEmpty())
+			{
+				ArgsJson = MakeSupervisorDefaultArgsJson(MemoryKey);
+			}
+
+			const FString SupervisorScriptPath = GetMcpSupervisorScriptPath();
+			if (!FPaths::FileExists(SupervisorScriptPath))
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Supervisor script was not found: %s"), *SupervisorScriptPath), nullptr, true);
+			}
+
+			FString ResolvedOutputDir;
+			FString FailureReason;
+			if (!ResolveProjectPathInsideProject(OutputDir, ResolvedOutputDir, FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			FString ProjectFilePath = FPaths::GetProjectFilePath();
+			if (ProjectFilePath.IsEmpty())
+			{
+				ProjectFilePath = FPaths::Combine(FPaths::ProjectDir(), FString::Printf(TEXT("%s.uproject"), FApp::GetProjectName()));
+			}
+			ProjectFilePath = FPaths::ConvertRelativePathToFull(ProjectFilePath);
+
+			TArray<FString> ParamParts;
+			ParamParts.Add(QuoteCommandLineArgument(SupervisorScriptPath));
+			ParamParts.Add(TEXT("--url"));
+			ParamParts.Add(QuoteCommandLineArgument(EndpointUrl));
+			ParamParts.Add(TEXT("--uproject"));
+			ParamParts.Add(QuoteCommandLineArgument(ProjectFilePath));
+			if (!EditorCmd.TrimStartAndEnd().IsEmpty())
+			{
+				ParamParts.Add(TEXT("--editor-cmd"));
+				ParamParts.Add(QuoteCommandLineArgument(EditorCmd.TrimStartAndEnd()));
+			}
+			ParamParts.Add(TEXT("install"));
+			ParamParts.Add(TEXT("--output-dir"));
+			ParamParts.Add(QuoteCommandLineArgument(ResolvedOutputDir));
+			ParamParts.Add(TEXT("--platform"));
+			ParamParts.Add(QuoteCommandLineArgument(Platform));
+			ParamParts.Add(TEXT("--label"));
+			ParamParts.Add(QuoteCommandLineArgument(Label));
+			ParamParts.Add(TEXT("--memory-key"));
+			ParamParts.Add(QuoteCommandLineArgument(MemoryKey));
+			ParamParts.Add(TEXT("--args-json"));
+			ParamParts.Add(QuoteCommandLineArgument(ArgsJson));
+			ParamParts.Add(TEXT("--supervisor-log-dir"));
+			ParamParts.Add(QuoteCommandLineArgument(FPaths::ConvertRelativePathToFull(SupervisorLogDir)));
+			if (bInstallLaunchAgent)
+			{
+				ParamParts.Add(TEXT("--install-launch-agent"));
+			}
+			if (bLaunchAtLoad)
+			{
+				ParamParts.Add(TEXT("--launch-at-load"));
+			}
+			if (!bAutoRestart)
+			{
+				ParamParts.Add(TEXT("--no-auto-restart"));
+			}
+			if (bOverwrite)
+			{
+				ParamParts.Add(TEXT("--overwrite"));
+			}
+
+#if PLATFORM_WINDOWS
+			const FString PythonExecutable = TEXT("py");
+			const FString Params = TEXT("-3 ") + FString::Join(ParamParts, TEXT(" "));
+#else
+			const FString PythonExecutable = TEXT("/usr/bin/env");
+			const FString Params = TEXT("python3 ") + FString::Join(ParamParts, TEXT(" "));
+#endif
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_supervisor_install"));
+			StructuredContent->SetStringField(TEXT("platform"), Platform);
+			StructuredContent->SetStringField(TEXT("outputDir"), ResolvedOutputDir);
+			StructuredContent->SetStringField(TEXT("label"), Label);
+			StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
+			StructuredContent->SetStringField(TEXT("argsJson"), ArgsJson);
+			StructuredContent->SetStringField(TEXT("endpointUrl"), EndpointUrl);
+			StructuredContent->SetStringField(TEXT("supervisorLogDir"), FPaths::ConvertRelativePathToFull(SupervisorLogDir));
+			StructuredContent->SetStringField(TEXT("supervisorScriptPath"), SupervisorScriptPath);
+			StructuredContent->SetStringField(TEXT("executable"), PythonExecutable);
+			StructuredContent->SetStringField(TEXT("params"), Params);
+			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
+			StructuredContent->SetBoolField(TEXT("autoRestart"), bAutoRestart);
+			StructuredContent->SetBoolField(TEXT("installLaunchAgent"), bInstallLaunchAgent);
+
+			if (bDryRun)
+			{
+				return MakeExecutionResult(TEXT("Dry run supervisor install prepared the generator command."), StructuredContent, false);
+			}
+
+			int32 ReturnCode = -1;
+			FString StdOut;
+			FString StdErr;
+			const bool bLaunched = FPlatformProcess::ExecProcess(
+				*PythonExecutable,
+				*Params,
+				&ReturnCode,
+				&StdOut,
+				&StdErr,
+				*FPaths::ProjectDir());
+
+			StructuredContent->SetBoolField(TEXT("launched"), bLaunched);
+			StructuredContent->SetNumberField(TEXT("returnCode"), ReturnCode);
+			StructuredContent->SetStringField(TEXT("stdout"), StdOut);
+			StructuredContent->SetStringField(TEXT("stderr"), StdErr);
+
+			TSharedPtr<FJsonObject> InstallResult;
+			if (LoadJsonObject(StdOut, InstallResult) && InstallResult.IsValid())
+			{
+				StructuredContent->SetObjectField(TEXT("installResult"), InstallResult);
+			}
+
+			const bool bSucceeded = bLaunched && ReturnCode == 0;
+			return MakeExecutionResult(
+				bSucceeded
+					? FString::Printf(TEXT("Supervisor launcher files generated under %s."), *ResolvedOutputDir)
+					: FString::Printf(TEXT("Supervisor install failed with returnCode=%d. stderr: %s"), ReturnCode, *StdErr),
+				StructuredContent,
+				!bSucceeded);
+		}
+
 			FUnrealMcpExecutionResult ScaffoldRoundSystem(UEditorAssetSubsystem* EditorAssetSubsystem, const FJsonObject& Arguments)
 			{
 		FString RootArg;
@@ -11399,6 +11577,33 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				TEXT("unreal.mcp_compile_error_fix_plan"),
 				TEXT("Compile Error Fix Plan"),
 				TEXT("Parses build logs into error file/line/source context, probable cause, suggested fixes, and safe auto-patch status."),
+				InputSchema);
+		}
+
+		{
+			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+			PropertiesObject->SetObjectField(TEXT("platform"), UnrealMcp::MakeStringProperty(TEXT("Launcher platform to generate: all, macos, or windows."), TEXT("all")));
+			PropertiesObject->SetObjectField(TEXT("outputDir"), UnrealMcp::MakeStringProperty(TEXT("Project-relative output directory for generated supervisor launchers."), TEXT("Tools/UnrealMcpSupervisor")));
+			PropertiesObject->SetObjectField(TEXT("label"), UnrealMcp::MakeStringProperty(TEXT("macOS LaunchAgent label.")));
+			PropertiesObject->SetObjectField(TEXT("memoryKey"), UnrealMcp::MakeStringProperty(TEXT("Pipeline memory key embedded in generated commands."), TEXT("mcp.extension.pipeline")));
+			PropertiesObject->SetObjectField(TEXT("argsJson"), UnrealMcp::MakeStringProperty(TEXT("Pipeline args JSON embedded in generated commands. Defaults to {\"memoryKey\": memoryKey}.")));
+			PropertiesObject->SetObjectField(TEXT("endpointUrl"), UnrealMcp::MakeStringProperty(TEXT("MCP endpoint URL used by generated supervisor commands."), TEXT("http://127.0.0.1:8765/mcp")));
+			PropertiesObject->SetObjectField(TEXT("supervisorLogDir"), UnrealMcp::MakeStringProperty(TEXT("Directory where generated supervisor commands should write logs."), TEXT("Saved/UnrealMcp/SupervisorLogs")));
+			PropertiesObject->SetObjectField(TEXT("editorCmd"), UnrealMcp::MakeStringProperty(TEXT("Optional UnrealEditor executable path for generated commands.")));
+			PropertiesObject->SetObjectField(TEXT("installLaunchAgent"), UnrealMcp::MakeBoolProperty(TEXT("Also copy the generated macOS plist to ~/Library/LaunchAgents."), false));
+			PropertiesObject->SetObjectField(TEXT("launchAtLoad"), UnrealMcp::MakeBoolProperty(TEXT("Set RunAtLoad=true in the generated macOS LaunchAgent."), false));
+			PropertiesObject->SetObjectField(TEXT("autoRestart"), UnrealMcp::MakeBoolProperty(TEXT("Generate commands with supervisor pipeline --auto-restart."), true));
+			PropertiesObject->SetObjectField(TEXT("overwrite"), UnrealMcp::MakeBoolProperty(TEXT("Overwrite existing generated launcher files."), true));
+			PropertiesObject->SetObjectField(TEXT("dryRun"), UnrealMcp::MakeBoolProperty(TEXT("Preview the install generator command without writing launcher files."), false));
+
+			TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+			InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+			UnrealMcp::AddToolDefinition(
+				ToolsArray,
+				TEXT("unreal.mcp_supervisor_install"),
+				TEXT("Install MCP Supervisor Launchers"),
+				TEXT("Generates macOS LaunchAgent/command and Windows PowerShell launchers for the external Unreal MCP supervisor."),
 				InputSchema);
 		}
 
@@ -15560,6 +15765,16 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 		if (ToolName == TEXT("unreal.mcp_compile_error_fix_plan"))
 		{
 			return UnrealMcp::CompileErrorFixPlan(Arguments);
+		}
+
+		if (ToolName == TEXT("unreal.mcp_supervisor_install"))
+		{
+			UnrealMcp::FScopedMcpExtensionSessionLock ScopedLock(ToolName, Arguments);
+			if (!ScopedLock.IsAcquired())
+			{
+				return UnrealMcp::MakeExecutionResult(ScopedLock.GetFailureReason(), ScopedLock.MakeStructuredContent(TEXT("mcp_extension_lock_failed")), true);
+			}
+			return UnrealMcp::SupervisorInstall(Arguments);
 		}
 
 		if (ToolName == TEXT("unreal.mcp_generate_tests"))

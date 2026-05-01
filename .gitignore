@@ -35,6 +35,7 @@ Content/__ExternalActors__/MCP_ScaffoldSmoke_C/
 Content/__ExternalObjects__/MCP_ScaffoldSmoke_C/
 Content/MCPDemo/Blueprints/Core/BP_MCP_BPGraphSmokeTest_*.uasset
 Content/MCPDemo/Blueprints/UI/WBP_MCP_WidgetSmokeTest_*.uasset
+Tools/UnrealMcpSupervisor/
 
 # Logs and crash dumps
 *.log

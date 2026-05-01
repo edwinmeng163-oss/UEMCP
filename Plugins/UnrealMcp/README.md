@@ -77,6 +77,7 @@ Editor action tools:
 - `unreal.mcp_backup_project_state`
 - `unreal.mcp_rollback_to_manifest`
 - `unreal.mcp_compile_error_fix_plan`
+- `unreal.mcp_supervisor_install`
 - `unreal.mcp_generate_tests`
 - `unreal.mcp_build_editor`
 - `unreal.mcp_run_tool_test`
@@ -398,13 +399,21 @@ Inspect pipeline state and last source apply:
 External restart supervisor:
 
 ```bash
-python3 Tools/unreal_mcp_supervisor.py wait
-python3 Tools/unreal_mcp_supervisor.py restart
-python3 Tools/unreal_mcp_supervisor.py resume-test --memory-key mcp.extension.pipeline --pipeline
-python3 Tools/unreal_mcp_supervisor.py pipeline --auto-restart --args-json '{"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}'
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs wait
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs restart
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs resume-test --memory-key mcp.extension.pipeline --pipeline
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs pipeline --auto-restart --args-json '{"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}'
 ```
 
 The supervisor script runs outside Unreal Editor, so it can close/reopen the editor and resume MCP tests after plugin code reloads. This is the safe path for strict self-extension; the in-editor Chat can request a restart, but it cannot keep executing while its own host process is closed.
+
+Generate local supervisor launchers:
+
+```text
+/tool unreal.mcp_supervisor_install {"platform":"all","outputDir":"Tools/UnrealMcpSupervisor","memoryKey":"mcp.extension.pipeline"}
+```
+
+The installer generates a macOS `.command` shortcut, a macOS LaunchAgent plist, a Windows PowerShell launcher, and a small local README. The default output directory is ignored by Git because generated files contain machine-specific absolute paths.
 
 ```text
 /tool unreal.mcp_rollback_last_extension {"dryRun":true}

@@ -101,6 +101,7 @@ Unreal MCP currently supports:
   - `unreal.mcp_backup_project_state`
   - `unreal.mcp_rollback_to_manifest`
   - `unreal.mcp_compile_error_fix_plan`
+  - `unreal.mcp_supervisor_install`
   - `unreal.mcp_generate_tests`
   - `unreal.mcp_build_editor`
   - `unreal.mcp_run_tool_test`
@@ -190,6 +191,7 @@ Useful first-stage extension checks:
 /tool unreal.mcp_generate_tests {"toolName":"unreal.my_custom_tool","scaffoldDir":"Tools/UnrealMcpToolScaffolds/my_custom_tool"}
 /tool unreal.mcp_build_editor {"toolName":"unreal.my_custom_tool","scaffoldDir":"Tools/UnrealMcpToolScaffolds/my_custom_tool","writeProjectMemory":true}
 /tool unreal.mcp_compile_error_fix_plan {"maxErrors":5,"contextLines":4}
+/tool unreal.mcp_supervisor_install {"platform":"all","outputDir":"Tools/UnrealMcpSupervisor","memoryKey":"mcp.extension.pipeline"}
 /tool unreal.mcp_run_tool_test {"memoryKey":"mcp.extension.build_test","readProjectMemory":true}
 /tool unreal.mcp_run_test_suite {"memoryKey":"mcp.extension.build_test","readProjectMemory":true}
 /tool unreal.mcp_extension_pipeline {"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}
@@ -212,6 +214,7 @@ Build/test handoff note:
 - `unreal.mcp_backup_project_state` snapshots MCP source/header files, root/plugin README files, project memory, extension manifests, and optional build logs under `Saved/UnrealMcp/ProjectStateBackups`.
 - `unreal.mcp_rollback_to_manifest` can restore a selected historical `ExtensionBackups/*/Manifest.json`, not only `LastExtensionApply.json`, and can create a pre-rollback project-state backup first.
 - `unreal.mcp_compile_error_fix_plan` reads the newest build log or a passed `buildLogPath`, extracts compiler errors with file/line/source context, guesses likely causes, and returns suggested fixes before another build.
+- `unreal.mcp_supervisor_install` generates local macOS LaunchAgent/shortcut and Windows PowerShell launcher files for the external supervisor. Generated launchers live under `Tools/UnrealMcpSupervisor/` by default and are intentionally ignored because they contain machine-specific paths.
 - `unreal.mcp_generate_tests` creates `Tests/valid_basic.json`, `Tests/missing_required.json`, `Tests/boundary_values.json`, and `Tests/wrong_type.json` from a loaded tool schema, scaffold README schema, or `TestRequest.json`.
 - `unreal.mcp_build_editor` runs Unreal Build Tool for `MyProjectEditor`, captures a build log under `Saved/UnrealMcp/BuildLogs`, parses key error lines, and writes restart handoff state into project memory.
 - Because the tool is invoked from a running editor, newly compiled plugin code is not loaded until Unreal Editor is restarted.
@@ -225,13 +228,55 @@ Build/test handoff note:
 External supervisor:
 
 ```bash
-python3 Tools/unreal_mcp_supervisor.py wait
-python3 Tools/unreal_mcp_supervisor.py restart
-python3 Tools/unreal_mcp_supervisor.py resume-test --memory-key mcp.extension.pipeline --pipeline
-python3 Tools/unreal_mcp_supervisor.py pipeline --auto-restart --args-json '{"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}'
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs wait
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs restart
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs resume-test --memory-key mcp.extension.pipeline --pipeline
+python3 Tools/unreal_mcp_supervisor.py --log-dir Saved/UnrealMcp/SupervisorLogs pipeline --auto-restart --args-json '{"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}'
 ```
 
 The supervisor runs outside Unreal Editor, so it can close/reopen the editor and resume MCP tests after plugin code reloads.
+
+Install local supervisor launchers from Editor Chat:
+
+```text
+/tool unreal.mcp_supervisor_install {"platform":"all","outputDir":"Tools/UnrealMcpSupervisor","memoryKey":"mcp.extension.pipeline"}
+```
+
+Or from the terminal:
+
+```bash
+python3 Tools/unreal_mcp_supervisor.py install \
+  --platform all \
+  --output-dir Tools/UnrealMcpSupervisor \
+  --memory-key mcp.extension.pipeline \
+  --args-json '{"memoryKey":"mcp.extension.pipeline"}'
+```
+
+macOS generates:
+
+- `Tools/UnrealMcpSupervisor/run_unreal_mcp_pipeline.command`
+- `Tools/UnrealMcpSupervisor/com.unrealmcp.<project>.plist`
+
+To install the LaunchAgent manually:
+
+```bash
+mkdir -p "$HOME/Library/LaunchAgents"
+cp Tools/UnrealMcpSupervisor/com.unrealmcp.myproject.plist "$HOME/Library/LaunchAgents/"
+launchctl unload "$HOME/Library/LaunchAgents/com.unrealmcp.myproject.plist" 2>/dev/null || true
+launchctl load "$HOME/Library/LaunchAgents/com.unrealmcp.myproject.plist"
+launchctl start "com.unrealmcp.myproject"
+```
+
+Windows generates:
+
+- `Tools/UnrealMcpSupervisor/run_unreal_mcp_pipeline.ps1`
+
+Run it from PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Tools\UnrealMcpSupervisor\run_unreal_mcp_pipeline.ps1
+```
 
 ## Opening The Project
 
