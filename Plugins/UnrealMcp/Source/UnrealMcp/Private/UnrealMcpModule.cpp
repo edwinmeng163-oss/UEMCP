@@ -87,7 +87,10 @@
 #include "Templates/Atomic.h"
 #include "ToolMenus.h"
 #include "UnrealMcpChatPanel.h"
+#include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpSettings.h"
+#include "UnrealMcpSkillTools.h"
+#include "UnrealMcpToolRegistry.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "Blueprint/UserWidget.h"
@@ -636,18 +639,24 @@ namespace UnrealMcp
 			CopyNumberFieldIfPresent(Source, TEXT("limit"), Destination);
 		}
 
-		void AddToolDefinition(
-			TArray<TSharedPtr<FJsonValue>>& ToolsArray,
+	void AddToolDefinition(
+		TArray<TSharedPtr<FJsonValue>>& ToolsArray,
 		const FString& Name,
 		const FString& Title,
 		const FString& Description,
 		const TSharedPtr<FJsonObject>& InputSchema)
 	{
+		if (!ShouldExposeToolToAi(Name))
+		{
+			return;
+		}
+
 		TSharedPtr<FJsonObject> ToolObject = MakeShared<FJsonObject>();
 		ToolObject->SetStringField(TEXT("name"), Name);
 		ToolObject->SetStringField(TEXT("title"), Title);
 		ToolObject->SetStringField(TEXT("description"), Description);
 		ToolObject->SetObjectField(TEXT("inputSchema"), InputSchema);
+		ToolObject->SetObjectField(TEXT("policy"), MakeToolPolicyObject(Name));
 		ToolsArray.Add(MakeShared<FJsonValueObject>(ToolObject));
 	}
 
@@ -3665,6 +3674,17 @@ namespace UnrealMcp
 			TArray<FString> IncompatibleSchemas;
 			int32 CompatibleCount = 0;
 			int32 WarningCount = 0;
+			int32 ReadOnlyRiskCount = 0;
+			int32 LowRiskCount = 0;
+			int32 MediumRiskCount = 0;
+			int32 HighRiskCount = 0;
+			int32 CriticalRiskCount = 0;
+			int32 RequiresWriteCount = 0;
+			int32 RequiresBuildCount = 0;
+			int32 RequiresExternalProcessCount = 0;
+			int32 RequiresRestartCount = 0;
+			int32 RequiresProjectMemoryCount = 0;
+			int32 RequiresLockCount = 0;
 
 			for (const TSharedPtr<FJsonValue>& ToolValue : ToolsArray)
 			{
@@ -3724,6 +3744,34 @@ namespace UnrealMcp
 					++WarningCount;
 				}
 
+				const FToolPolicy Policy = GetToolPolicy(Name);
+				switch (Policy.RiskLevel)
+				{
+				case EToolRiskLevel::ReadOnly:
+					++ReadOnlyRiskCount;
+					break;
+				case EToolRiskLevel::Low:
+					++LowRiskCount;
+					break;
+				case EToolRiskLevel::Medium:
+					++MediumRiskCount;
+					break;
+				case EToolRiskLevel::High:
+					++HighRiskCount;
+					break;
+				case EToolRiskLevel::Critical:
+					++CriticalRiskCount;
+					break;
+				default:
+					break;
+				}
+				RequiresWriteCount += Policy.bRequiresWrite ? 1 : 0;
+				RequiresBuildCount += Policy.bRequiresBuild ? 1 : 0;
+				RequiresExternalProcessCount += Policy.bRequiresExternalProcess ? 1 : 0;
+				RequiresRestartCount += Policy.bRequiresRestart ? 1 : 0;
+				RequiresProjectMemoryCount += Policy.bRequiresProjectMemory ? 1 : 0;
+				RequiresLockCount += Policy.bRequiresLock ? 1 : 0;
+
 				TSharedPtr<FJsonObject> ReportObject = MakeShared<FJsonObject>();
 				ReportObject->SetStringField(TEXT("name"), Name);
 				ReportObject->SetStringField(TEXT("title"), Title);
@@ -3734,6 +3782,7 @@ namespace UnrealMcp
 				ReportObject->SetBoolField(TEXT("schemaCompatible"), bCompatible);
 				ReportObject->SetStringField(TEXT("schemaReason"), Reason);
 				ReportObject->SetArrayField(TEXT("schemaIssues"), Issues);
+				ReportObject->SetObjectField(TEXT("policy"), MakeToolPolicyObject(Name));
 				ToolReports.Add(MakeShared<FJsonValueObject>(ReportObject));
 			}
 
@@ -3745,6 +3794,19 @@ namespace UnrealMcp
 			StructuredContent->SetNumberField(TEXT("toolsWithSchemaIssues"), WarningCount);
 			StructuredContent->SetNumberField(TEXT("missingHandlerCount"), MissingHandlers.Num());
 			StructuredContent->SetNumberField(TEXT("missingDocumentationCount"), MissingDocs.Num());
+			TSharedPtr<FJsonObject> RiskCountsObject = MakeShared<FJsonObject>();
+			RiskCountsObject->SetNumberField(TEXT("readOnly"), ReadOnlyRiskCount);
+			RiskCountsObject->SetNumberField(TEXT("low"), LowRiskCount);
+			RiskCountsObject->SetNumberField(TEXT("medium"), MediumRiskCount);
+			RiskCountsObject->SetNumberField(TEXT("high"), HighRiskCount);
+			RiskCountsObject->SetNumberField(TEXT("critical"), CriticalRiskCount);
+			StructuredContent->SetObjectField(TEXT("riskCounts"), RiskCountsObject);
+			StructuredContent->SetNumberField(TEXT("requiresWriteCount"), RequiresWriteCount);
+			StructuredContent->SetNumberField(TEXT("requiresBuildCount"), RequiresBuildCount);
+			StructuredContent->SetNumberField(TEXT("requiresExternalProcessCount"), RequiresExternalProcessCount);
+			StructuredContent->SetNumberField(TEXT("requiresRestartCount"), RequiresRestartCount);
+			StructuredContent->SetNumberField(TEXT("requiresProjectMemoryCount"), RequiresProjectMemoryCount);
+			StructuredContent->SetNumberField(TEXT("requiresLockCount"), RequiresLockCount);
 			StructuredContent->SetArrayField(TEXT("tools"), ToolReports);
 
 			auto AddStringArray = [](TSharedPtr<FJsonObject> Object, const FString& FieldName, const TArray<FString>& Values)
@@ -4483,308 +4545,6 @@ namespace UnrealMcp
 					: FString::Printf(TEXT("Deleted project memory key '%s'."), *Key),
 				StructuredContent,
 				false);
-		}
-
-		FString GetDefaultProjectSkillRoot()
-		{
-			return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpSkills")));
-		}
-
-		FString SkillNameFromPath(const FString& SkillPath)
-		{
-			if (FPaths::GetCleanFilename(SkillPath).Equals(TEXT("SKILL.md"), ESearchCase::IgnoreCase))
-			{
-				return FPaths::GetCleanFilename(FPaths::GetPath(SkillPath));
-			}
-			FString Name = FPaths::GetBaseFilename(SkillPath);
-			Name.RemoveFromEnd(TEXT(".skill"), ESearchCase::IgnoreCase);
-			return Name;
-		}
-
-		FString ExtractSkillTitle(const FString& SkillText, const FString& Fallback)
-		{
-			TArray<FString> Lines;
-			SkillText.ParseIntoArrayLines(Lines, false);
-			for (const FString& Line : Lines)
-			{
-				FString CleanLine = Line.TrimStartAndEnd();
-				if (CleanLine.StartsWith(TEXT("#")))
-				{
-					CleanLine.RemoveFromStart(TEXT("#"));
-					return CleanLine.TrimStartAndEnd();
-				}
-			}
-			return Fallback;
-		}
-
-		FString ExtractSkillDescription(const FString& SkillText)
-		{
-			TArray<FString> Lines;
-			SkillText.ParseIntoArrayLines(Lines, false);
-			bool bPassedTitle = false;
-			for (const FString& Line : Lines)
-			{
-				const FString CleanLine = Line.TrimStartAndEnd();
-				if (CleanLine.IsEmpty())
-				{
-					continue;
-				}
-				if (CleanLine.StartsWith(TEXT("#")))
-				{
-					bPassedTitle = true;
-					continue;
-				}
-				if (bPassedTitle)
-				{
-					return CleanLine.Left(600);
-				}
-			}
-			return FString();
-		}
-
-		void CollectSkillPathsFromRoot(const FString& RootPath, TArray<FString>& OutSkillPaths)
-		{
-			if (!FPaths::DirectoryExists(RootPath))
-			{
-				return;
-			}
-			TArray<FString> SkillMdFiles;
-			TArray<FString> SkillFiles;
-			IFileManager::Get().FindFilesRecursive(SkillMdFiles, *RootPath, TEXT("SKILL.md"), true, false);
-			IFileManager::Get().FindFilesRecursive(SkillFiles, *RootPath, TEXT("*.skill"), true, false);
-			for (const FString& SkillPath : SkillMdFiles)
-			{
-				OutSkillPaths.AddUnique(SkillPath);
-			}
-			for (const FString& SkillPath : SkillFiles)
-			{
-				OutSkillPaths.AddUnique(SkillPath);
-			}
-			OutSkillPaths.Sort();
-		}
-
-		TSharedPtr<FJsonObject> MakeSkillInfoObject(const FString& SkillPath, bool bIncludeText, int32 MaxPreviewChars)
-		{
-			TSharedPtr<FJsonObject> SkillObject = MakeShared<FJsonObject>();
-			const FString SkillName = SkillNameFromPath(SkillPath);
-			SkillObject->SetStringField(TEXT("name"), SkillName);
-			SkillObject->SetStringField(TEXT("path"), SkillPath);
-			SkillObject->SetObjectField(TEXT("file"), MakeFileInfoObject(SkillPath));
-
-			FString SkillText;
-			if (FFileHelper::LoadFileToString(SkillText, *SkillPath))
-			{
-				SkillObject->SetStringField(TEXT("title"), ExtractSkillTitle(SkillText, SkillName));
-				SkillObject->SetStringField(TEXT("description"), ExtractSkillDescription(SkillText));
-				SkillObject->SetStringField(TEXT("preview"), SkillText.Left(FMath::Max(0, MaxPreviewChars)));
-				if (bIncludeText)
-				{
-					SkillObject->SetStringField(TEXT("text"), SkillText);
-				}
-			}
-			else
-			{
-				SkillObject->SetStringField(TEXT("title"), SkillName);
-				SkillObject->SetStringField(TEXT("description"), TEXT("Failed to read skill text."));
-			}
-			return SkillObject;
-		}
-
-		bool ResolveSkillPathFromArguments(const FJsonObject& Arguments, FString& OutSkillPath, FString& OutFailureReason)
-		{
-			FString SkillPath;
-			FString SkillName;
-			Arguments.TryGetStringField(TEXT("skillPath"), SkillPath);
-			Arguments.TryGetStringField(TEXT("skillName"), SkillName);
-			SkillPath = SkillPath.TrimStartAndEnd();
-			SkillName = SkillName.TrimStartAndEnd();
-
-			if (!SkillPath.IsEmpty())
-			{
-				return ResolveProjectPathInsideProject(SkillPath, OutSkillPath, OutFailureReason);
-			}
-
-			if (SkillName.IsEmpty())
-			{
-				OutFailureReason = TEXT("Provide either skillPath or skillName.");
-				return false;
-			}
-
-			TArray<FString> Roots;
-			TryGetStringArrayField(Arguments, TEXT("roots"), Roots);
-			if (Roots.Num() == 0)
-			{
-				Roots.Add(TEXT("Tools/UnrealMcpSkills"));
-			}
-
-			TArray<FString> SkillPaths;
-			for (const FString& Root : Roots)
-			{
-				FString ResolvedRoot;
-				if (ResolveProjectPathInsideProject(Root, ResolvedRoot, OutFailureReason))
-				{
-					CollectSkillPathsFromRoot(ResolvedRoot, SkillPaths);
-				}
-			}
-
-			for (const FString& CandidatePath : SkillPaths)
-			{
-				if (SkillNameFromPath(CandidatePath).Equals(SkillName, ESearchCase::IgnoreCase))
-				{
-					OutSkillPath = CandidatePath;
-					return true;
-				}
-			}
-
-			OutFailureReason = FString::Printf(TEXT("No project skill named '%s' was found."), *SkillName);
-			return false;
-		}
-
-		FUnrealMcpExecutionResult SkillList(const FJsonObject& Arguments)
-		{
-			TArray<FString> Roots;
-			TryGetStringArrayField(Arguments, TEXT("roots"), Roots);
-			if (Roots.Num() == 0)
-			{
-				Roots.Add(TEXT("Tools/UnrealMcpSkills"));
-			}
-			FString NameFilter;
-			bool bIncludeText = false;
-			double MaxPreviewCharsDouble = 1200.0;
-			Arguments.TryGetStringField(TEXT("nameFilter"), NameFilter);
-			Arguments.TryGetBoolField(TEXT("includeText"), bIncludeText);
-			Arguments.TryGetNumberField(TEXT("maxPreviewChars"), MaxPreviewCharsDouble);
-			const int32 MaxPreviewChars = FMath::Clamp(static_cast<int32>(MaxPreviewCharsDouble), 0, 20000);
-
-			TArray<TSharedPtr<FJsonValue>> RootObjects;
-			TArray<FString> SkillPaths;
-			FString FailureReason;
-			for (const FString& Root : Roots)
-			{
-				FString ResolvedRoot;
-				if (!ResolveProjectPathInsideProject(Root, ResolvedRoot, FailureReason))
-				{
-					return MakeExecutionResult(FailureReason, nullptr, true);
-				}
-				TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
-				RootObject->SetStringField(TEXT("root"), ResolvedRoot);
-				RootObject->SetBoolField(TEXT("exists"), FPaths::DirectoryExists(ResolvedRoot));
-				RootObjects.Add(MakeShared<FJsonValueObject>(RootObject));
-				CollectSkillPathsFromRoot(ResolvedRoot, SkillPaths);
-			}
-
-			TArray<TSharedPtr<FJsonValue>> SkillObjects;
-			for (const FString& SkillPath : SkillPaths)
-			{
-				const FString SkillName = SkillNameFromPath(SkillPath);
-				if (!NameFilter.TrimStartAndEnd().IsEmpty() && !SkillName.Contains(NameFilter.TrimStartAndEnd(), ESearchCase::IgnoreCase))
-				{
-					continue;
-				}
-				SkillObjects.Add(MakeShared<FJsonValueObject>(MakeSkillInfoObject(SkillPath, bIncludeText, MaxPreviewChars)));
-			}
-
-			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-			StructuredContent->SetStringField(TEXT("action"), TEXT("skill_list"));
-			StructuredContent->SetArrayField(TEXT("roots"), RootObjects);
-			StructuredContent->SetStringField(TEXT("nameFilter"), NameFilter);
-			StructuredContent->SetNumberField(TEXT("skillCount"), SkillObjects.Num());
-			StructuredContent->SetArrayField(TEXT("skills"), SkillObjects);
-			return MakeExecutionResult(FString::Printf(TEXT("Found %d project skill%s."), SkillObjects.Num(), SkillObjects.Num() == 1 ? TEXT("") : TEXT("s")), StructuredContent, false);
-		}
-
-		FUnrealMcpExecutionResult SkillRead(const FJsonObject& Arguments)
-		{
-			bool bIncludeText = true;
-			double MaxPreviewCharsDouble = 4000.0;
-			Arguments.TryGetBoolField(TEXT("includeText"), bIncludeText);
-			Arguments.TryGetNumberField(TEXT("maxPreviewChars"), MaxPreviewCharsDouble);
-
-			FString SkillPath;
-			FString FailureReason;
-			if (!ResolveSkillPathFromArguments(Arguments, SkillPath, FailureReason))
-			{
-				return MakeExecutionResult(FailureReason, nullptr, true);
-			}
-
-			TSharedPtr<FJsonObject> SkillObject = MakeSkillInfoObject(SkillPath, bIncludeText, FMath::Clamp(static_cast<int32>(MaxPreviewCharsDouble), 0, 50000));
-			SkillObject->SetStringField(TEXT("action"), TEXT("skill_read"));
-			return MakeExecutionResult(FString::Printf(TEXT("Read project skill '%s'."), *SkillObject->GetStringField(TEXT("name"))), SkillObject, false);
-		}
-
-		FUnrealMcpExecutionResult SkillApply(const FJsonObject& Arguments)
-		{
-			FString Task;
-			FString MemoryKey;
-			bool bWriteMemory = true;
-			bool bIncludeFullText = true;
-			Arguments.TryGetStringField(TEXT("task"), Task);
-			Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
-			Arguments.TryGetBoolField(TEXT("writeMemory"), bWriteMemory);
-			Arguments.TryGetBoolField(TEXT("includeFullText"), bIncludeFullText);
-
-			FString SkillPath;
-			FString FailureReason;
-			if (!ResolveSkillPathFromArguments(Arguments, SkillPath, FailureReason))
-			{
-				return MakeExecutionResult(FailureReason, nullptr, true);
-			}
-
-			FString SkillText;
-			if (!FFileHelper::LoadFileToString(SkillText, *SkillPath))
-			{
-				return MakeExecutionResult(FString::Printf(TEXT("Failed to read skill '%s'."), *SkillPath), nullptr, true);
-			}
-
-			const FString SkillName = SkillNameFromPath(SkillPath);
-			if (MemoryKey.TrimStartAndEnd().IsEmpty())
-			{
-				MemoryKey = FString::Printf(TEXT("skill.%s.last_apply"), *SkillName);
-			}
-
-			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-			StructuredContent->SetStringField(TEXT("action"), TEXT("skill_apply"));
-			StructuredContent->SetStringField(TEXT("skillName"), SkillName);
-			StructuredContent->SetStringField(TEXT("skillPath"), SkillPath);
-			StructuredContent->SetStringField(TEXT("task"), Task);
-			StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
-			StructuredContent->SetStringField(TEXT("title"), ExtractSkillTitle(SkillText, SkillName));
-			StructuredContent->SetStringField(TEXT("description"), ExtractSkillDescription(SkillText));
-			StructuredContent->SetStringField(TEXT("applicationPrompt"), FString::Printf(
-				TEXT("Apply the project skill '%s' from %s to the current task. Follow the SKILL.md instructions first, then continue with normal MCP tool safety checks."),
-				*SkillName,
-				*SkillPath));
-			if (bIncludeFullText)
-			{
-				StructuredContent->SetStringField(TEXT("skillText"), SkillText);
-			}
-			else
-			{
-				StructuredContent->SetStringField(TEXT("skillPreview"), SkillText.Left(4000));
-			}
-
-			if (bWriteMemory)
-			{
-				TSharedPtr<FJsonObject> ContentObject = MakeShared<FJsonObject>();
-				ContentObject->SetStringField(TEXT("skillName"), SkillName);
-				ContentObject->SetStringField(TEXT("skillPath"), SkillPath);
-				ContentObject->SetStringField(TEXT("task"), Task);
-				ContentObject->SetStringField(TEXT("appliedAtUtc"), FDateTime::UtcNow().ToIso8601());
-				TSharedPtr<FJsonObject> MemoryArgs = MakeShared<FJsonObject>();
-				MemoryArgs->SetStringField(TEXT("key"), MemoryKey);
-				MemoryArgs->SetStringField(TEXT("summary"), FString::Printf(TEXT("Applied project skill %s."), *SkillName));
-				MemoryArgs->SetStringField(TEXT("status"), TEXT("applied"));
-				MemoryArgs->SetStringField(TEXT("nextStep"), TEXT("Use returned skillText/applicationPrompt as the instruction context for this task."));
-				MemoryArgs->SetStringField(TEXT("contentJson"), JsonObjectToString(ContentObject));
-				MemoryArgs->SetArrayField(TEXT("tags"), MakeJsonStringArray({ TEXT("skill"), SkillName }));
-				FUnrealMcpExecutionResult MemoryResult = ProjectMemoryWrite(*MemoryArgs);
-				if (MemoryResult.StructuredContent.IsValid())
-				{
-					StructuredContent->SetObjectField(TEXT("memoryWrite"), MemoryResult.StructuredContent);
-				}
-			}
-
-			return MakeExecutionResult(FString::Printf(TEXT("Applied project skill '%s'."), *SkillName), StructuredContent, false);
 		}
 
 		FString HashTextForManifest(const FString& Text)
@@ -6567,114 +6327,6 @@ namespace UnrealMcp
 				return TEXT("Run unreal.mcp_build_editor, restart if needed, then resume the tool test.");
 			}
 			return TEXT("Continue with the next pipeline step shown in project memory.");
-		}
-
-		FUnrealMcpExecutionResult PipelineStatus(const FJsonObject& Arguments)
-		{
-			FString MemoryKey = TEXT("mcp.extension.pipeline");
-			bool bIncludeAllMemory = false;
-			bool bIncludeBuildLogTail = true;
-			Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
-			Arguments.TryGetBoolField(TEXT("includeAllMemory"), bIncludeAllMemory);
-			Arguments.TryGetBoolField(TEXT("includeBuildLogTail"), bIncludeBuildLogTail);
-			const int32 BuildLogTailLines = FMath::Min(GetPositiveIntArgument(Arguments, TEXT("buildLogTailLines"), 80), 500);
-
-			FString FailureReason;
-			TSharedPtr<FJsonObject> MemoryObject;
-			if (!LoadProjectMemory(MemoryObject, FailureReason))
-			{
-				return MakeExecutionResult(FailureReason, nullptr, true);
-			}
-
-			TSharedPtr<FJsonObject> MatchingMemoryEntry = FindMemoryEntryByKey(MemoryObject, MemoryKey.TrimStartAndEnd());
-			TArray<TSharedPtr<FJsonValue>> MemorySummaries;
-			const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
-			if (MemoryObject->TryGetArrayField(TEXT("entries"), Entries) && Entries)
-			{
-				for (const TSharedPtr<FJsonValue>& EntryValue : *Entries)
-				{
-					if (EntryValue.IsValid() && EntryValue->Type == EJson::Object && EntryValue->AsObject().IsValid())
-					{
-						MemorySummaries.Add(MakeShared<FJsonValueObject>(MakeMemoryEntrySummary(EntryValue->AsObject(), bIncludeAllMemory)));
-					}
-				}
-			}
-
-			TArray<FString> TestScaffolds;
-			TArray<FString> ExtensionBackups;
-			TArray<FString> TestRequests;
-			FindImmediateChildren(FPaths::Combine(GetUnrealMcpSavedRoot(), TEXT("TestScaffolds")), TEXT("*"), false, true, TestScaffolds);
-			FindImmediateChildren(GetMcpExtensionBackupRoot(), TEXT("*"), false, true, ExtensionBackups);
-			FindImmediateChildren(FPaths::Combine(GetUnrealMcpSavedRoot(), TEXT("TestRequests")), TEXT("*"), false, true, TestRequests);
-
-			TArray<TSharedPtr<FJsonValue>> TestScaffoldValues;
-			for (const FString& Path : TestScaffolds)
-			{
-				TestScaffoldValues.Add(MakeShared<FJsonValueString>(Path));
-			}
-			TArray<TSharedPtr<FJsonValue>> BackupValues;
-			for (const FString& Path : ExtensionBackups)
-			{
-				BackupValues.Add(MakeShared<FJsonValueString>(Path));
-			}
-			TArray<TSharedPtr<FJsonValue>> TestRequestValues;
-			for (const FString& Path : TestRequests)
-			{
-				TestRequestValues.Add(MakeShared<FJsonValueString>(Path));
-			}
-
-			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_pipeline_status"));
-			StructuredContent->SetStringField(TEXT("savedRoot"), GetUnrealMcpSavedRoot());
-			StructuredContent->SetStringField(TEXT("memoryPath"), GetProjectMemoryFilePath());
-			StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
-			StructuredContent->SetBoolField(TEXT("memoryEntryFound"), MatchingMemoryEntry.IsValid());
-			StructuredContent->SetObjectField(TEXT("selectedMemoryEntry"), MakeMemoryEntrySummary(MatchingMemoryEntry, true));
-			StructuredContent->SetNumberField(TEXT("memoryEntryCount"), MemorySummaries.Num());
-			StructuredContent->SetArrayField(TEXT("memoryEntries"), MemorySummaries);
-			StructuredContent->SetStringField(TEXT("latestManifestPath"), GetLatestMcpExtensionManifestPath());
-			StructuredContent->SetObjectField(TEXT("latestManifestFile"), MakeFileInfoObject(GetLatestMcpExtensionManifestPath()));
-
-			TSharedPtr<FJsonObject> ManifestObject;
-			if (FPaths::FileExists(GetLatestMcpExtensionManifestPath()) && LoadJsonObjectFromFile(GetLatestMcpExtensionManifestPath(), ManifestObject, FailureReason))
-			{
-				StructuredContent->SetObjectField(TEXT("latestManifest"), ManifestObject);
-			}
-			else if (!FailureReason.IsEmpty())
-			{
-				StructuredContent->SetStringField(TEXT("latestManifestReadWarning"), FailureReason);
-			}
-
-			FString LatestBuildLogPath;
-			StructuredContent->SetStringField(TEXT("buildLogRoot"), GetMcpBuildLogRoot());
-			if (FindNewestFile(GetMcpBuildLogRoot(), TEXT("*.log"), LatestBuildLogPath))
-			{
-				StructuredContent->SetObjectField(TEXT("latestBuildLog"), MakeFileInfoObject(LatestBuildLogPath));
-				if (bIncludeBuildLogTail)
-				{
-					FString LogText;
-					if (FFileHelper::LoadFileToString(LogText, *LatestBuildLogPath))
-					{
-						StructuredContent->SetStringField(TEXT("latestBuildLogTail"), TailLines(LogText, BuildLogTailLines));
-					}
-				}
-			}
-
-			StructuredContent->SetNumberField(TEXT("testScaffoldCount"), TestScaffolds.Num());
-			StructuredContent->SetArrayField(TEXT("testScaffolds"), TestScaffoldValues);
-			StructuredContent->SetNumberField(TEXT("extensionBackupCount"), ExtensionBackups.Num());
-			StructuredContent->SetArrayField(TEXT("extensionBackups"), BackupValues);
-			StructuredContent->SetNumberField(TEXT("testRequestCount"), TestRequests.Num());
-			StructuredContent->SetArrayField(TEXT("testRequests"), TestRequestValues);
-			StructuredContent->SetStringField(TEXT("recommendedNextStep"), RecommendPipelineNextStep(MatchingMemoryEntry));
-
-			const FString Text = FString::Printf(
-				TEXT("MCP pipeline status: memoryKey=%s found=%s testScaffolds=%d backups=%d."),
-				*MemoryKey,
-				MatchingMemoryEntry.IsValid() ? TEXT("true") : TEXT("false"),
-				TestScaffolds.Num(),
-				ExtensionBackups.Num());
-			return MakeExecutionResult(Text, StructuredContent, false);
 		}
 
 		void BuildSimpleLineDiffPreview(
@@ -8589,22 +8241,40 @@ namespace UnrealMcp
 				FString& OutFailureReason)
 			{
 				FString TestsDir;
+				FString ToolName;
+				FString ScaffoldDir;
+				FString OutputRoot;
 				Arguments.TryGetStringField(TEXT("testsDir"), TestsDir);
+				Arguments.TryGetStringField(TEXT("toolName"), ToolName);
+				Arguments.TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
+				Arguments.TryGetStringField(TEXT("outputRoot"), OutputRoot);
+
+				TestsDir = TestsDir.TrimStartAndEnd();
+				ToolName = ToolName.TrimStartAndEnd();
+				ScaffoldDir = ScaffoldDir.TrimStartAndEnd();
 				if (!TestsDir.TrimStartAndEnd().IsEmpty())
 				{
 					if (!ResolveProjectPathInsideProject(TestsDir, OutTestsDirectory, OutFailureReason))
 					{
 						return false;
 					}
+
+					OutToolName = ToolName;
+					if (!ScaffoldDir.IsEmpty())
+					{
+						if (!ResolveProjectPathInsideProject(ScaffoldDir, OutScaffoldDirectory, OutFailureReason))
+						{
+							return false;
+						}
+					}
+					else
+					{
+						OutScaffoldDirectory = FPaths::GetPath(OutTestsDirectory);
+					}
+					return true;
 				}
 
 				TSharedPtr<FJsonObject> ResolveArguments = MakeShared<FJsonObject>();
-				FString ToolName;
-				FString ScaffoldDir;
-				FString OutputRoot;
-				Arguments.TryGetStringField(TEXT("toolName"), ToolName);
-				Arguments.TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-				Arguments.TryGetStringField(TEXT("outputRoot"), OutputRoot);
 				ResolveArguments->SetStringField(TEXT("toolName"), ToolName);
 				ResolveArguments->SetStringField(TEXT("scaffoldDir"), ScaffoldDir);
 				ResolveArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
@@ -12187,6 +11857,23 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+			PropertiesObject->SetObjectField(TEXT("memoryKey"), UnrealMcp::MakeStringProperty(TEXT("Project memory key to highlight in pipeline/workbench status."), TEXT("mcp.extension.pipeline")));
+			PropertiesObject->SetObjectField(TEXT("includeBuildLogTail"), UnrealMcp::MakeBoolProperty(TEXT("Whether to include the latest build log tail."), false));
+			PropertiesObject->SetObjectField(TEXT("buildLogTailLines"), UnrealMcp::MakeNumberProperty(TEXT("Maximum latest build log tail lines."), 80.0));
+
+			TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+			InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+			UnrealMcp::AddToolDefinition(
+				ToolsArray,
+				TEXT("unreal.mcp_workbench_status"),
+				TEXT("MCP Workbench Status"),
+				TEXT("Read-only dashboard summary for self-extension health: tools, audit, memory, manifests, build/test artifacts, and supervisor status."),
+				InputSchema);
+		}
+
+		{
+			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
 			PropertiesObject->SetObjectField(TEXT("key"), UnrealMcp::MakeStringProperty(TEXT("Memory entry key."), TEXT("current")));
 			PropertiesObject->SetObjectField(TEXT("summary"), UnrealMcp::MakeStringProperty(TEXT("Short human-readable memory summary.")));
 			PropertiesObject->SetObjectField(TEXT("status"), UnrealMcp::MakeStringProperty(TEXT("Current status, for example pending, in_progress, blocked, or done.")));
@@ -12757,6 +12444,12 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleToolsList(const TSharedP
 
 FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName, const FJsonObject& Arguments) const
 {
+	const FString RegisteredHandlerName = UnrealMcp::ResolveToolHandlerName(ToolName);
+	if (!RegisteredHandlerName.Equals(ToolName, ESearchCase::CaseSensitive))
+	{
+		return ExecuteTool(RegisteredHandlerName, Arguments);
+	}
+
 	UEditorAssetSubsystem* EditorAssetSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
 	UEditorActorSubsystem* EditorActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
 	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
@@ -16577,6 +16270,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 			return UnrealMcp::AuditMcpTools(ToolsArray);
 		}
 
+		if (ToolName == TEXT("unreal.mcp_workbench_status"))
+		{
+			TArray<TSharedPtr<FJsonValue>> ToolsArray;
+			AppendToolDefinitions(ToolsArray);
+			return UnrealMcp::WorkbenchStatus(Arguments, ToolsArray);
+		}
+
 		if (ToolName == TEXT("unreal.project_memory_write"))
 		{
 			return UnrealMcp::ProjectMemoryWrite(Arguments);
@@ -17689,949 +17389,6 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteChatCommand(const FString& In
 
 		return UnrealMcp::MakeExecutionResult(TEXT("Unknown command. Try /help."), nullptr, true);
 	}
-
-FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Arguments) const
-{
-	FString ToolName;
-	FString TestRequestPath;
-	FString ScaffoldDir;
-	FString OutputRoot = TEXT("Tools/UnrealMcpToolScaffolds");
-	FString MemoryKey = TEXT("mcp.extension.build_test");
-	bool bReadProjectMemory = true;
-	bool bWriteProjectMemory = true;
-	bool bExecuteTool = true;
-	bool bExpectToolListed = true;
-	bool bRunSuite = false;
-
-	Arguments.TryGetStringField(TEXT("toolName"), ToolName);
-	Arguments.TryGetStringField(TEXT("testRequestPath"), TestRequestPath);
-	Arguments.TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-	Arguments.TryGetStringField(TEXT("outputRoot"), OutputRoot);
-	Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
-	Arguments.TryGetBoolField(TEXT("readProjectMemory"), bReadProjectMemory);
-	Arguments.TryGetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
-	Arguments.TryGetBoolField(TEXT("executeTool"), bExecuteTool);
-	Arguments.TryGetBoolField(TEXT("expectToolListed"), bExpectToolListed);
-	Arguments.TryGetBoolField(TEXT("runSuite"), bRunSuite);
-
-	if (bRunSuite)
-	{
-		return RunMcpTestSuite(Arguments);
-	}
-
-	ToolName = ToolName.TrimStartAndEnd();
-	TestRequestPath = TestRequestPath.TrimStartAndEnd();
-	ScaffoldDir = ScaffoldDir.TrimStartAndEnd();
-	MemoryKey = MemoryKey.TrimStartAndEnd();
-	if (MemoryKey.IsEmpty())
-	{
-		MemoryKey = TEXT("mcp.extension.build_test");
-	}
-
-	TSharedPtr<FJsonObject> MemoryContent = MakeShared<FJsonObject>();
-	if (bReadProjectMemory)
-	{
-		FString FailureReason;
-		TSharedPtr<FJsonObject> MemoryObject;
-		if (UnrealMcp::LoadProjectMemory(MemoryObject, FailureReason) && MemoryObject.IsValid())
-		{
-			const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
-			if (MemoryObject->TryGetArrayField(TEXT("entries"), Entries) && Entries)
-			{
-				for (const TSharedPtr<FJsonValue>& EntryValue : *Entries)
-				{
-					if (!EntryValue.IsValid() || EntryValue->Type != EJson::Object || !EntryValue->AsObject().IsValid())
-					{
-						continue;
-					}
-
-					TSharedPtr<FJsonObject> EntryObject = EntryValue->AsObject();
-					FString ExistingKey;
-					if (!EntryObject->TryGetStringField(TEXT("key"), ExistingKey) || ExistingKey != MemoryKey)
-					{
-						continue;
-					}
-
-					const TSharedPtr<FJsonObject>* ContentObject = nullptr;
-					if (EntryObject->TryGetObjectField(TEXT("content"), ContentObject) && ContentObject && (*ContentObject).IsValid())
-					{
-						MemoryContent = *ContentObject;
-						if (ToolName.IsEmpty())
-						{
-							MemoryContent->TryGetStringField(TEXT("toolName"), ToolName);
-						}
-						if (TestRequestPath.IsEmpty())
-						{
-							MemoryContent->TryGetStringField(TEXT("testRequestPath"), TestRequestPath);
-						}
-						if (ScaffoldDir.IsEmpty())
-						{
-							MemoryContent->TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-						}
-					}
-					break;
-				}
-			}
-		}
-	}
-
-	if (TestRequestPath.IsEmpty())
-	{
-		if (!ScaffoldDir.IsEmpty())
-		{
-			FString ResolvedScaffoldDir;
-			FString FailureReason;
-			if (!UnrealMcp::ResolveProjectPathInsideProject(ScaffoldDir, ResolvedScaffoldDir, FailureReason))
-			{
-				return UnrealMcp::MakeExecutionResult(FailureReason, nullptr, true);
-			}
-			TestRequestPath = FPaths::Combine(ResolvedScaffoldDir, TEXT("TestRequest.json"));
-		}
-		else if (!ToolName.IsEmpty())
-		{
-			FString ResolvedOutputRoot;
-			FString FailureReason;
-			if (!UnrealMcp::ResolveProjectOutputDirectory(OutputRoot, ResolvedOutputRoot, FailureReason))
-			{
-				return UnrealMcp::MakeExecutionResult(FailureReason, nullptr, true);
-			}
-			TestRequestPath = FPaths::Combine(ResolvedOutputRoot, UnrealMcp::SanitizeMcpToolIdForPath(ToolName), TEXT("TestRequest.json"));
-		}
-	}
-
-	FString ResolvedTestRequestPath;
-	FString ResolveFailure;
-	if (!UnrealMcp::ResolveProjectPathInsideProject(TestRequestPath, ResolvedTestRequestPath, ResolveFailure))
-	{
-		return UnrealMcp::MakeExecutionResult(ResolveFailure, nullptr, true);
-	}
-
-	FString TestRequestText;
-	if (!FFileHelper::LoadFileToString(TestRequestText, *ResolvedTestRequestPath))
-	{
-		return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("Failed to read TestRequest.json at '%s'."), *ResolvedTestRequestPath), nullptr, true);
-	}
-
-	TSharedPtr<FJsonObject> TestRequestObject;
-	if (!UnrealMcp::LoadJsonObject(TestRequestText, TestRequestObject) || !TestRequestObject.IsValid())
-	{
-		return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("Test request '%s' is not valid JSON."), *ResolvedTestRequestPath), nullptr, true);
-	}
-
-	TSharedPtr<FJsonObject> TestCaseObject;
-	TSharedPtr<FJsonObject> RequestObject = TestRequestObject;
-	FString TestName = FPaths::GetBaseFilename(ResolvedTestRequestPath);
-	FString TestDescription;
-	FString ExpectationNote;
-	bool bExpectToolCallError = false;
-	bool bHasExpectToolCallError = false;
-	const TSharedPtr<FJsonObject>* WrappedRequestObject = nullptr;
-	if (TestRequestObject->TryGetObjectField(TEXT("request"), WrappedRequestObject) && WrappedRequestObject && (*WrappedRequestObject).IsValid())
-	{
-		TestCaseObject = TestRequestObject;
-		RequestObject = *WrappedRequestObject;
-		TestCaseObject->TryGetStringField(TEXT("name"), TestName);
-		TestCaseObject->TryGetStringField(TEXT("description"), TestDescription);
-		TestCaseObject->TryGetStringField(TEXT("expectationNote"), ExpectationNote);
-		TestCaseObject->TryGetBoolField(TEXT("executeTool"), bExecuteTool);
-		TestCaseObject->TryGetBoolField(TEXT("expectToolListed"), bExpectToolListed);
-		if (TestCaseObject->TryGetBoolField(TEXT("expectToolCallError"), bExpectToolCallError)
-			|| TestCaseObject->TryGetBoolField(TEXT("expectError"), bExpectToolCallError))
-		{
-			bHasExpectToolCallError = true;
-		}
-	}
-
-	FString Method;
-	RequestObject->TryGetStringField(TEXT("method"), Method);
-	if (!Method.IsEmpty() && Method != TEXT("tools/call"))
-	{
-		return UnrealMcp::MakeExecutionResult(TEXT("TestRequest.json must use JSON-RPC method tools/call."), nullptr, true);
-	}
-
-	const TSharedPtr<FJsonObject>* ParamsObject = nullptr;
-	if (!RequestObject->TryGetObjectField(TEXT("params"), ParamsObject) || !ParamsObject || !(*ParamsObject).IsValid())
-	{
-		return UnrealMcp::MakeExecutionResult(TEXT("TestRequest.json is missing params object."), nullptr, true);
-	}
-
-	FString RequestToolName;
-	(*ParamsObject)->TryGetStringField(TEXT("name"), RequestToolName);
-	RequestToolName = RequestToolName.TrimStartAndEnd();
-	if (RequestToolName.IsEmpty())
-	{
-		RequestToolName = ToolName;
-	}
-	if (RequestToolName.IsEmpty())
-	{
-		return UnrealMcp::MakeExecutionResult(TEXT("Unable to determine tool name from arguments, project memory, or TestRequest.json."), nullptr, true);
-	}
-
-	const TSharedPtr<FJsonObject>* RequestArgumentsObject = nullptr;
-	const TSharedPtr<FJsonObject> EmptyArguments = UnrealMcp::MakeEmptyObject();
-	const FJsonObject& RequestArguments = ((*ParamsObject)->TryGetObjectField(TEXT("arguments"), RequestArgumentsObject) && RequestArgumentsObject && (*RequestArgumentsObject).IsValid())
-		? **RequestArgumentsObject
-		: *EmptyArguments;
-
-	TArray<TSharedPtr<FJsonValue>> ToolsArray;
-	AppendToolDefinitions(ToolsArray);
-
-	bool bToolListed = false;
-	TSharedPtr<FJsonObject> ListedToolObject;
-	for (const TSharedPtr<FJsonValue>& ToolValue : ToolsArray)
-	{
-		if (!ToolValue.IsValid() || ToolValue->Type != EJson::Object || !ToolValue->AsObject().IsValid())
-		{
-			continue;
-		}
-
-		FString ListedName;
-		if (ToolValue->AsObject()->TryGetStringField(TEXT("name"), ListedName) && ListedName == RequestToolName)
-		{
-			bToolListed = true;
-			ListedToolObject = ToolValue->AsObject();
-			break;
-		}
-	}
-
-	bool bToolExecuted = false;
-	FUnrealMcpExecutionResult ToolResult;
-	if (bExecuteTool && bToolListed)
-	{
-		ToolResult = ExecuteTool(RequestToolName, RequestArguments);
-		bToolExecuted = true;
-	}
-
-	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-	StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_run_tool_test"));
-	StructuredContent->SetStringField(TEXT("toolName"), RequestToolName);
-	StructuredContent->SetStringField(TEXT("testRequestPath"), ResolvedTestRequestPath);
-	StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
-	StructuredContent->SetStringField(TEXT("endpointMode"), TEXT("in_process_mcp_handlers"));
-	StructuredContent->SetStringField(TEXT("endpointNote"), TEXT("tools/list and tools/call are exercised through the same in-editor MCP handlers. A network self-call to tools/call from inside tools/call would deadlock on the editor game thread."));
-	StructuredContent->SetNumberField(TEXT("toolCount"), ToolsArray.Num());
-	StructuredContent->SetBoolField(TEXT("toolListed"), bToolListed);
-	StructuredContent->SetBoolField(TEXT("toolExecuted"), bToolExecuted);
-	StructuredContent->SetBoolField(TEXT("expectToolListed"), bExpectToolListed);
-	if (ListedToolObject.IsValid())
-	{
-		StructuredContent->SetObjectField(TEXT("listedTool"), ListedToolObject);
-	}
-	if (bToolExecuted)
-	{
-		StructuredContent->SetBoolField(TEXT("toolCallIsError"), ToolResult.bIsError);
-		StructuredContent->SetStringField(TEXT("toolCallText"), ToolResult.Text);
-		if (ToolResult.StructuredContent.IsValid())
-		{
-			StructuredContent->SetObjectField(TEXT("toolCallStructuredContent"), ToolResult.StructuredContent);
-		}
-	}
-	StructuredContent->SetStringField(TEXT("testName"), TestName);
-	StructuredContent->SetStringField(TEXT("testDescription"), TestDescription);
-	StructuredContent->SetStringField(TEXT("expectationNote"), ExpectationNote);
-	StructuredContent->SetBoolField(TEXT("isWrappedTestCase"), TestCaseObject.IsValid());
-	StructuredContent->SetBoolField(TEXT("hasExpectedToolCallError"), bHasExpectToolCallError);
-	if (bHasExpectToolCallError)
-	{
-		StructuredContent->SetBoolField(TEXT("expectToolCallError"), bExpectToolCallError);
-	}
-
-	const bool bListedExpectationOk = !bExpectToolListed || bToolListed;
-	const bool bToolCallExpectationOk = !bExecuteTool
-		|| (bToolExecuted && (bHasExpectToolCallError ? ToolResult.bIsError == bExpectToolCallError : !ToolResult.bIsError));
-	const bool bSucceeded = bListedExpectationOk && bToolCallExpectationOk;
-	StructuredContent->SetBoolField(TEXT("listedExpectationOk"), bListedExpectationOk);
-	StructuredContent->SetBoolField(TEXT("toolCallExpectationOk"), bToolCallExpectationOk);
-	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);
-
-	if (bWriteProjectMemory)
-	{
-		TSharedPtr<FJsonObject> UpdatedMemoryContent = MakeShared<FJsonObject>();
-		UpdatedMemoryContent->SetStringField(TEXT("toolName"), RequestToolName);
-		UpdatedMemoryContent->SetStringField(TEXT("testRequestPath"), ResolvedTestRequestPath);
-		UpdatedMemoryContent->SetBoolField(TEXT("toolListed"), bToolListed);
-		UpdatedMemoryContent->SetBoolField(TEXT("toolExecuted"), bToolExecuted);
-		UpdatedMemoryContent->SetBoolField(TEXT("testSucceeded"), bSucceeded);
-		UpdatedMemoryContent->SetStringField(TEXT("testName"), TestName);
-		UnrealMcp::WriteBuildTestMemory(
-			MemoryKey,
-			bSucceeded ? TEXT("MCP tool test succeeded.") : TEXT("MCP tool test failed or tool is not loaded."),
-			bSucceeded ? TEXT("tool_test_succeeded") : TEXT("tool_test_failed"),
-			bSucceeded ? TEXT("Continue with tool audit or next MCP extension stage.") : TEXT("If the tool is missing, restart Unreal Editor after a successful build, then rerun unreal.mcp_run_tool_test."),
-			UpdatedMemoryContent);
-	}
-
-	FString Text;
-	if (!bToolListed)
-	{
-		Text = FString::Printf(TEXT("Tool '%s' was not found in tools/list."), *RequestToolName);
-	}
-	else if (!bExecuteTool)
-	{
-		Text = FString::Printf(TEXT("Tool '%s' is listed. Execution was skipped by request."), *RequestToolName);
-	}
-	else
-	{
-		Text = FString::Printf(TEXT("Test '%s' tool '%s' listed=%s executed=%s isError=%s expectationOk=%s."),
-			*TestName,
-			*RequestToolName,
-			bToolListed ? TEXT("true") : TEXT("false"),
-			bToolExecuted ? TEXT("true") : TEXT("false"),
-			ToolResult.bIsError ? TEXT("true") : TEXT("false"),
-			bToolCallExpectationOk ? TEXT("true") : TEXT("false"));
-	}
-
-	return UnrealMcp::MakeExecutionResult(Text, StructuredContent, !bSucceeded);
-}
-
-FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& Arguments) const
-{
-	FString ToolName;
-	FString TestsDir;
-	FString ScaffoldDir;
-	FString OutputRoot = TEXT("Tools/UnrealMcpToolScaffolds");
-	FString MemoryKey = TEXT("mcp.extension.build_test");
-	bool bReadProjectMemory = true;
-	bool bWriteProjectMemory = true;
-	bool bExecuteTool = true;
-	bool bStopOnFailure = false;
-	bool bFallbackToSingleTest = true;
-	bool bIncludePassedStructuredContent = false;
-
-	Arguments.TryGetStringField(TEXT("toolName"), ToolName);
-	Arguments.TryGetStringField(TEXT("testsDir"), TestsDir);
-	Arguments.TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-	Arguments.TryGetStringField(TEXT("outputRoot"), OutputRoot);
-	Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
-	Arguments.TryGetBoolField(TEXT("readProjectMemory"), bReadProjectMemory);
-	Arguments.TryGetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
-	Arguments.TryGetBoolField(TEXT("executeTool"), bExecuteTool);
-	Arguments.TryGetBoolField(TEXT("stopOnFailure"), bStopOnFailure);
-	Arguments.TryGetBoolField(TEXT("fallbackToSingleTest"), bFallbackToSingleTest);
-	Arguments.TryGetBoolField(TEXT("includePassedStructuredContent"), bIncludePassedStructuredContent);
-
-	ToolName = ToolName.TrimStartAndEnd();
-	TestsDir = TestsDir.TrimStartAndEnd();
-	ScaffoldDir = ScaffoldDir.TrimStartAndEnd();
-	MemoryKey = MemoryKey.TrimStartAndEnd();
-	if (MemoryKey.IsEmpty())
-	{
-		MemoryKey = TEXT("mcp.extension.build_test");
-	}
-
-	if (bReadProjectMemory)
-	{
-		FString FailureReason;
-		TSharedPtr<FJsonObject> MemoryObject;
-		if (UnrealMcp::LoadProjectMemory(MemoryObject, FailureReason) && MemoryObject.IsValid())
-		{
-			const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
-			if (MemoryObject->TryGetArrayField(TEXT("entries"), Entries) && Entries)
-			{
-				for (const TSharedPtr<FJsonValue>& EntryValue : *Entries)
-				{
-					if (!EntryValue.IsValid() || EntryValue->Type != EJson::Object || !EntryValue->AsObject().IsValid())
-					{
-						continue;
-					}
-
-					TSharedPtr<FJsonObject> EntryObject = EntryValue->AsObject();
-					FString ExistingKey;
-					if (!EntryObject->TryGetStringField(TEXT("key"), ExistingKey) || ExistingKey != MemoryKey)
-					{
-						continue;
-					}
-
-					const TSharedPtr<FJsonObject>* ContentObject = nullptr;
-					if (EntryObject->TryGetObjectField(TEXT("content"), ContentObject) && ContentObject && (*ContentObject).IsValid())
-					{
-						if (ToolName.IsEmpty())
-						{
-							(*ContentObject)->TryGetStringField(TEXT("toolName"), ToolName);
-						}
-						if (TestsDir.IsEmpty())
-						{
-							(*ContentObject)->TryGetStringField(TEXT("testsDir"), TestsDir);
-						}
-						if (ScaffoldDir.IsEmpty())
-						{
-							(*ContentObject)->TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-						}
-					}
-					break;
-				}
-			}
-		}
-	}
-
-	TSharedPtr<FJsonObject> ResolveArguments = MakeShared<FJsonObject>();
-	ResolveArguments->SetStringField(TEXT("toolName"), ToolName);
-	ResolveArguments->SetStringField(TEXT("testsDir"), TestsDir);
-	ResolveArguments->SetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-	ResolveArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
-
-	FString ResolvedTestsDir;
-	FString ResolvedScaffoldDir;
-	FString ResolvedToolName;
-	FString ResolveFailure;
-	if (!UnrealMcp::ResolveMcpTestsDirectory(*ResolveArguments, ResolvedTestsDir, ResolvedScaffoldDir, ResolvedToolName, ResolveFailure))
-	{
-		return UnrealMcp::MakeExecutionResult(ResolveFailure, nullptr, true);
-	}
-	ToolName = ResolvedToolName;
-
-	TArray<FString> TestFiles;
-	if (FPaths::DirectoryExists(ResolvedTestsDir))
-	{
-		UnrealMcp::FindImmediateChildren(ResolvedTestsDir, TEXT("*.json"), true, false, TestFiles);
-	}
-	TestFiles.Sort();
-
-	if (TestFiles.Num() == 0 && bFallbackToSingleTest)
-	{
-		TSharedPtr<FJsonObject> SingleArguments = MakeShared<FJsonObject>();
-		SingleArguments->SetStringField(TEXT("toolName"), ToolName);
-		SingleArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		SingleArguments->SetStringField(TEXT("testRequestPath"), FPaths::Combine(ResolvedScaffoldDir, TEXT("TestRequest.json")));
-		SingleArguments->SetStringField(TEXT("memoryKey"), MemoryKey);
-		SingleArguments->SetBoolField(TEXT("readProjectMemory"), false);
-		SingleArguments->SetBoolField(TEXT("writeProjectMemory"), false);
-		SingleArguments->SetBoolField(TEXT("executeTool"), bExecuteTool);
-		const FUnrealMcpExecutionResult SingleResult = RunMcpToolTest(*SingleArguments);
-
-		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-		StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_run_test_suite"));
-		StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-		StructuredContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
-		StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		StructuredContent->SetBoolField(TEXT("fallbackToSingleTest"), true);
-		StructuredContent->SetBoolField(TEXT("succeeded"), !SingleResult.bIsError);
-		StructuredContent->SetNumberField(TEXT("total"), 1);
-		StructuredContent->SetNumberField(TEXT("passed"), SingleResult.bIsError ? 0 : 1);
-		StructuredContent->SetNumberField(TEXT("failed"), SingleResult.bIsError ? 1 : 0);
-		StructuredContent->SetNumberField(TEXT("passRate"), SingleResult.bIsError ? 0.0 : 1.0);
-		if (SingleResult.StructuredContent.IsValid())
-		{
-			StructuredContent->SetObjectField(TEXT("singleTest"), SingleResult.StructuredContent);
-		}
-		return UnrealMcp::MakeExecutionResult(
-			SingleResult.bIsError ? TEXT("MCP test suite fallback single test failed.") : TEXT("MCP test suite fallback single test passed."),
-			StructuredContent,
-			SingleResult.bIsError);
-	}
-
-	if (TestFiles.Num() == 0)
-	{
-		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-		StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_run_test_suite"));
-		StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-		StructuredContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
-		StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		StructuredContent->SetBoolField(TEXT("succeeded"), false);
-		StructuredContent->SetNumberField(TEXT("total"), 0);
-		return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("No JSON test cases found under '%s'."), *ResolvedTestsDir), StructuredContent, true);
-	}
-
-	TArray<TSharedPtr<FJsonValue>> TestResults;
-	TArray<TSharedPtr<FJsonValue>> FailedCases;
-	int32 PassedCount = 0;
-	int32 FailedCount = 0;
-
-	for (const FString& TestFile : TestFiles)
-	{
-		TSharedPtr<FJsonObject> TestArguments = MakeShared<FJsonObject>();
-		TestArguments->SetStringField(TEXT("toolName"), ToolName);
-		TestArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		TestArguments->SetStringField(TEXT("testRequestPath"), TestFile);
-		TestArguments->SetStringField(TEXT("memoryKey"), MemoryKey);
-		TestArguments->SetBoolField(TEXT("readProjectMemory"), false);
-		TestArguments->SetBoolField(TEXT("writeProjectMemory"), false);
-		TestArguments->SetBoolField(TEXT("executeTool"), bExecuteTool);
-
-		const FUnrealMcpExecutionResult TestResult = RunMcpToolTest(*TestArguments);
-		const bool bPassed = !TestResult.bIsError;
-		PassedCount += bPassed ? 1 : 0;
-		FailedCount += bPassed ? 0 : 1;
-
-		TSharedPtr<FJsonObject> ResultObject = MakeShared<FJsonObject>();
-		ResultObject->SetStringField(TEXT("path"), TestFile);
-		ResultObject->SetStringField(TEXT("fileName"), FPaths::GetCleanFilename(TestFile));
-		ResultObject->SetBoolField(TEXT("passed"), bPassed);
-		ResultObject->SetBoolField(TEXT("isError"), TestResult.bIsError);
-		ResultObject->SetStringField(TEXT("text"), TestResult.Text);
-		if (TestResult.StructuredContent.IsValid())
-		{
-			FString TestName;
-			if (TestResult.StructuredContent->TryGetStringField(TEXT("testName"), TestName))
-			{
-				ResultObject->SetStringField(TEXT("name"), TestName);
-			}
-			if (!bPassed || bIncludePassedStructuredContent)
-			{
-				ResultObject->SetObjectField(TEXT("structuredContent"), TestResult.StructuredContent);
-			}
-		}
-
-		TestResults.Add(MakeShared<FJsonValueObject>(ResultObject));
-		if (!bPassed)
-		{
-			FailedCases.Add(MakeShared<FJsonValueObject>(ResultObject));
-			if (bStopOnFailure)
-			{
-				break;
-			}
-		}
-	}
-
-	const int32 ExecutedCount = PassedCount + FailedCount;
-	const double PassRate = ExecutedCount > 0 ? static_cast<double>(PassedCount) / static_cast<double>(ExecutedCount) : 0.0;
-	const bool bSucceeded = FailedCount == 0 && ExecutedCount == TestFiles.Num();
-
-	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-	StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_run_test_suite"));
-	StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-	StructuredContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
-	StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-	StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
-	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);
-	StructuredContent->SetBoolField(TEXT("executeTool"), bExecuteTool);
-	StructuredContent->SetBoolField(TEXT("stopOnFailure"), bStopOnFailure);
-	StructuredContent->SetNumberField(TEXT("total"), TestFiles.Num());
-	StructuredContent->SetNumberField(TEXT("executed"), ExecutedCount);
-	StructuredContent->SetNumberField(TEXT("passed"), PassedCount);
-	StructuredContent->SetNumberField(TEXT("failed"), FailedCount);
-	StructuredContent->SetNumberField(TEXT("passRate"), PassRate);
-	StructuredContent->SetArrayField(TEXT("results"), TestResults);
-	StructuredContent->SetArrayField(TEXT("failedCases"), FailedCases);
-
-	if (bWriteProjectMemory)
-	{
-		TSharedPtr<FJsonObject> MemoryContent = MakeShared<FJsonObject>();
-		MemoryContent->SetStringField(TEXT("toolName"), ToolName);
-		MemoryContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		MemoryContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
-		MemoryContent->SetBoolField(TEXT("testSuiteSucceeded"), bSucceeded);
-		MemoryContent->SetNumberField(TEXT("total"), TestFiles.Num());
-		MemoryContent->SetNumberField(TEXT("passed"), PassedCount);
-		MemoryContent->SetNumberField(TEXT("failed"), FailedCount);
-		MemoryContent->SetNumberField(TEXT("passRate"), PassRate);
-		UnrealMcp::WriteBuildTestMemory(
-			MemoryKey,
-			bSucceeded ? TEXT("MCP test suite succeeded.") : TEXT("MCP test suite failed."),
-			bSucceeded ? TEXT("test_suite_succeeded") : TEXT("test_suite_failed"),
-			bSucceeded ? TEXT("Continue with tool audit or next MCP extension stage.") : TEXT("Inspect failedCases, patch snippets, rebuild, and rerun the suite."),
-			MemoryContent);
-	}
-
-	return UnrealMcp::MakeExecutionResult(
-		FString::Printf(TEXT("MCP test suite for %s: %d/%d passed (%.0f%%)."),
-			*ToolName,
-			PassedCount,
-			TestFiles.Num(),
-			PassRate * 100.0),
-		StructuredContent,
-		!bSucceeded);
-}
-
-FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonObject& Arguments) const
-{
-	FString Mode = TEXT("auto");
-	FString ToolName;
-	FString ScaffoldDir;
-	FString OutputRoot = TEXT("Tools/UnrealMcpToolScaffolds");
-	FString SchemaJson;
-	FString TestRequestPath;
-	FString TestsDir;
-	FString MemoryKey = TEXT("mcp.extension.pipeline");
-	bool bApply = true;
-	bool bBuild = true;
-	bool bRunTest = true;
-	bool bRunTestSuite = true;
-	bool bGenerateTests = true;
-	bool bOverwriteTests = true;
-	bool bDryRunOnly = false;
-	bool bApplyChatCommand = true;
-	bool bCreateBackup = true;
-	bool bBackupProjectState = true;
-	bool bWriteProjectMemory = true;
-
-	Arguments.TryGetStringField(TEXT("mode"), Mode);
-	Arguments.TryGetStringField(TEXT("toolName"), ToolName);
-	Arguments.TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-	Arguments.TryGetStringField(TEXT("outputRoot"), OutputRoot);
-	Arguments.TryGetStringField(TEXT("schemaJson"), SchemaJson);
-	Arguments.TryGetStringField(TEXT("testRequestPath"), TestRequestPath);
-	Arguments.TryGetStringField(TEXT("testsDir"), TestsDir);
-	Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
-	Arguments.TryGetBoolField(TEXT("apply"), bApply);
-	Arguments.TryGetBoolField(TEXT("build"), bBuild);
-	Arguments.TryGetBoolField(TEXT("runTest"), bRunTest);
-	Arguments.TryGetBoolField(TEXT("runTestSuite"), bRunTestSuite);
-	Arguments.TryGetBoolField(TEXT("generateTests"), bGenerateTests);
-	Arguments.TryGetBoolField(TEXT("overwriteTests"), bOverwriteTests);
-	Arguments.TryGetBoolField(TEXT("dryRunOnly"), bDryRunOnly);
-	Arguments.TryGetBoolField(TEXT("applyChatCommand"), bApplyChatCommand);
-	Arguments.TryGetBoolField(TEXT("createBackup"), bCreateBackup);
-	Arguments.TryGetBoolField(TEXT("backupProjectState"), bBackupProjectState);
-	Arguments.TryGetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
-
-	Mode = Mode.TrimStartAndEnd().ToLower();
-	ToolName = ToolName.TrimStartAndEnd();
-	ScaffoldDir = ScaffoldDir.TrimStartAndEnd();
-	SchemaJson = SchemaJson.TrimStartAndEnd();
-	TestRequestPath = TestRequestPath.TrimStartAndEnd();
-	TestsDir = TestsDir.TrimStartAndEnd();
-	MemoryKey = MemoryKey.TrimStartAndEnd();
-	if (Mode.IsEmpty())
-	{
-		Mode = TEXT("auto");
-	}
-	if (MemoryKey.IsEmpty())
-	{
-		MemoryKey = TEXT("mcp.extension.pipeline");
-	}
-
-	TArray<TSharedPtr<FJsonValue>> Steps;
-	TArray<TSharedPtr<FJsonValue>> Issues;
-	bool bSucceeded = true;
-	bool bRequiresRestart = false;
-	bool bAppliedSourceChanges = false;
-	bool bBuildSucceeded = false;
-
-	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-	StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_extension_pipeline"));
-	StructuredContent->SetStringField(TEXT("mode"), Mode);
-	StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
-
-	if (Mode == TEXT("resume_test") || Mode == TEXT("test") || Mode == TEXT("test_only"))
-	{
-		TSharedPtr<FJsonObject> TestArguments = MakeShared<FJsonObject>();
-		TestArguments->SetStringField(TEXT("toolName"), ToolName);
-		TestArguments->SetStringField(TEXT("testRequestPath"), TestRequestPath);
-		TestArguments->SetStringField(TEXT("testsDir"), TestsDir);
-		TestArguments->SetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-		TestArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
-		TestArguments->SetStringField(TEXT("memoryKey"), MemoryKey);
-		TestArguments->SetBoolField(TEXT("readProjectMemory"), true);
-		TestArguments->SetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
-		const FUnrealMcpExecutionResult TestResult = bRunTestSuite ? RunMcpTestSuite(*TestArguments) : RunMcpToolTest(*TestArguments);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			bRunTestSuite ? TEXT("test_suite") : TEXT("test"),
-			TestResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			TestResult.Text,
-			&TestResult)));
-
-		StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-		StructuredContent->SetBoolField(TEXT("succeeded"), !TestResult.bIsError);
-		StructuredContent->SetBoolField(TEXT("requiresRestart"), false);
-		StructuredContent->SetArrayField(TEXT("steps"), Steps);
-		StructuredContent->SetArrayField(TEXT("issues"), Issues);
-		return UnrealMcp::MakeExecutionResult(
-			TestResult.bIsError ? TEXT("MCP extension pipeline resume test failed.") : TEXT("MCP extension pipeline resume test completed."),
-			StructuredContent,
-			TestResult.bIsError);
-	}
-
-	FString ResolvedScaffoldDir;
-	FString ResolvedToolName;
-	FString ResolveFailure;
-	TSharedPtr<FJsonObject> ResolveArguments = MakeShared<FJsonObject>();
-	ResolveArguments->SetStringField(TEXT("toolName"), ToolName);
-	ResolveArguments->SetStringField(TEXT("scaffoldDir"), ScaffoldDir);
-	ResolveArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
-	if (!UnrealMcp::ResolveMcpScaffoldDirectory(*ResolveArguments, ResolvedScaffoldDir, ResolvedToolName, ResolveFailure))
-	{
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("resolve_scaffold"), TEXT("failed"), ResolveFailure)));
-		StructuredContent->SetBoolField(TEXT("succeeded"), false);
-		StructuredContent->SetBoolField(TEXT("requiresRestart"), false);
-		StructuredContent->SetArrayField(TEXT("steps"), Steps);
-		StructuredContent->SetArrayField(TEXT("issues"), Issues);
-		return UnrealMcp::MakeExecutionResult(ResolveFailure, StructuredContent, true);
-	}
-
-	ToolName = ResolvedToolName;
-	if (TestRequestPath.IsEmpty())
-	{
-		TestRequestPath = FPaths::Combine(ResolvedScaffoldDir, TEXT("TestRequest.json"));
-	}
-	if (TestsDir.IsEmpty())
-	{
-		TestsDir = FPaths::Combine(ResolvedScaffoldDir, TEXT("Tests"));
-	}
-	StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-	StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-	StructuredContent->SetStringField(TEXT("testRequestPath"), TestRequestPath);
-	StructuredContent->SetStringField(TEXT("testsDir"), TestsDir);
-	Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-		TEXT("resolve_scaffold"),
-		TEXT("completed"),
-		FString::Printf(TEXT("Resolved scaffold for %s."), *ToolName))));
-
-	TArray<TSharedPtr<FJsonValue>> ToolsArray;
-	AppendToolDefinitions(ToolsArray);
-	const bool bToolAlreadyListed = UnrealMcp::FindToolDefinitionByName(ToolsArray, ToolName).IsValid();
-	StructuredContent->SetBoolField(TEXT("toolAlreadyListed"), bToolAlreadyListed);
-
-	if (SchemaJson.IsEmpty())
-	{
-		UnrealMcp::ExtractRequestedSchemaFromScaffoldReadme(ResolvedScaffoldDir, SchemaJson);
-	}
-
-	if (!SchemaJson.IsEmpty() || bToolAlreadyListed)
-	{
-		TSharedPtr<FJsonObject> ValidateArguments = MakeShared<FJsonObject>();
-		if (!SchemaJson.IsEmpty())
-		{
-			ValidateArguments->SetStringField(TEXT("schemaJson"), SchemaJson);
-		}
-		else
-		{
-			ValidateArguments->SetStringField(TEXT("toolName"), ToolName);
-		}
-		ValidateArguments->SetBoolField(TEXT("returnNormalizedSchema"), true);
-		const FUnrealMcpExecutionResult ValidateResult = UnrealMcp::ValidateMcpToolSchema(*ValidateArguments, ToolsArray);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("validate_schema"),
-			ValidateResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			ValidateResult.Text,
-			&ValidateResult)));
-		if (ValidateResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-	}
-	else
-	{
-		UnrealMcp::AddAuditIssue(
-			Issues,
-			TEXT("warning"),
-			TEXT("schemaJson"),
-			TEXT("No schemaJson provided and the tool is not loaded yet; skipped requested schema validation."));
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("validate_schema"),
-			TEXT("skipped"),
-			TEXT("No schemaJson found; skipped schema validation."))));
-	}
-
-	if (bSucceeded && bGenerateTests)
-	{
-		TSharedPtr<FJsonObject> GenerateArguments = MakeShared<FJsonObject>();
-		GenerateArguments->SetStringField(TEXT("toolName"), ToolName);
-		GenerateArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		GenerateArguments->SetStringField(TEXT("testsDir"), TestsDir);
-		GenerateArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
-		GenerateArguments->SetStringField(TEXT("schemaJson"), SchemaJson);
-		GenerateArguments->SetBoolField(TEXT("overwrite"), bOverwriteTests);
-		GenerateArguments->SetBoolField(TEXT("dryRun"), bDryRunOnly);
-		const FUnrealMcpExecutionResult GenerateTestsResult = UnrealMcp::GenerateMcpTests(*GenerateArguments, ToolsArray);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("generate_tests"),
-			GenerateTestsResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			GenerateTestsResult.Text,
-			&GenerateTestsResult)));
-		if (GenerateTestsResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-	}
-	else if (!bGenerateTests)
-	{
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("generate_tests"), TEXT("skipped"), TEXT("generateTests=false."))));
-	}
-
-	if (bSucceeded)
-	{
-		TSharedPtr<FJsonObject> DryRunArguments = MakeShared<FJsonObject>();
-		DryRunArguments->SetStringField(TEXT("toolName"), ToolName);
-		DryRunArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		DryRunArguments->SetBoolField(TEXT("dryRun"), true);
-		DryRunArguments->SetBoolField(TEXT("applyChatCommand"), bApplyChatCommand);
-		DryRunArguments->SetBoolField(TEXT("createBackup"), bCreateBackup);
-		const FUnrealMcpExecutionResult DryRunResult = UnrealMcp::ApplyMcpScaffold(*DryRunArguments);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("apply_dry_run"),
-			DryRunResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			DryRunResult.Text,
-			&DryRunResult)));
-		if (DryRunResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-	}
-
-	if (bSucceeded && bDryRunOnly)
-	{
-		bApply = false;
-		bBuild = false;
-		bRunTest = false;
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("dry_run_only"),
-			TEXT("completed"),
-			TEXT("dryRunOnly=true; skipped apply/build/test."))));
-	}
-
-	if (bSucceeded && !bDryRunOnly && bBackupProjectState && (bApply || bBuild || bRunTest))
-	{
-		TSharedPtr<FJsonObject> BackupArguments = MakeShared<FJsonObject>();
-		BackupArguments->SetStringField(TEXT("label"), FString::Printf(TEXT("pipeline_%s"), *ToolName));
-		BackupArguments->SetStringField(TEXT("reason"), FString::Printf(TEXT("Pre-pipeline snapshot before applying/building/testing MCP tool %s."), *ToolName));
-		BackupArguments->SetBoolField(TEXT("includeBuildLogs"), false);
-		const FUnrealMcpExecutionResult BackupResult = UnrealMcp::BackupProjectState(*BackupArguments);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("backup_project_state"),
-			BackupResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			BackupResult.Text,
-			&BackupResult)));
-		if (BackupResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-	}
-	else if (bDryRunOnly || !bBackupProjectState)
-	{
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("backup_project_state"),
-			TEXT("skipped"),
-			bDryRunOnly ? TEXT("dryRunOnly=true.") : TEXT("backupProjectState=false."))));
-	}
-
-	if (bSucceeded && bApply)
-	{
-		TSharedPtr<FJsonObject> ApplyArguments = MakeShared<FJsonObject>();
-		ApplyArguments->SetStringField(TEXT("toolName"), ToolName);
-		ApplyArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		ApplyArguments->SetBoolField(TEXT("dryRun"), false);
-		ApplyArguments->SetBoolField(TEXT("applyChatCommand"), bApplyChatCommand);
-		ApplyArguments->SetBoolField(TEXT("createBackup"), bCreateBackup);
-		const FUnrealMcpExecutionResult ApplyResult = UnrealMcp::ApplyMcpScaffold(*ApplyArguments);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("apply"),
-			ApplyResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			ApplyResult.Text,
-			&ApplyResult)));
-		if (ApplyResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-		else if (ApplyResult.StructuredContent.IsValid())
-		{
-			ApplyResult.StructuredContent->TryGetBoolField(TEXT("changed"), bAppliedSourceChanges);
-		}
-	}
-	else if (!bApply)
-	{
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("apply"), TEXT("skipped"), TEXT("apply=false."))));
-	}
-
-	if (bSucceeded && bWriteProjectMemory)
-	{
-		TSharedPtr<FJsonObject> MemoryContent = MakeShared<FJsonObject>();
-		MemoryContent->SetStringField(TEXT("toolName"), ToolName);
-		MemoryContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		MemoryContent->SetStringField(TEXT("testRequestPath"), TestRequestPath);
-		MemoryContent->SetStringField(TEXT("testsDir"), TestsDir);
-		MemoryContent->SetStringField(TEXT("pipelineMode"), Mode);
-		MemoryContent->SetBoolField(TEXT("appliedSourceChanges"), bAppliedSourceChanges);
-		MemoryContent->SetBoolField(TEXT("buildRequested"), bBuild);
-		MemoryContent->SetBoolField(TEXT("runTestRequested"), bRunTest);
-		MemoryContent->SetBoolField(TEXT("runTestSuite"), bRunTestSuite);
-		UnrealMcp::WriteBuildTestMemory(
-			MemoryKey,
-			TEXT("MCP extension pipeline applied scaffold; build/test handoff pending."),
-			TEXT("pipeline_apply_complete"),
-			bBuild ? TEXT("Run build, restart Unreal Editor if needed, then resume mcp_extension_pipeline with mode=resume_test.") : TEXT("Run mcp_extension_pipeline with mode=resume_test when ready."),
-			MemoryContent);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("write_memory"),
-			TEXT("completed"),
-			FString::Printf(TEXT("Wrote project memory key '%s'."), *MemoryKey))));
-	}
-
-	if (bSucceeded && bBuild)
-	{
-		TSharedPtr<FJsonObject> BuildArguments = MakeShared<FJsonObject>();
-		BuildArguments->SetStringField(TEXT("toolName"), ToolName);
-		BuildArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		BuildArguments->SetStringField(TEXT("testRequestPath"), TestRequestPath);
-		BuildArguments->SetStringField(TEXT("testsDir"), TestsDir);
-		BuildArguments->SetStringField(TEXT("memoryKey"), MemoryKey);
-		BuildArguments->SetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
-		const FUnrealMcpExecutionResult BuildResult = UnrealMcp::BuildEditor(*BuildArguments);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("build"),
-			BuildResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			BuildResult.Text,
-			&BuildResult)));
-		if (BuildResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-		else if (BuildResult.StructuredContent.IsValid())
-		{
-			BuildResult.StructuredContent->TryGetBoolField(TEXT("succeeded"), bBuildSucceeded);
-		}
-	}
-	else if (!bBuild)
-	{
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("build"), TEXT("skipped"), TEXT("build=false."))));
-	}
-
-	const bool bShouldDeferTestForRestart = bBuild && bBuildSucceeded && bAppliedSourceChanges && !bToolAlreadyListed;
-	if (bShouldDeferTestForRestart)
-	{
-		bRequiresRestart = true;
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("restart"),
-			TEXT("required"),
-			TEXT("New C++ snippets were compiled while the editor was running. Restart Unreal Editor before running the test step."))));
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			bRunTestSuite ? TEXT("test_suite") : TEXT("test"),
-			TEXT("deferred"),
-			bRunTestSuite ? TEXT("Run unreal.mcp_extension_pipeline with mode=resume_test after restart to execute the generated test suite.") : TEXT("Run unreal.mcp_extension_pipeline with mode=resume_test after restart, or use Tools/unreal_mcp_supervisor.py resume-test."))));
-	}
-	else if (bSucceeded && bRunTest)
-	{
-		TSharedPtr<FJsonObject> TestArguments = MakeShared<FJsonObject>();
-		TestArguments->SetStringField(TEXT("toolName"), ToolName);
-		TestArguments->SetStringField(TEXT("testRequestPath"), TestRequestPath);
-		TestArguments->SetStringField(TEXT("testsDir"), TestsDir);
-		TestArguments->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
-		TestArguments->SetStringField(TEXT("memoryKey"), MemoryKey);
-		TestArguments->SetBoolField(TEXT("readProjectMemory"), false);
-		TestArguments->SetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
-		const FUnrealMcpExecutionResult TestResult = bRunTestSuite ? RunMcpTestSuite(*TestArguments) : RunMcpToolTest(*TestArguments);
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			bRunTestSuite ? TEXT("test_suite") : TEXT("test"),
-			TestResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			TestResult.Text,
-			&TestResult)));
-		if (TestResult.bIsError)
-		{
-			bSucceeded = false;
-		}
-	}
-	else if (!bRunTest)
-	{
-		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("test"), TEXT("skipped"), TEXT("runTest=false."))));
-	}
-
-	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);
-	StructuredContent->SetBoolField(TEXT("requiresRestart"), bRequiresRestart);
-	StructuredContent->SetBoolField(TEXT("appliedSourceChanges"), bAppliedSourceChanges);
-	StructuredContent->SetBoolField(TEXT("buildSucceeded"), bBuildSucceeded);
-	StructuredContent->SetBoolField(TEXT("generateTests"), bGenerateTests);
-	StructuredContent->SetBoolField(TEXT("runTestSuite"), bRunTestSuite);
-	StructuredContent->SetBoolField(TEXT("backupProjectState"), bBackupProjectState);
-	StructuredContent->SetStringField(TEXT("restartAdvice"), TEXT("If requiresRestart=true, close and reopen Unreal Editor, then call unreal.mcp_extension_pipeline with mode=resume_test and the same memoryKey."));
-	StructuredContent->SetStringField(TEXT("supervisorCommand"), FString::Printf(TEXT("python3 Tools/unreal_mcp_supervisor.py resume-test --memory-key %s"), *MemoryKey));
-	StructuredContent->SetArrayField(TEXT("steps"), Steps);
-	StructuredContent->SetArrayField(TEXT("issues"), Issues);
-
-	const FString Text = bRequiresRestart
-		? TEXT("MCP extension pipeline applied and built changes. Restart Unreal Editor, then resume test.")
-		: (bSucceeded ? TEXT("MCP extension pipeline completed.") : TEXT("MCP extension pipeline failed. See steps for details."));
-	return UnrealMcp::MakeExecutionResult(Text, StructuredContent, !bSucceeded);
-}
 
 TSharedRef<IUnrealMcpAssistantHandle, ESPMode::ThreadSafe> FUnrealMcpModule::ExecuteAssistantTurnAsync(
 	const FString& UserPrompt,

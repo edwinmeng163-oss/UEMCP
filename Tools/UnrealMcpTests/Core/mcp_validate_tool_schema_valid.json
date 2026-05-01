@@ -1,0 +1,20 @@
+{
+  "name": "mcp_validate_tool_schema_valid",
+  "description": "Validates an existing fixed-schema tool.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_validate_tool_schema",
+      "arguments": {
+        "toolName": "unreal.editor_status",
+        "returnNormalizedSchema": false
+      }
+    }
+  }
+}

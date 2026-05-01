@@ -1,0 +1,17 @@
+{
+  "name": "editor_status_valid",
+  "description": "Core happy-path smoke test for the editor status tool.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.editor_status",
+      "arguments": {}
+    }
+  }
+}

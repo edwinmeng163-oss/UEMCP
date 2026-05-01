@@ -28,7 +28,6 @@ Editor action tools:
 - `unreal.batch_set_actor_tags`
 - `unreal.batch_set_point_light_properties`
 - `unreal.batch_configure_static_mesh_actors`
-- `unreal.batch_set_actor_properties`
 - `unreal.layout_actors_grid`
 - `unreal.layout_actors_circle`
 - `unreal.open_map`
@@ -37,8 +36,6 @@ Editor action tools:
 - `unreal.spawn_actor_basic`
 - `unreal.spawn_actor_batch_basic`
 - `unreal.spawn_static_mesh_actor`
-- `unreal.spawn_actor`
-- `unreal.spawn_actor_batch`
 - `unreal.destroy_selected_actors`
 - `unreal.compile_blueprint`
 - `unreal.compile_blueprints_in_path`
@@ -84,6 +81,7 @@ Editor action tools:
 - `unreal.mcp_run_test_suite`
 - `unreal.mcp_extension_pipeline`
 - `unreal.mcp_pipeline_status`
+- `unreal.mcp_workbench_status`
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
@@ -96,6 +94,14 @@ Editor action tools:
 - `unreal.skill_read`
 - `unreal.skill_apply`
 - `unreal.save_dirty_packages`
+
+Legacy compatibility handlers:
+
+- `unreal.batch_set_actor_properties`
+- `unreal.spawn_actor`
+- `unreal.spawn_actor_batch`
+
+These tools intentionally use flexible object schemas for compatibility with older direct callers. They are hidden from AI-facing `tools/list` by the ToolRegistry because OpenAI function calling rejects `additionalProperties=true`. Prefer `unreal.spawn_actor_basic`, `unreal.spawn_actor_batch_basic`, `unreal.spawn_static_mesh_actor`, and the fixed batch actor tools.
 
 ## Endpoint
 
@@ -203,11 +209,11 @@ open the TwinStick map, list the enemies in the level, and arrange the selected 
 For direct tool calls from inside the chat window:
 
 ```text
-/tool unreal.spawn_actor {"classPath":"/Script/Engine.PointLight","x":0,"y":0,"z":150,"label":"ChatLight"}
+/tool unreal.spawn_actor_basic {"classPath":"/Script/Engine.PointLight","x":0,"y":0,"z":150,"label":"ChatLight"}
 ```
 
 ```text
-/tool unreal.batch_set_actor_properties {"selectedOnly":true,"properties":{"Tags":["Encounter","Wave1"]}}
+/tool unreal.batch_set_actor_tags {"selectedOnly":true,"tags":["Encounter","Wave1"],"replaceExisting":false}
 ```
 
 ```text
@@ -397,10 +403,26 @@ Inspect pipeline state and last source apply:
 ```
 
 ```text
+/tool unreal.mcp_workbench_status {"memoryKey":"mcp.extension.pipeline","includeBuildLogTail":false}
+```
+
+```text
 /tool unreal.mcp_diff_last_apply {"maxPreviewLines":80}
 ```
 
-`unreal.mcp_pipeline_status` collects project memory, the latest apply manifest, the newest build log tail, test scaffolds, test requests, and extension backups into one status report. `unreal.mcp_diff_last_apply` reads the backup snapshots written by `mcp_apply_scaffold`, so it can explain exactly what the last automatic source integration changed.
+`unreal.mcp_pipeline_status` collects project memory, the latest apply manifest, the newest build log tail, test scaffolds, test requests, and extension backups into one status report. `unreal.mcp_workbench_status` adds tool audit health, ToolRegistry legacy-hidden tools, handler aliases, supervisor logs, and aggregate test counts for a higher-level self-extension dashboard. `unreal.mcp_diff_last_apply` reads the backup snapshots written by `mcp_apply_scaffold`, so it can explain exactly what the last automatic source integration changed.
+
+`tools/list`, audit output, and workbench status include ToolRegistry policy metadata for every visible tool:
+
+- `riskLevel`
+- `requiresWrite`
+- `requiresBuild`
+- `requiresExternalProcess`
+- `requiresRestart`
+- `requiresProjectMemory`
+- `requiresLock`
+
+Stable core test fixtures live under `Tools/UnrealMcpTests/Core`. Runtime-generated scaffold tests remain under `Saved/UnrealMcp/TestScaffolds`.
 
 External restart supervisor:
 
@@ -563,14 +585,14 @@ curl -s \
   http://127.0.0.1:8765/mcp
 ```
 
-Batch actor property edit example:
+Batch actor scale example:
 
 ```bash
 curl -s \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2025-06-18' \
-  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"unreal.batch_set_actor_properties","arguments":{"selectedOnly":true,"properties":{"Tags":["Encounter"],"RootComponent.RelativeScale3D":{"X":1.1,"Y":1.1,"Z":1.1}}}}}' \
+  -d '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"unreal.batch_set_actor_scale","arguments":{"selectedOnly":true,"scaleX":1.1,"scaleY":1.1,"scaleZ":1.1}}}' \
   http://127.0.0.1:8765/mcp
 ```
 

@@ -1,0 +1,17 @@
+{
+  "name": "mcp_validate_tool_schema_missing_required",
+  "description": "Missing both toolName and schemaJson should return a controlled tool error.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_validate_tool_schema",
+      "arguments": {}
+    }
+  }
+}

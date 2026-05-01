@@ -1,0 +1,19 @@
+{
+  "name": "mcp_validate_tool_schema_wrong_type",
+  "description": "Wrong argument shape should be handled as a controlled validation error.",
+  "category": "wrong_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_validate_tool_schema",
+      "arguments": {
+        "schemaJson": 123
+      }
+    }
+  }
+}

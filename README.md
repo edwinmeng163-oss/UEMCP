@@ -2,7 +2,7 @@
 
 This repository is an Unreal Engine 5.7 project focused on editor automation, AI-assisted project inspection, Blueprint scaffolding, UMG setup, and local Model Context Protocol workflows.
 
-It includes an in-project editor plugin, **Unreal MCP**, which exposes Unreal Editor operations through a localhost MCP endpoint and an in-editor chat panel.
+It includes an in-project editor plugin, **Unreal MCP**, which exposes Unreal Editor operations through a localhost MCP endpoint and an in-editor chat panel. The current product direction is an **Unreal Editor MCP self-extension workbench**: AI can call tools, then safely scaffold, validate, dry-run, apply, build, test, roll back, and remember MCP tool extensions.
 
 ## 中文概览
 
@@ -25,6 +25,17 @@ The project currently contains:
 - `Plugins/UnrealMcp`, an editor plugin for local MCP and in-editor AI/chat workflows.
 - Git LFS setup for Unreal binary assets.
 - Project-level README and ignore rules suitable for public GitHub hosting.
+- Self-extension safety rails: schema validation, snippet validation, dry-run diffs, backups, build/test handoff, rollback manifests, project memory, and project-local skills.
+- Versioned core MCP test fixtures under `Tools/UnrealMcpTests`.
+- ToolRegistry policy metadata for risk level, write/build/process/restart/memory/lock requirements.
+
+## Planning Docs
+
+- [Roadmap](Docs/Roadmap.md)
+- [Architecture](Docs/Architecture.md)
+- [Contributing](Docs/Contributing.md)
+- [Security Model](Docs/SecurityModel.md)
+- [Self-Extension Pipeline](Docs/SelfExtensionPipeline.md)
 
 ## Unreal MCP Plugin
 
@@ -108,6 +119,7 @@ Unreal MCP currently supports:
   - `unreal.mcp_run_test_suite`
   - `unreal.mcp_extension_pipeline`
   - `unreal.mcp_pipeline_status`
+  - `unreal.mcp_workbench_status`
   - `unreal.mcp_diff_last_apply`
   - `unreal.mcp_clean_test_artifacts`
   - `unreal.mcp_tool_audit`
@@ -122,6 +134,8 @@ Unreal MCP currently supports:
   - `unreal.skill_read`
   - `unreal.skill_apply`
 - Saving dirty packages.
+
+Legacy flexible-schema tools such as `unreal.spawn_actor`, `unreal.spawn_actor_batch`, and `unreal.batch_set_actor_properties` still have handlers for compatibility, but are hidden from AI-facing `tools/list` by default. Use the fixed-schema wrappers such as `unreal.spawn_actor_basic`, `unreal.spawn_actor_batch_basic`, `unreal.spawn_static_mesh_actor`, and the fixed batch actor tools instead.
 
 ## In-Editor Chat Usage
 
@@ -206,6 +220,7 @@ Useful first-stage extension checks:
 /tool unreal.mcp_diff_last_apply {"maxPreviewLines":80}
 /tool unreal.mcp_clean_test_artifacts {"dryRun":true}
 /tool unreal.mcp_tool_audit {}
+/tool unreal.mcp_workbench_status {"memoryKey":"mcp.extension.pipeline","includeBuildLogTail":false}
 /tool unreal.project_memory_write {"key":"mcp_extension","summary":"Resume MCP extension work after editor restart.","status":"in_progress","nextStep":"Run schema validation and tool audit after rebuilding.","contentJson":"{\"target\":\"self-extension\"}","tags":["mcp","restart"]}
 /tool unreal.project_memory_read {"key":"mcp_extension","includeContent":true}
 /tool unreal.project_memory_view {"tag":"mcp","includeContent":false}
@@ -235,6 +250,9 @@ Build/test handoff note:
 - `unreal.mcp_run_test_suite` runs all `Tests/*.json` cases and reports pass rate, failed cases, failure text, and failed structured content.
 - `unreal.mcp_extension_pipeline` orchestrates validate, test generation, apply dry run, apply, memory write, build, restart handoff, and post-restart test suite resume.
 - `unreal.mcp_pipeline_status` summarizes the current extension memory entry, last apply manifest, latest build log, saved test scaffolds, extension backups, and recommended next step.
+- `unreal.mcp_workbench_status` aggregates tool audit health, ToolRegistry legacy-hidden tools, pipeline state, latest build/supervisor artifacts, test scaffold counts, and project memory into one self-extension dashboard response.
+- `tools/list`, `unreal.mcp_tool_audit`, and `unreal.mcp_workbench_status` include per-tool policy metadata such as `riskLevel`, `requiresWrite`, `requiresBuild`, `requiresExternalProcess`, `requiresRestart`, `requiresProjectMemory`, and `requiresLock`.
+- Stable core MCP test fixtures live in `Tools/UnrealMcpTests/Core`; runtime-generated test scaffolds stay under ignored `Saved/UnrealMcp`.
 - `unreal.mcp_diff_last_apply` reads `Saved/UnrealMcp/LastExtensionApply.json` and returns a before/after source diff preview from the backup snapshots created by `mcp_apply_scaffold`.
 - `unreal.mcp_clean_test_artifacts` defaults to `dryRun:true` and only previews generated `Saved/UnrealMcp/TestScaffolds`; destructive cleanup must explicitly set `dryRun:false`, and optional filters such as `nameContains` should be used for targeted cleanup.
 - `unreal.project_memory_view`, `unreal.project_memory_edit`, and `unreal.project_memory_delete` turn `Saved/UnrealMcp/ProjectMemory.json` into a manageable long-term project memory store with filters, field-level edits, content merge/replace, tag modes, dry-run edits, and safe dry-run deletion.

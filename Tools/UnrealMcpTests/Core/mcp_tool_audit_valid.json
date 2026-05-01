@@ -1,0 +1,17 @@
+{
+  "name": "mcp_tool_audit_valid",
+  "description": "Core happy-path smoke test for the tool audit surface.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_tool_audit",
+      "arguments": {}
+    }
+  }
+}
