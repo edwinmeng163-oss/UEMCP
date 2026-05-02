@@ -63,6 +63,7 @@ public:
 	virtual void ShutdownModule() override;
 
 	FUnrealMcpExecutionResult ExecuteChatCommand(const FString& Input) const;
+	FUnrealMcpExecutionResult ExecuteToolFromEditorUI(const FString& ToolName, const FJsonObject& Arguments) const;
 	TSharedRef<IUnrealMcpAssistantHandle, ESPMode::ThreadSafe> ExecuteAssistantTurnAsync(
 		const FString& UserPrompt,
 		const FString& ConversationContext,
@@ -80,7 +81,9 @@ private:
 	void UnregisterTabSpawner();
 	void RegisterMenus();
 	void OpenChatTab();
+	void OpenWorkbenchTab();
 	TSharedRef<SDockTab> SpawnChatTab(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnWorkbenchTab(const FSpawnTabArgs& Args);
 
 	bool HandleMcpHttpRequest(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
 	TUniquePtr<FHttpServerResponse> HandleMcpHttpRequestInternal(const FHttpServerRequest& Request);

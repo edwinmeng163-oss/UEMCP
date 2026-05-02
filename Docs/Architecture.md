@@ -13,6 +13,11 @@ Core layers:
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
 - `Schemas/UnrealMcpExtensionManifest.schema.json`: versioned contract for source apply manifests.
 - `Saved/UnrealMcp`: local runtime state, memory, manifests, backups, generated tests, and logs.
+
+## Editor UI Surfaces
+
+- `SUnrealMcpChatPanel`: conversational command and AI surface.
+- `SUnrealMcpWorkbenchPanel`: thin self-extension console over existing MCP tools. It should not own self-extension business logic; it delegates to `ExecuteToolFromEditorUI` so Chat, HTTP MCP, tests, and Workbench continue sharing the same backend behavior.
 - `Tools/UnrealMcpSkills`: project-local skill instructions.
 
 ## Current Bottleneck

@@ -19,6 +19,8 @@ The self-extension pipeline lets Unreal MCP add new MCP tools from inside Editor
 - `unreal.mcp_extension_pipeline`: orchestrate the flow.
 - `unreal.mcp_workbench_status`: summarize health and next steps.
 
+The same status and safety tools are also exposed through `Window > Unreal MCP Workbench`, a thin Slate panel for people who prefer a dashboard over typing `/tool` commands.
+
 Versioned core tests live in `Tools/UnrealMcpTests/Core`. Generated tests remain local under `Saved/UnrealMcp/TestScaffolds`.
 
 Shared contracts:

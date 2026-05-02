@@ -155,6 +155,10 @@ Open the command chat window from:
 
 `Window > Unreal MCP Chat`
 
+Open the thin self-extension console from:
+
+`Window > Unreal MCP Workbench`
+
 The chat panel supports both direct slash commands and AI-assisted requests, and uses the same tool execution layer as the HTTP MCP server.
 
 The plugin now depends on Unreal's `Python Script Plugin`, and the project enables it automatically for editor sessions so MCP can run Python automation in-process.
@@ -411,6 +415,8 @@ Inspect pipeline state and last source apply:
 ```
 
 `unreal.mcp_pipeline_status` collects project memory, the latest apply manifest, the newest build log tail, test scaffolds, test requests, and extension backups into one status report. `unreal.mcp_workbench_status` adds tool audit health, ToolRegistry legacy-hidden tools, handler aliases, supervisor logs, and aggregate test counts for a higher-level self-extension dashboard. `unreal.mcp_diff_last_apply` reads the backup snapshots written by `mcp_apply_scaffold`, so it can explain exactly what the last automatic source integration changed.
+
+The Workbench UI is intentionally thin: it calls the same MCP tools used by Chat and displays the latest structured result. It currently exposes safe operational buttons for status refresh, audit, core test suite, pipeline status, lock status, and copying the latest result. High-risk actions such as apply, build, restart, and rollback should stay behind the existing dry-run, lock, supervisor, and manifest workflow until the UI adds explicit confirmation surfaces.
 
 `tools/list`, audit output, and workbench status include ToolRegistry policy metadata for every visible tool:
 
