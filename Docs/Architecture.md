@@ -11,6 +11,7 @@ Core layers:
 - `UnrealMcpToolRegistry`: lightweight metadata for visibility, handler aliases, and migration status.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
+- `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
 - `Schemas/UnrealMcpExtensionManifest.schema.json`: versioned contract for source apply manifests.
 - `Saved/UnrealMcp`: local runtime state, memory, manifests, backups, generated tests, and logs.
 
@@ -38,7 +39,7 @@ Recommended split:
 - `Private/Tools/Scaffold`: gameplay scaffolds and MCP tool scaffolds.
 - `Private/Tools/SelfExtension`: validate, apply, build, test, audit, rollback, pipeline.
 - `Private/Tools/Memory`: project memory CRUD.
-- `Private/Tools/Skills`: project skill discovery and application. `unreal.skill_list`, `unreal.skill_read`, and `unreal.skill_apply` now live in `UnrealMcpSkillTools.cpp`.
+- `Private/Tools/Skills`: project skill discovery, application, local activity recording, and skill distillation. `unreal.skill_list`, `unreal.skill_read`, `unreal.skill_apply`, and `unreal.skill_*` distillation tools now live in `UnrealMcpSkillTools.cpp`.
 - `Private/UI`: Chat panel and future Workbench panel.
 
 ## ToolRegistry Role
@@ -71,3 +72,5 @@ Future work should replace broad heuristics with explicit per-tool ownership met
 Local runtime state remains under `Saved/UnrealMcp` and is ignored by Git.
 
 Team-shared planning and policy state should live under `Docs/` or a future `.unrealmcp/` directory so it can be reviewed and versioned.
+
+Activity recording is intentionally local-first: JSONL events, distilled drafts, build logs, and transient test output stay under `Saved/UnrealMcp`. A draft only becomes team-shared when `unreal.skill_promote_draft` writes it into `Tools/UnrealMcpSkills`.

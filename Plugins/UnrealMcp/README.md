@@ -93,6 +93,12 @@ Editor action tools:
 - `unreal.skill_list`
 - `unreal.skill_read`
 - `unreal.skill_apply`
+- `unreal.skill_recording_start`
+- `unreal.skill_recording_stop`
+- `unreal.skill_activity_status`
+- `unreal.skill_distill_from_activity`
+- `unreal.skill_save_draft`
+- `unreal.skill_promote_draft`
 - `unreal.save_dirty_packages`
 
 Legacy compatibility handlers:
@@ -150,6 +156,7 @@ Behavior notes:
 - Unreal MCP also synchronizes Unreal's global HTTP connection/activity timeouts for AI turns so macOS does not fall back to the engine's default 30-second connection timeout.
 - The default AI tool-round budget is 16 so scaffold-style requests have more room to inspect, create assets, and then summarize.
 - The conversation history is persisted at `Saved/UnrealMcp/ChatHistory.json`.
+- High-level activity recording writes local JSONL events under `Saved/UnrealMcp/ActivityLog/*.jsonl`; it records MCP tool calls/results and a periodic editor heartbeat roughly once per minute while recording is active.
 - On the first AI turn after the panel reloads, Unreal MCP now also replays a small, compact slice of the persisted local transcript back to the model for continuity, so saved history is not just UI-only.
 - `Copy Chat` copies the full visible transcript, and `Copy Log` copies the most recent `/log` or `unreal.tail_log` output.
 - For AI-driven editing, prefer the fixed-schema wrapper tools such as `unreal.spawn_actor_basic`, `unreal.spawn_static_mesh_actor`, `unreal.batch_set_actor_scale`, `unreal.batch_set_actor_tags`, `unreal.batch_set_point_light_properties`, `unreal.batch_configure_static_mesh_actors`, the `unreal.bp_*` Blueprint graph editing tools, the `unreal.widget_*` UMG editing tools, and the `unreal.scaffold_*` gameplay scaffold tools.
@@ -518,6 +525,26 @@ Project-local skills:
 ```
 
 The project skill tools scan `Tools/UnrealMcpSkills` by default for `SKILL.md` or `*.skill` files. Applying a skill returns the instruction text to Chat and can record the skill/task in project memory.
+
+Skill distillation tools:
+
+```text
+/tool unreal.skill_recording_start {"goal":"Capture a repeatable editor workflow.","recordIntervalSeconds":60}
+```
+
+```text
+/tool unreal.skill_activity_status {"includeRecentEvents":true,"maxEvents":10}
+```
+
+```text
+/tool unreal.skill_distill_from_activity {"skillName":"repeatable-editor-workflow","title":"Repeatable Editor Workflow","writeDraft":true}
+```
+
+```text
+/tool unreal.skill_promote_draft {"skillName":"repeatable-editor-workflow","overwrite":false}
+```
+
+Activity logs are local-only runtime files under `Saved/UnrealMcp/ActivityLog/*.jsonl`. Distilled drafts are written to `Saved/UnrealMcp/SkillDrafts/<skill-name>/SKILL.md`; only `unreal.skill_promote_draft` writes a reviewed skill into versioned `Tools/UnrealMcpSkills/<skill-name>/SKILL.md`.
 
 ## Quick Test
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "HttpResultCallback.h"
 #include "HttpRouteHandle.h"
 #include "Modules/ModuleManager.h"
@@ -84,6 +85,7 @@ private:
 	void OpenWorkbenchTab();
 	TSharedRef<SDockTab> SpawnChatTab(const FSpawnTabArgs& Args);
 	TSharedRef<SDockTab> SpawnWorkbenchTab(const FSpawnTabArgs& Args);
+	bool TickSkillActivity(float DeltaTime);
 
 	bool HandleMcpHttpRequest(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
 	TUniquePtr<FHttpServerResponse> HandleMcpHttpRequestInternal(const FHttpServerRequest& Request);
@@ -127,5 +129,6 @@ private:
 
 	TSharedPtr<IHttpRouter> HttpRouter;
 	FHttpRouteHandle McpRouteHandle;
+	FTSTicker::FDelegateHandle SkillActivityTickerHandle;
 	bool bServerStarted = false;
 };

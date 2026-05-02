@@ -19,6 +19,7 @@ It includes an in-project editor plugin, **Unreal MCP**, which exposes Unreal Ed
 - 支持项目检查、地图/资产查询、PIE 控制、日志读取、Map Check、Python/Console 执行等基础编辑器自动化。
 - 支持 Blueprint 图编辑、UMG Widget 编辑、玩法系统脚手架、MCP 工具脚手架和项目本地 `.skill` 工作流。
 - 自扩展链路包含 schema 校验、snippet 校验、dry-run diff、备份 manifest、UBT 编译、测试套件、rollback、project memory 和 supervisor 重启恢复。
+- Skill 蒸馏链路会记录高层 Editor/Chat/MCP 活动到本地 JSONL，并把一次任务/session 总结成可审查的 `SKILL.md` 草稿，确认后再 promote 到项目技能库。
 - 引入多人协作保护：CODEOWNERS、工具命名规范、Manifest schema、extension session lock、ToolRegistry 风险元数据和冲突检测规则。
 - 保留 UE 模板内容作为本地测试与原型资源，并使用 Git LFS 管理 Unreal 二进制资产，方便上传和协作。
 
@@ -148,6 +149,12 @@ Unreal MCP currently supports:
   - `unreal.skill_list`
   - `unreal.skill_read`
   - `unreal.skill_apply`
+  - `unreal.skill_recording_start`
+  - `unreal.skill_recording_stop`
+  - `unreal.skill_activity_status`
+  - `unreal.skill_distill_from_activity`
+  - `unreal.skill_save_draft`
+  - `unreal.skill_promote_draft`
 - Saving dirty packages.
 
 Legacy flexible-schema tools such as `unreal.spawn_actor`, `unreal.spawn_actor_batch`, and `unreal.batch_set_actor_properties` still have handlers for compatibility, but are hidden from AI-facing `tools/list` by default. Use the fixed-schema wrappers such as `unreal.spawn_actor_basic`, `unreal.spawn_actor_batch_basic`, `unreal.spawn_static_mesh_actor`, and the fixed batch actor tools instead.
@@ -255,6 +262,8 @@ Useful first-stage extension checks:
 /tool unreal.skill_list {}
 /tool unreal.skill_read {"skillName":"mcp-self-extension"}
 /tool unreal.skill_apply {"skillName":"mcp-self-extension","task":"Extend Unreal MCP safely from Editor Chat."}
+/tool unreal.skill_activity_status {"includeRecentEvents":true,"maxEvents":10}
+/tool unreal.skill_distill_from_activity {"skillName":"my-repeatable-workflow","title":"My Repeatable Workflow","writeDraft":true}
 ```
 
 Build/test handoff note:
@@ -284,6 +293,9 @@ Build/test handoff note:
 - `unreal.mcp_clean_test_artifacts` defaults to `dryRun:true` and only previews generated `Saved/UnrealMcp/TestScaffolds`; destructive cleanup must explicitly set `dryRun:false`, and optional filters such as `nameContains` should be used for targeted cleanup.
 - `unreal.project_memory_view`, `unreal.project_memory_edit`, and `unreal.project_memory_delete` turn `Saved/UnrealMcp/ProjectMemory.json` into a manageable long-term project memory store with filters, field-level edits, content merge/replace, tag modes, dry-run edits, and safe dry-run deletion.
 - `unreal.skill_list`, `unreal.skill_read`, and `unreal.skill_apply` scan project-local `SKILL.md` or `*.skill` files under `Tools/UnrealMcpSkills` by default. Applying a skill returns its instructions to Chat and can write a memory record of the applied skill/task.
+- `unreal.skill_recording_start`, `unreal.skill_recording_stop`, and `unreal.skill_activity_status` manage local activity recording. MCP tool calls are logged as high-level events, and the editor also writes a heartbeat roughly once per minute while recording is active.
+- Activity logs are local-only JSONL files under `Saved/UnrealMcp/ActivityLog/*.jsonl`; generated drafts go to `Saved/UnrealMcp/SkillDrafts/<skill-name>/SKILL.md`.
+- `unreal.skill_distill_from_activity` summarizes a session into a reusable skill draft; `unreal.skill_save_draft` can write a manual draft; `unreal.skill_promote_draft` copies a reviewed draft into `Tools/UnrealMcpSkills/<skill-name>/SKILL.md`.
 
 External supervisor:
 

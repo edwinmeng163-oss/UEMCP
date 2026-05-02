@@ -126,7 +126,8 @@ namespace UnrealMcp
 			|| ToolName == TEXT("unreal.project_memory_read")
 			|| ToolName == TEXT("unreal.project_memory_view")
 			|| ToolName == TEXT("unreal.skill_list")
-			|| ToolName == TEXT("unreal.skill_read"))
+			|| ToolName == TEXT("unreal.skill_read")
+			|| ToolName == TEXT("unreal.skill_activity_status"))
 		{
 			Policy.RiskLevel = EToolRiskLevel::ReadOnly;
 			Policy.Reason = TEXT("Read-only inspection, audit, status, memory read, or skill read tool.");
@@ -192,6 +193,11 @@ namespace UnrealMcp
 			|| ToolName == TEXT("unreal.project_memory_edit")
 			|| ToolName == TEXT("unreal.project_memory_delete")
 			|| ToolName == TEXT("unreal.skill_apply")
+			|| ToolName == TEXT("unreal.skill_recording_start")
+			|| ToolName == TEXT("unreal.skill_recording_stop")
+			|| ToolName == TEXT("unreal.skill_distill_from_activity")
+			|| ToolName == TEXT("unreal.skill_save_draft")
+			|| ToolName == TEXT("unreal.skill_promote_draft")
 			|| ToolName == TEXT("unreal.scaffold_mcp_tool"))
 		{
 			Policy.RiskLevel = EToolRiskLevel::Medium;

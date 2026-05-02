@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Async/Async.h"
+#include "Containers/Ticker.h"
 #include "ContentBrowserModule.h"
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -10512,16 +10513,28 @@ private:
 void FUnrealMcpModule::StartupModule()
 {
 	StartServer();
+	SkillActivityTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FUnrealMcpModule::TickSkillActivity), 60.0f);
 	RegisterTabSpawner();
 	UToolMenus::Get()->RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FUnrealMcpModule::RegisterMenus));
 }
 
 void FUnrealMcpModule::ShutdownModule()
 {
+	if (SkillActivityTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(SkillActivityTickerHandle);
+		SkillActivityTickerHandle.Reset();
+	}
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
 	UnregisterTabSpawner();
 	StopServer();
+}
+
+bool FUnrealMcpModule::TickSkillActivity(float DeltaTime)
+{
+	UnrealMcp::TickSkillActivityRecorder();
+	return true;
 }
 
 bool FUnrealMcpModule::StartServer()
@@ -12111,9 +12124,9 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				InputSchema);
 		}
 
-		{
-			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
-			PropertiesObject->SetObjectField(TEXT("skillName"), UnrealMcp::MakeStringProperty(TEXT("Project skill name to apply. Used when skillPath is empty.")));
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("skillName"), UnrealMcp::MakeStringProperty(TEXT("Project skill name to apply. Used when skillPath is empty.")));
 			PropertiesObject->SetObjectField(TEXT("skillPath"), UnrealMcp::MakeStringProperty(TEXT("Project-relative or absolute path to SKILL.md or *.skill.")));
 			PropertiesObject->SetObjectField(TEXT("roots"), UnrealMcp::MakeStringArrayProperty(TEXT("Project-relative skill roots to search by skillName.")));
 			PropertiesObject->SetObjectField(TEXT("task"), UnrealMcp::MakeStringProperty(TEXT("Current task/context this skill should be applied to.")));
@@ -12128,12 +12141,120 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				ToolsArray,
 				TEXT("unreal.skill_apply"),
 				TEXT("Skill Apply"),
-				TEXT("Applies a project-local skill by returning its instructions and optionally recording the application in project memory."),
-				InputSchema);
-		}
+					TEXT("Applies a project-local skill by returning its instructions and optionally recording the application in project memory."),
+					InputSchema);
+			}
 
-		{
-			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("goal"), UnrealMcp::MakeStringProperty(TEXT("Human-readable goal for this activity recording session.")));
+				PropertiesObject->SetObjectField(TEXT("sessionId"), UnrealMcp::MakeStringProperty(TEXT("Optional explicit session id. Defaults to timestamp-guid.")));
+				PropertiesObject->SetObjectField(TEXT("recordIntervalSeconds"), UnrealMcp::MakeNumberProperty(TEXT("Heartbeat interval in seconds. Clamped to 10..3600; default 60."), 60.0));
+				PropertiesObject->SetObjectField(TEXT("reset"), UnrealMcp::MakeBoolProperty(TEXT("Start a new session instead of resuming current state."), true));
+
+				TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+				InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+				UnrealMcp::AddToolDefinition(
+					ToolsArray,
+					TEXT("unreal.skill_recording_start"),
+					TEXT("Skill Recording Start"),
+					TEXT("Starts local high-level activity recording for later skill distillation. Writes JSONL under Saved/UnrealMcp/ActivityLog."),
+					InputSchema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("reason"), UnrealMcp::MakeStringProperty(TEXT("Optional stop reason or session summary.")));
+
+				TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+				InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+				UnrealMcp::AddToolDefinition(
+					ToolsArray,
+					TEXT("unreal.skill_recording_stop"),
+					TEXT("Skill Recording Stop"),
+					TEXT("Stops local activity recording after writing a final recording_stopped event."),
+					InputSchema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("includeRecentEvents"), UnrealMcp::MakeBoolProperty(TEXT("Include recent JSONL events from the active session."), false));
+				PropertiesObject->SetObjectField(TEXT("maxEvents"), UnrealMcp::MakeNumberProperty(TEXT("Maximum recent events to include."), 20.0));
+
+				TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+				InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+				UnrealMcp::AddToolDefinition(
+					ToolsArray,
+					TEXT("unreal.skill_activity_status"),
+					TEXT("Skill Activity Status"),
+					TEXT("Reports the active activity recording session, log paths, draft paths, counters, and optionally recent events."),
+					InputSchema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("sessionId"), UnrealMcp::MakeStringProperty(TEXT("Activity session id to distill. Defaults to current session.")));
+				PropertiesObject->SetObjectField(TEXT("skillName"), UnrealMcp::MakeStringProperty(TEXT("Output skill folder name. Defaults to sanitized title/goal.")));
+				PropertiesObject->SetObjectField(TEXT("title"), UnrealMcp::MakeStringProperty(TEXT("Draft SKILL.md title.")));
+				PropertiesObject->SetObjectField(TEXT("goal"), UnrealMcp::MakeStringProperty(TEXT("Override learned goal text.")));
+				PropertiesObject->SetObjectField(TEXT("writeDraft"), UnrealMcp::MakeBoolProperty(TEXT("Write draft SKILL.md under Saved/UnrealMcp/SkillDrafts."), true));
+				PropertiesObject->SetObjectField(TEXT("includeEvents"), UnrealMcp::MakeBoolProperty(TEXT("Append event summaries to the draft for review."), false));
+				PropertiesObject->SetObjectField(TEXT("overwrite"), UnrealMcp::MakeBoolProperty(TEXT("Overwrite an existing draft when writeDraft=true."), true));
+				PropertiesObject->SetObjectField(TEXT("maxEvents"), UnrealMcp::MakeNumberProperty(TEXT("Maximum JSONL events to distill."), 200.0));
+
+				TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+				InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+				UnrealMcp::AddToolDefinition(
+					ToolsArray,
+					TEXT("unreal.skill_distill_from_activity"),
+					TEXT("Skill Distill From Activity"),
+					TEXT("Summarizes one activity session into a reusable SKILL.md draft and optionally writes it under Saved/UnrealMcp/SkillDrafts."),
+					InputSchema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("skillName"), UnrealMcp::MakeStringProperty(TEXT("Draft skill folder name.")));
+				PropertiesObject->SetObjectField(TEXT("title"), UnrealMcp::MakeStringProperty(TEXT("Draft title used when draftText is empty.")));
+				PropertiesObject->SetObjectField(TEXT("goal"), UnrealMcp::MakeStringProperty(TEXT("Draft goal used when draftText is empty.")));
+				PropertiesObject->SetObjectField(TEXT("summary"), UnrealMcp::MakeStringProperty(TEXT("Draft summary used when draftText is empty.")));
+				PropertiesObject->SetObjectField(TEXT("draftText"), UnrealMcp::MakeStringProperty(TEXT("Complete SKILL.md text to save as a draft.")));
+				PropertiesObject->SetObjectField(TEXT("overwrite"), UnrealMcp::MakeBoolProperty(TEXT("Overwrite an existing draft."), true));
+
+				TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+				InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+				UnrealMcp::AddToolDefinition(
+					ToolsArray,
+					TEXT("unreal.skill_save_draft"),
+					TEXT("Skill Save Draft"),
+					TEXT("Writes or replaces a local skill draft under Saved/UnrealMcp/SkillDrafts without promoting it into project skills."),
+					InputSchema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
+				PropertiesObject->SetObjectField(TEXT("skillName"), UnrealMcp::MakeStringProperty(TEXT("Skill name to promote under Tools/UnrealMcpSkills.")));
+				PropertiesObject->SetObjectField(TEXT("draftPath"), UnrealMcp::MakeStringProperty(TEXT("Optional project-local draft path. Defaults to Saved/UnrealMcp/SkillDrafts/<skillName>/SKILL.md.")));
+				PropertiesObject->SetObjectField(TEXT("overwrite"), UnrealMcp::MakeBoolProperty(TEXT("Overwrite existing promoted skill."), false));
+
+				TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
+				InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);
+
+				UnrealMcp::AddToolDefinition(
+					ToolsArray,
+					TEXT("unreal.skill_promote_draft"),
+					TEXT("Skill Promote Draft"),
+					TEXT("Promotes a reviewed draft into Tools/UnrealMcpSkills/<skillName>/SKILL.md for future Chat skill discovery."),
+					InputSchema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
 			PropertiesObject->SetObjectField(TEXT("toolName"), UnrealMcp::MakeStringProperty(TEXT("Tool name whose scaffold should be applied. Used when scaffoldDir is empty.")));
 			PropertiesObject->SetObjectField(TEXT("scaffoldDir"), UnrealMcp::MakeStringProperty(TEXT("Project-relative or absolute scaffold directory containing generated snippet files.")));
 			PropertiesObject->SetObjectField(TEXT("outputRoot"), UnrealMcp::MakeStringProperty(TEXT("Project-relative scaffold root used with toolName."), TEXT("Tools/UnrealMcpToolScaffolds")));
@@ -12559,6 +12680,19 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 	if (!RegisteredHandlerName.Equals(ToolName, ESearchCase::CaseSensitive))
 	{
 		return ExecuteTool(RegisteredHandlerName, Arguments);
+	}
+
+	{
+		TArray<FString> ArgumentKeys;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Arguments.Values)
+		{
+			ArgumentKeys.Add(Pair.Key);
+		}
+		ArgumentKeys.Sort();
+		TSharedPtr<FJsonObject> ActivityDetails = MakeShared<FJsonObject>();
+		ActivityDetails->SetStringField(TEXT("toolName"), ToolName);
+		ActivityDetails->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
+		UnrealMcp::RecordSkillActivityEvent(TEXT("mcp_tool_call"), FString::Printf(TEXT("Called MCP tool %s."), *ToolName), ActivityDetails);
 	}
 
 	UEditorAssetSubsystem* EditorAssetSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
@@ -16423,13 +16557,43 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 			return UnrealMcp::SkillRead(Arguments);
 		}
 
-		if (ToolName == TEXT("unreal.skill_apply"))
-		{
-			return UnrealMcp::SkillApply(Arguments);
-		}
+			if (ToolName == TEXT("unreal.skill_apply"))
+			{
+				return UnrealMcp::SkillApply(Arguments);
+			}
 
-		if (ToolName == TEXT("unreal.mcp_apply_scaffold"))
-		{
+			if (ToolName == TEXT("unreal.skill_recording_start"))
+			{
+				return UnrealMcp::SkillRecordingStart(Arguments);
+			}
+
+			if (ToolName == TEXT("unreal.skill_recording_stop"))
+			{
+				return UnrealMcp::SkillRecordingStop(Arguments);
+			}
+
+			if (ToolName == TEXT("unreal.skill_activity_status"))
+			{
+				return UnrealMcp::SkillActivityStatus(Arguments);
+			}
+
+			if (ToolName == TEXT("unreal.skill_distill_from_activity"))
+			{
+				return UnrealMcp::SkillDistillFromActivity(Arguments);
+			}
+
+			if (ToolName == TEXT("unreal.skill_save_draft"))
+			{
+				return UnrealMcp::SkillSaveDraft(Arguments);
+			}
+
+			if (ToolName == TEXT("unreal.skill_promote_draft"))
+			{
+				return UnrealMcp::SkillPromoteDraft(Arguments);
+			}
+
+			if (ToolName == TEXT("unreal.mcp_apply_scaffold"))
+			{
 			if (UnrealMcp::IsEditorPlaying())
 			{
 				return UnrealMcp::MakePieBlockedResult(ToolName);
@@ -17538,6 +17702,13 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleToolsCall(const TSharedP
 	const TSharedPtr<FJsonObject> EmptyArguments = UnrealMcp::MakeEmptyObject();
 	const FJsonObject& Arguments = ArgumentsObject ? **ArgumentsObject : *EmptyArguments;
 	const FUnrealMcpExecutionResult Result = ExecuteTool(ToolName, Arguments);
+	{
+		TSharedPtr<FJsonObject> ActivityDetails = MakeShared<FJsonObject>();
+		ActivityDetails->SetStringField(TEXT("toolName"), ToolName);
+		ActivityDetails->SetBoolField(TEXT("isError"), Result.bIsError);
+		ActivityDetails->SetStringField(TEXT("textPreview"), Result.Text.Left(1000));
+		UnrealMcp::RecordSkillActivityEvent(TEXT("mcp_tool_result"), FString::Printf(TEXT("MCP tool %s %s."), *ToolName, Result.bIsError ? TEXT("failed") : TEXT("completed")), ActivityDetails);
+	}
 
 	return MakeToolResult(Id, Result.Text, Result.StructuredContent, Result.bIsError);
 }
