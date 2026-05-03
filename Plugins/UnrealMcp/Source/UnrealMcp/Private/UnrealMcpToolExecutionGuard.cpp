@@ -1,6 +1,7 @@
 #include "UnrealMcpToolExecutionGuard.h"
 
 #include "UnrealMcpModule.h"
+#include "UnrealMcpToolOutcomeVerifiers.h"
 #include "UnrealMcpToolRegistry.h"
 
 #include "Dom/JsonObject.h"
@@ -147,7 +148,35 @@ namespace UnrealMcp
 		}
 
 		Result.StructuredContent->SetObjectField(TEXT("policy"), MakeToolPolicyObject(RequestedToolName));
-		Result.StructuredContent->SetObjectField(TEXT("preflight"), MakePreflightObject(RequestedToolName, Arguments, Policy));
-		Result.StructuredContent->SetObjectField(TEXT("postcheck"), MakePostcheckObject(RequestedToolName, Result, Policy));
+
+		TSharedPtr<FJsonObject> Preflight = MakePreflightObject(RequestedToolName, Arguments, Policy);
+		if (TSharedPtr<FJsonObject> BlueprintPreflight = BuildBlueprintToolPreflight(RequestedToolName, Arguments, Preflight))
+		{
+			Preflight = BlueprintPreflight;
+		}
+		else if (TSharedPtr<FJsonObject> WidgetPreflight = BuildWidgetToolPreflight(RequestedToolName, Arguments, Preflight))
+		{
+			Preflight = WidgetPreflight;
+		}
+		else if (TSharedPtr<FJsonObject> ActorPreflight = BuildActorToolPreflight(RequestedToolName, Arguments, Preflight))
+		{
+			Preflight = ActorPreflight;
+		}
+		Result.StructuredContent->SetObjectField(TEXT("preflight"), Preflight);
+
+		TSharedPtr<FJsonObject> Postcheck = VerifyBlueprintToolOutcome(RequestedToolName, Arguments, Result);
+		if (!Postcheck.IsValid())
+		{
+			Postcheck = VerifyWidgetToolOutcome(RequestedToolName, Arguments, Result);
+		}
+		if (!Postcheck.IsValid())
+		{
+			Postcheck = VerifyActorToolOutcome(RequestedToolName, Arguments, Result);
+		}
+		if (!Postcheck.IsValid())
+		{
+			Postcheck = MakePostcheckObject(RequestedToolName, Result, Policy);
+		}
+		Result.StructuredContent->SetObjectField(TEXT("postcheck"), Postcheck);
 	}
 }

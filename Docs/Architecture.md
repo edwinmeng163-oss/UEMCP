@@ -9,6 +9,7 @@ Core layers:
 - `FUnrealMcpModule`: module startup, HTTP routing, MCP protocol handling, Chat command dispatch, and current tool execution.
 - Tool helpers in `UnrealMcpModule.cpp`: editor, actor, Blueprint, widget, scaffold, self-extension, memory, skill, build, and test logic.
 - `UnrealMcpToolRegistry`: explicit metadata for visibility, handler aliases, risk policy, owners, docs, dry-run support, and test coverage.
+- `UnrealMcpToolExecutionGuard` plus `UnrealMcp*OutcomeVerifier`: shared execution checks with category-specific state verification for Blueprint, Widget, and Actor tools.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
 - `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
@@ -32,6 +33,7 @@ Recommended split:
 
 - `Private/Core`: MCP protocol helpers, JSON-RPC response helpers, schema utilities.
 - `Private/ToolRegistry`: tool metadata, visibility, handler aliases, policy metadata.
+- `Private/Execution`: shared execution guard plus category-specific preflight/postcheck verifiers.
 - `Private/Tools/SelfExtension`: self-extension workbench, pipeline status, MCP test execution, and extension pipeline helpers. The first split moved `unreal.mcp_workbench_status`, `unreal.mcp_pipeline_status`, `unreal.mcp_run_tool_test`, `unreal.mcp_run_test_suite`, and `unreal.mcp_extension_pipeline` into `UnrealMcpSelfExtensionTools.cpp`.
 - `Private/Tools/Editor`: status, logs, maps, assets, PIE, console, Python.
 - `Private/Tools/Actors`: actor selection, transforms, spawning, layout, batch edits.
@@ -85,3 +87,13 @@ Local runtime state remains under `Saved/UnrealMcp` and is ignored by Git.
 Team-shared planning and policy state should live under `Docs/` or a future `.unrealmcp/` directory so it can be reviewed and versioned.
 
 Activity recording is intentionally local-first: JSONL events, distilled drafts, build logs, and transient test output stay under `Saved/UnrealMcp`. A draft only becomes team-shared when `unreal.skill_promote_draft` writes it into `Tools/UnrealMcpSkills`.
+
+## Execution Verification
+
+Write-capable tools receive structured execution guard metadata:
+
+- `policy`: explicit ToolRegistry risk and side-effect metadata.
+- `preflight`: expected mutation areas plus category-specific readiness evidence when available.
+- `postcheck`: generic success metadata or category-specific state verification when available.
+
+Blueprint verifiers load the target Blueprint, inspect function/event graphs, member variables, node GUIDs, pin links, and pin defaults. Widget verifiers load the Widget Blueprint and inspect the WidgetTree, variable exposure, slots, and event binding evidence. Actor verifiers inspect the current editor world, selection state, spawned actors, reported transforms, and static mesh assignments.

@@ -56,6 +56,10 @@ Self-extension tools should preserve these rules:
 - Test suite after restart.
 - Rollback path if build or test fails.
 
+## Tool Outcome Verification
+
+Write-capable tools attach structured `preflight` and `postcheck` results. Generic checks come from ToolRegistry metadata. Blueprint, Widget, and Actor tools additionally inspect real editor state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, or mesh assignment actually exists as expected."
+
 ## Remaining Hardening Work
 
 - Replace heuristic policy classification with explicit reviewed metadata for every tool.
