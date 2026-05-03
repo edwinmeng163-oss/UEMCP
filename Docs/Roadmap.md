@@ -23,16 +23,18 @@ The goal is not only to let AI call existing editor tools. The goal is to let AI
 - AI-facing tool schemas are validated through `unreal.mcp_validate_tool_schema`.
 - Self-extension is orchestrated by `unreal.mcp_extension_pipeline`.
 - Build/test handoff is supported by project memory and supervisor scripts.
-- Legacy flexible-schema actor tools are hidden from AI-facing `tools/list` by ToolRegistry metadata.
+- Legacy flexible-schema actor tools are hidden from AI-facing `tools/list` by explicit ToolRegistry metadata.
+- Tool policy is versioned in `Tools/UnrealMcpToolRegistry/tools.json` and mirrored into plugin resources for plugin-only installs.
+- Write/build/process tools now receive generic preflight/postcheck metadata in their structured tool result.
 - `unreal.mcp_workbench_status` provides a read-only dashboard summary for the self-extension system.
 
 ## Near-Term Priorities
 
-1. Finish ToolRegistry adoption.
+1. Replace the remaining broad audit heuristics with per-tool registry assertions.
 2. Split the large module into category-specific tool files.
-3. Add versioned test fixtures under source control.
-4. Add policy metadata for high-risk tools.
-5. Add a Workbench UI panel for status, audit, build/test, rollback, memory, and skills.
+3. Add stronger tool-specific postcheck verifiers for Blueprint, Widget, actor, and self-extension writes.
+4. Promote category test fixtures from smoke coverage to CI-ready disposable-project suites.
+5. Add Workbench UI controls for preflight review, postcheck evidence, and registry gaps.
 
 ## Medium-Term Priorities
 

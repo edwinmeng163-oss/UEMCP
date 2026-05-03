@@ -8,11 +8,12 @@ Core layers:
 
 - `FUnrealMcpModule`: module startup, HTTP routing, MCP protocol handling, Chat command dispatch, and current tool execution.
 - Tool helpers in `UnrealMcpModule.cpp`: editor, actor, Blueprint, widget, scaffold, self-extension, memory, skill, build, and test logic.
-- `UnrealMcpToolRegistry`: lightweight metadata for visibility, handler aliases, and migration status.
+- `UnrealMcpToolRegistry`: explicit metadata for visibility, handler aliases, risk policy, owners, docs, dry-run support, and test coverage.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
 - `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
 - `Schemas/UnrealMcpExtensionManifest.schema.json`: versioned contract for source apply manifests.
+- `Schemas/UnrealMcpToolRegistry.schema.json`: versioned contract for explicit tool metadata under `Tools/UnrealMcpToolRegistry/tools.json`.
 - `Saved/UnrealMcp`: local runtime state, memory, manifests, backups, generated tests, and logs.
 
 ## Editor UI Surfaces
@@ -44,18 +45,24 @@ Recommended split:
 
 ## ToolRegistry Role
 
-ToolRegistry is the migration bridge. It should eventually become the single place to answer:
+ToolRegistry is now the single metadata source for:
 
 - Is this tool AI-facing?
 - Which handler executes it?
 - Which category owns it?
 - Is it read-only or write-capable?
-- Does it require a lock, build, restart, or external process?
+- Does it support dry run, preflight, or postcheck?
+- Does it require a lock, build, restart, project memory, or external process?
+- Which owner/docs/test coverage are attached to it?
 - Is it deprecated or legacy-hidden?
 
-For now it handles legacy-hidden schema-incompatible tools and fixed-schema handler aliases.
+The registry is loaded from `Tools/UnrealMcpToolRegistry/tools.json` when present,
+then from the plugin fallback at `Plugins/UnrealMcp/Resources/ToolRegistry/tools.json`.
+If neither file is available, the plugin falls back to a tiny built-in compatibility
+registry and treats unregistered tools conservatively.
 
-It also provides first-pass policy metadata for every visible tool. The policy object is attached to `tools/list` entries and reused by audit/workbench status output:
+The policy object is attached to `tools/list` entries and reused by audit/workbench
+status output:
 
 - `riskLevel`
 - `requiresWrite`
@@ -64,8 +71,12 @@ It also provides first-pass policy metadata for every visible tool. The policy o
 - `requiresRestart`
 - `requiresProjectMemory`
 - `requiresLock`
-
-Future work should replace broad heuristics with explicit per-tool ownership metadata.
+- `dryRunSupport`
+- `preflightSupport`
+- `postcheckSupport`
+- `testCoverage`
+- `owner`
+- `docsPath`
 
 ## Data and State
 

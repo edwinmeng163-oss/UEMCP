@@ -1,0 +1,20 @@
+{
+  "name": "widget_set_property_missing_required",
+  "description": "Widget property edit missing required widget/asset identifiers should fail safely.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 203,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.widget_set_property",
+      "arguments": {
+        "propertyName": "Text",
+        "value": "Hello"
+      }
+    }
+  }
+}

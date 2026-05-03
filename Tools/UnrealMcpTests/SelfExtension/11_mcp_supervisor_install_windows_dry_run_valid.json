@@ -1,0 +1,24 @@
+{
+  "name": "mcp_supervisor_install_windows_dry_run_valid",
+  "description": "Windows supervisor launcher dry-run validates PowerShell path handling without writing launcher files.",
+  "category": "windows_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 402,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_supervisor_install",
+      "arguments": {
+        "platform": "windows",
+        "outputDir": "Tools/UnrealMcpSupervisor",
+        "endpointUrl": "http://127.0.0.1:8765/mcp",
+        "supervisorLogDir": "Saved/UnrealMcp/SupervisorLogs",
+        "dryRun": true,
+        "skipLock": true
+      }
+    }
+  }
+}

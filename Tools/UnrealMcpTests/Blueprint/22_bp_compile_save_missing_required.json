@@ -1,0 +1,19 @@
+{
+  "name": "bp_compile_save_missing_required",
+  "description": "Blueprint compile/save missing path should fail safely.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 104,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_compile_save",
+      "arguments": {
+        "savePackage": false
+      }
+    }
+  }
+}

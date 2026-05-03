@@ -2,56 +2,234 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Interfaces/IPluginManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace UnrealMcp
 {
+	namespace
+	{
+		struct FLoadedToolRegistry
+		{
+			TArray<FToolRegistryEntry> Entries;
+			FString SourcePath;
+			bool bLoadedExplicitRegistry = false;
+		};
+
+		EToolExposure ParseExposure(const FString& Value)
+		{
+			return Value.Equals(TEXT("legacy_hidden"), ESearchCase::IgnoreCase)
+				? EToolExposure::LegacyHidden
+				: EToolExposure::Visible;
+		}
+
+		EToolRiskLevel ParseRiskLevel(const FString& Value)
+		{
+			if (Value.Equals(TEXT("read_only"), ESearchCase::IgnoreCase))
+			{
+				return EToolRiskLevel::ReadOnly;
+			}
+			if (Value.Equals(TEXT("medium"), ESearchCase::IgnoreCase))
+			{
+				return EToolRiskLevel::Medium;
+			}
+			if (Value.Equals(TEXT("high"), ESearchCase::IgnoreCase))
+			{
+				return EToolRiskLevel::High;
+			}
+			if (Value.Equals(TEXT("critical"), ESearchCase::IgnoreCase))
+			{
+				return EToolRiskLevel::Critical;
+			}
+			return EToolRiskLevel::Low;
+		}
+
+		FString GetStringFieldOrDefault(const TSharedPtr<FJsonObject>& Object, const FString& FieldName, const FString& DefaultValue = FString())
+		{
+			FString Value;
+			return Object.IsValid() && Object->TryGetStringField(FieldName, Value) ? Value : DefaultValue;
+		}
+
+		bool GetBoolFieldOrDefault(const TSharedPtr<FJsonObject>& Object, const FString& FieldName, bool bDefaultValue = false)
+		{
+			bool bValue = bDefaultValue;
+			if (Object.IsValid())
+			{
+				Object->TryGetBoolField(FieldName, bValue);
+			}
+			return bValue;
+		}
+
+		FToolPolicy MakeBuiltInPolicy(EToolRiskLevel RiskLevel, const FString& Reason)
+		{
+			FToolPolicy Policy;
+			Policy.RiskLevel = RiskLevel;
+			Policy.Reason = Reason;
+			Policy.TestCoverage = TEXT("missing");
+			Policy.Owner = TEXT("UEvolve Core");
+			Policy.DocsPath = TEXT("README.md#tool-coverage");
+			return Policy;
+		}
+
+		FToolRegistryEntry MakeBuiltInEntry(
+			const FString& Name,
+			const FString& Category,
+			const FString& HandlerName,
+			EToolExposure Exposure,
+			const FString& Notes,
+			const FToolPolicy& Policy)
+		{
+			FToolRegistryEntry Entry;
+			Entry.Name = Name;
+			Entry.Category = Category;
+			Entry.HandlerName = HandlerName.IsEmpty() ? Name : HandlerName;
+			Entry.Exposure = Exposure;
+			Entry.Notes = Notes;
+			Entry.Policy = Policy;
+			Entry.bLoadedFromExplicitRegistry = false;
+			return Entry;
+		}
+
+		TArray<FToolRegistryEntry> MakeBuiltInFallbackEntries()
+		{
+			FToolPolicy LegacyPolicy = MakeBuiltInPolicy(EToolRiskLevel::Medium, TEXT("Built-in fallback for legacy flexible-schema compatibility tool."));
+			LegacyPolicy.bRequiresWrite = true;
+
+			FToolPolicy AliasPolicy = MakeBuiltInPolicy(EToolRiskLevel::Medium, TEXT("Built-in fallback for fixed-schema actor spawn wrapper."));
+			AliasPolicy.bRequiresWrite = true;
+
+			FToolPolicy WorkbenchPolicy = MakeBuiltInPolicy(EToolRiskLevel::ReadOnly, TEXT("Built-in fallback for read-only self-extension workbench health summary."));
+
+			return {
+				MakeBuiltInEntry(TEXT("unreal.batch_set_actor_properties"), TEXT("actors"), TEXT("unreal.batch_set_actor_properties"), EToolExposure::LegacyHidden, TEXT("Legacy flexible property map uses additionalProperties=true; prefer fixed-schema batch actor tools."), LegacyPolicy),
+				MakeBuiltInEntry(TEXT("unreal.spawn_actor"), TEXT("actors"), TEXT("unreal.spawn_actor"), EToolExposure::LegacyHidden, TEXT("Legacy spawn tool supports freeform property overrides; prefer unreal.spawn_actor_basic or unreal.spawn_static_mesh_actor."), LegacyPolicy),
+				MakeBuiltInEntry(TEXT("unreal.spawn_actor_batch"), TEXT("actors"), TEXT("unreal.spawn_actor_batch"), EToolExposure::LegacyHidden, TEXT("Legacy batch spawn supports freeform item objects; prefer unreal.spawn_actor_batch_basic."), LegacyPolicy),
+				MakeBuiltInEntry(TEXT("unreal.spawn_actor_basic"), TEXT("actors"), TEXT("unreal.spawn_actor"), EToolExposure::Visible, TEXT("AI-facing fixed-schema wrapper routed to the legacy spawn handler."), AliasPolicy),
+				MakeBuiltInEntry(TEXT("unreal.spawn_actor_batch_basic"), TEXT("actors"), TEXT("unreal.spawn_actor_batch"), EToolExposure::Visible, TEXT("AI-facing fixed-schema wrapper routed to the legacy batch spawn handler."), AliasPolicy),
+				MakeBuiltInEntry(TEXT("unreal.mcp_workbench_status"), TEXT("self-extension"), TEXT("unreal.mcp_workbench_status"), EToolExposure::Visible, TEXT("Read-only self-extension workbench health summary."), WorkbenchPolicy)
+			};
+		}
+
+		void AddRegistryCandidatePaths(TArray<FString>& OutPaths)
+		{
+			OutPaths.Add(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpToolRegistry/tools.json"))));
+
+			const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMcp"));
+			if (Plugin.IsValid())
+			{
+				OutPaths.Add(FPaths::ConvertRelativePathToFull(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources/ToolRegistry/tools.json"))));
+			}
+		}
+
+		bool LoadRegistryEntriesFromPath(const FString& RegistryPath, TArray<FToolRegistryEntry>& OutEntries)
+		{
+			FString JsonText;
+			if (!FFileHelper::LoadFileToString(JsonText, *RegistryPath))
+			{
+				return false;
+			}
+
+			TSharedPtr<FJsonObject> RootObject;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+			if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+			{
+				return false;
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* ToolValues = nullptr;
+			if (!RootObject->TryGetArrayField(TEXT("tools"), ToolValues) || ToolValues == nullptr)
+			{
+				return false;
+			}
+
+			TArray<FToolRegistryEntry> LoadedEntries;
+			for (const TSharedPtr<FJsonValue>& ToolValue : *ToolValues)
+			{
+				if (!ToolValue.IsValid() || ToolValue->Type != EJson::Object || !ToolValue->AsObject().IsValid())
+				{
+					continue;
+				}
+
+				const TSharedPtr<FJsonObject> ToolObject = ToolValue->AsObject();
+				const FString Name = GetStringFieldOrDefault(ToolObject, TEXT("name")).TrimStartAndEnd();
+				if (Name.IsEmpty())
+				{
+					continue;
+				}
+
+				FToolRegistryEntry Entry;
+				Entry.Name = Name;
+				Entry.Category = GetStringFieldOrDefault(ToolObject, TEXT("category"), TEXT("uncategorized"));
+				Entry.HandlerName = GetStringFieldOrDefault(ToolObject, TEXT("handlerName"), Name);
+				Entry.Exposure = ParseExposure(GetStringFieldOrDefault(ToolObject, TEXT("exposure"), TEXT("visible")));
+				Entry.Notes = GetStringFieldOrDefault(ToolObject, TEXT("notes"));
+				Entry.bLoadedFromExplicitRegistry = true;
+
+				Entry.Policy.RiskLevel = ParseRiskLevel(GetStringFieldOrDefault(ToolObject, TEXT("riskLevel"), TEXT("low")));
+				Entry.Policy.bRequiresWrite = GetBoolFieldOrDefault(ToolObject, TEXT("requiresWrite"));
+				Entry.Policy.bRequiresBuild = GetBoolFieldOrDefault(ToolObject, TEXT("requiresBuild"));
+				Entry.Policy.bRequiresExternalProcess = GetBoolFieldOrDefault(ToolObject, TEXT("requiresExternalProcess"));
+				Entry.Policy.bRequiresRestart = GetBoolFieldOrDefault(ToolObject, TEXT("requiresRestart"));
+				Entry.Policy.bRequiresProjectMemory = GetBoolFieldOrDefault(ToolObject, TEXT("requiresProjectMemory"));
+				Entry.Policy.bRequiresLock = GetBoolFieldOrDefault(ToolObject, TEXT("requiresLock"));
+				Entry.Policy.bDryRunSupport = GetBoolFieldOrDefault(ToolObject, TEXT("dryRunSupport"));
+				Entry.Policy.bPreflightSupport = GetBoolFieldOrDefault(ToolObject, TEXT("preflightSupport"));
+				Entry.Policy.bPostcheckSupport = GetBoolFieldOrDefault(ToolObject, TEXT("postcheckSupport"));
+				Entry.Policy.TestCoverage = GetStringFieldOrDefault(ToolObject, TEXT("testCoverage"), TEXT("missing"));
+				Entry.Policy.Owner = GetStringFieldOrDefault(ToolObject, TEXT("owner"), TEXT("Unowned"));
+				Entry.Policy.DocsPath = GetStringFieldOrDefault(ToolObject, TEXT("docsPath"));
+				Entry.Policy.Reason = GetStringFieldOrDefault(ToolObject, TEXT("reason"), TEXT("Explicit registry policy."));
+
+				LoadedEntries.Add(MoveTemp(Entry));
+			}
+
+			if (LoadedEntries.Num() == 0)
+			{
+				return false;
+			}
+
+			OutEntries = MoveTemp(LoadedEntries);
+			return true;
+		}
+
+		FLoadedToolRegistry LoadToolRegistry()
+		{
+			TArray<FString> CandidatePaths;
+			AddRegistryCandidatePaths(CandidatePaths);
+
+			for (const FString& CandidatePath : CandidatePaths)
+			{
+				TArray<FToolRegistryEntry> LoadedEntries;
+				if (LoadRegistryEntriesFromPath(CandidatePath, LoadedEntries))
+				{
+					FLoadedToolRegistry Registry;
+					Registry.Entries = MoveTemp(LoadedEntries);
+					Registry.SourcePath = CandidatePath;
+					Registry.bLoadedExplicitRegistry = true;
+					return Registry;
+				}
+			}
+
+			FLoadedToolRegistry Registry;
+			Registry.Entries = MakeBuiltInFallbackEntries();
+			Registry.SourcePath = TEXT("<built-in fallback>");
+			Registry.bLoadedExplicitRegistry = false;
+			return Registry;
+		}
+
+		const FLoadedToolRegistry& GetLoadedToolRegistry()
+		{
+			static const FLoadedToolRegistry Registry = LoadToolRegistry();
+			return Registry;
+		}
+	}
+
 	const TArray<FToolRegistryEntry>& GetToolRegistryEntries()
 	{
-		static const TArray<FToolRegistryEntry> Entries = {
-			{
-				TEXT("unreal.batch_set_actor_properties"),
-				TEXT("actors"),
-				TEXT("unreal.batch_set_actor_properties"),
-				EToolExposure::LegacyHidden,
-				TEXT("Legacy flexible property map uses additionalProperties=true; prefer fixed-schema batch actor tools.")
-			},
-			{
-				TEXT("unreal.spawn_actor"),
-				TEXT("actors"),
-				TEXT("unreal.spawn_actor"),
-				EToolExposure::LegacyHidden,
-				TEXT("Legacy spawn tool supports freeform property overrides; prefer unreal.spawn_actor_basic or unreal.spawn_static_mesh_actor.")
-			},
-			{
-				TEXT("unreal.spawn_actor_batch"),
-				TEXT("actors"),
-				TEXT("unreal.spawn_actor_batch"),
-				EToolExposure::LegacyHidden,
-				TEXT("Legacy batch spawn supports freeform item objects; prefer unreal.spawn_actor_batch_basic.")
-			},
-			{
-				TEXT("unreal.spawn_actor_basic"),
-				TEXT("actors"),
-				TEXT("unreal.spawn_actor"),
-				EToolExposure::Visible,
-				TEXT("AI-facing fixed-schema wrapper routed to the legacy spawn handler.")
-			},
-			{
-				TEXT("unreal.spawn_actor_batch_basic"),
-				TEXT("actors"),
-				TEXT("unreal.spawn_actor_batch"),
-				EToolExposure::Visible,
-				TEXT("AI-facing fixed-schema wrapper routed to the legacy batch spawn handler.")
-			},
-			{
-				TEXT("unreal.mcp_workbench_status"),
-				TEXT("mcp-workbench"),
-				TEXT("unreal.mcp_workbench_status"),
-				EToolExposure::Visible,
-				TEXT("Read-only self-extension workbench health summary.")
-			}
-		};
-		return Entries;
+		return GetLoadedToolRegistry().Entries;
 	}
 
 	const FToolRegistryEntry* FindToolRegistryEntry(const FString& ToolName)
@@ -64,6 +242,20 @@ namespace UnrealMcp
 			}
 		}
 		return nullptr;
+	}
+
+	bool HasExplicitToolRegistryEntry(const FString& ToolName)
+	{
+		if (const FToolRegistryEntry* Entry = FindToolRegistryEntry(ToolName))
+		{
+			return Entry->bLoadedFromExplicitRegistry;
+		}
+		return false;
+	}
+
+	FString GetToolRegistrySourcePath()
+	{
+		return GetLoadedToolRegistry().SourcePath;
 	}
 
 	bool ShouldExposeToolToAi(const FString& ToolName)
@@ -108,151 +300,18 @@ namespace UnrealMcp
 
 	FToolPolicy GetToolPolicy(const FString& ToolName)
 	{
+		if (const FToolRegistryEntry* Entry = FindToolRegistryEntry(ToolName))
+		{
+			return Entry->Policy;
+		}
+
 		FToolPolicy Policy;
-		Policy.Reason = TEXT("Default low-risk MCP tool.");
-
-		if (ToolName.StartsWith(TEXT("unreal.list_"))
-			|| ToolName == TEXT("unreal.editor_status")
-			|| ToolName == TEXT("unreal.tail_log")
-			|| ToolName == TEXT("unreal.map_check")
-			|| ToolName == TEXT("unreal.mcp_validate_tool_schema")
-			|| ToolName == TEXT("unreal.mcp_tool_audit")
-			|| ToolName == TEXT("unreal.mcp_workbench_status")
-			|| ToolName == TEXT("unreal.mcp_pipeline_status")
-			|| ToolName == TEXT("unreal.mcp_diff_last_apply")
-			|| ToolName == TEXT("unreal.mcp_list_scaffolds")
-			|| ToolName == TEXT("unreal.mcp_inspect_scaffold")
-			|| ToolName == TEXT("unreal.mcp_validate_cpp_snippet")
-			|| ToolName == TEXT("unreal.project_memory_read")
-			|| ToolName == TEXT("unreal.project_memory_view")
-			|| ToolName == TEXT("unreal.skill_list")
-			|| ToolName == TEXT("unreal.skill_read")
-			|| ToolName == TEXT("unreal.skill_activity_status"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::ReadOnly;
-			Policy.Reason = TEXT("Read-only inspection, audit, status, memory read, or skill read tool.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.execute_console_command")
-			|| ToolName == TEXT("unreal.execute_python")
-			|| ToolName == TEXT("unreal.execute_python_file"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::Critical;
-			Policy.bRequiresWrite = true;
-			Policy.bRequiresExternalProcess = ToolName == TEXT("unreal.execute_python_file");
-			Policy.Reason = TEXT("Dynamic code or console execution can mutate editor/project state.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.clear_level_environment"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::High;
-			Policy.bRequiresWrite = true;
-			Policy.Reason = TEXT("Destructively clears level actors from the current editor world.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.mcp_build_editor"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::High;
-			Policy.bRequiresBuild = true;
-			Policy.bRequiresExternalProcess = true;
-			Policy.bRequiresProjectMemory = true;
-			Policy.bRequiresLock = true;
-			Policy.Reason = TEXT("Runs Unreal Build Tool and writes build handoff state.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.mcp_extension_pipeline"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::Critical;
-			Policy.bRequiresWrite = true;
-			Policy.bRequiresBuild = true;
-			Policy.bRequiresExternalProcess = true;
-			Policy.bRequiresRestart = true;
-			Policy.bRequiresProjectMemory = true;
-			Policy.bRequiresLock = true;
-			Policy.Reason = TEXT("Orchestrates self-extension source changes, build, restart handoff, and tests.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.mcp_apply_scaffold")
-			|| ToolName == TEXT("unreal.mcp_patch_scaffold_snippet")
-			|| ToolName == TEXT("unreal.mcp_rollback_last_extension")
-			|| ToolName == TEXT("unreal.mcp_rollback_to_manifest")
-			|| ToolName == TEXT("unreal.mcp_backup_project_state")
-			|| ToolName == TEXT("unreal.mcp_clean_test_artifacts")
-			|| ToolName == TEXT("unreal.mcp_supervisor_install"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::High;
-			Policy.bRequiresWrite = true;
-			Policy.bRequiresProjectMemory = ToolName.Contains(TEXT("rollback")) || ToolName.Contains(TEXT("backup"));
-			Policy.bRequiresExternalProcess = ToolName == TEXT("unreal.mcp_supervisor_install");
-			Policy.bRequiresLock = true;
-			Policy.Reason = TEXT("Writes source, snippets, backups, generated artifacts, supervisor launchers, or rollback state.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.skill_promote_draft"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::High;
-			Policy.bRequiresWrite = true;
-			Policy.bRequiresLock = true;
-			Policy.Reason = TEXT("Promotes reviewed skill drafts into versioned Tools/UnrealMcpSkills and may overwrite team-shared skill files.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.mcp_generate_tests")
-			|| ToolName == TEXT("unreal.mcp_run_tool_test")
-			|| ToolName == TEXT("unreal.mcp_run_test_suite")
-			|| ToolName == TEXT("unreal.project_memory_write")
-			|| ToolName == TEXT("unreal.project_memory_edit")
-			|| ToolName == TEXT("unreal.project_memory_delete")
-			|| ToolName == TEXT("unreal.skill_apply")
-			|| ToolName == TEXT("unreal.skill_recording_start")
-			|| ToolName == TEXT("unreal.skill_recording_stop")
-			|| ToolName == TEXT("unreal.skill_distill_from_activity")
-			|| ToolName == TEXT("unreal.skill_save_draft")
-			|| ToolName == TEXT("unreal.scaffold_mcp_tool"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::Medium;
-			Policy.bRequiresWrite = true;
-			Policy.bRequiresProjectMemory = ToolName.Contains(TEXT("project_memory")) || ToolName == TEXT("unreal.skill_apply") || ToolName.Contains(TEXT("run_"));
-			Policy.bRequiresLock = ToolName.StartsWith(TEXT("unreal.mcp_"));
-			Policy.Reason = TEXT("Writes generated tests, scaffold files, project memory, or test result state.");
-			return Policy;
-		}
-
-		if (ToolName == TEXT("unreal.start_pie")
-			|| ToolName == TEXT("unreal.stop_pie")
-			|| ToolName == TEXT("unreal.open_map")
-			|| ToolName == TEXT("unreal.open_asset")
-			|| ToolName == TEXT("unreal.sync_content_browser"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::Low;
-			Policy.Reason = TEXT("Changes editor session state without directly writing source or assets.");
-			return Policy;
-		}
-
-		if (ToolName.Contains(TEXT("spawn"))
-			|| ToolName.Contains(TEXT("set_actor"))
-			|| ToolName.Contains(TEXT("layout_"))
-			|| ToolName.Contains(TEXT("destroy_"))
-			|| ToolName.Contains(TEXT("compile_"))
-			|| ToolName.Contains(TEXT("create_blueprint"))
-			|| ToolName.Contains(TEXT("bp_"))
-			|| ToolName.Contains(TEXT("widget_"))
-			|| ToolName.Contains(TEXT("scaffold_"))
-			|| ToolName == TEXT("unreal.save_dirty_packages")
-			|| ToolName == TEXT("unreal.select_actors"))
-		{
-			Policy.RiskLevel = EToolRiskLevel::Medium;
-			Policy.bRequiresWrite = !ToolName.Contains(TEXT("compile_")) && ToolName != TEXT("unreal.select_actors");
-			Policy.Reason = TEXT("Edits or compiles Unreal editor assets, actors, Blueprint graphs, widgets, or generated gameplay scaffolds.");
-			return Policy;
-		}
-
+		Policy.RiskLevel = EToolRiskLevel::Medium;
+		Policy.bRequiresWrite = true;
+		Policy.TestCoverage = TEXT("missing");
+		Policy.Owner = TEXT("Unregistered");
+		Policy.DocsPath = TEXT("");
+		Policy.Reason = TEXT("Tool is missing from the explicit registry; defaulting to conservative medium write risk until Tools/UnrealMcpToolRegistry/tools.json is updated.");
 		return Policy;
 	}
 
@@ -267,7 +326,14 @@ namespace UnrealMcp
 		PolicyObject->SetBoolField(TEXT("requiresRestart"), Policy.bRequiresRestart);
 		PolicyObject->SetBoolField(TEXT("requiresProjectMemory"), Policy.bRequiresProjectMemory);
 		PolicyObject->SetBoolField(TEXT("requiresLock"), Policy.bRequiresLock);
+		PolicyObject->SetBoolField(TEXT("dryRunSupport"), Policy.bDryRunSupport);
+		PolicyObject->SetBoolField(TEXT("preflightSupport"), Policy.bPreflightSupport);
+		PolicyObject->SetBoolField(TEXT("postcheckSupport"), Policy.bPostcheckSupport);
+		PolicyObject->SetStringField(TEXT("testCoverage"), Policy.TestCoverage);
+		PolicyObject->SetStringField(TEXT("owner"), Policy.Owner);
+		PolicyObject->SetStringField(TEXT("docsPath"), Policy.DocsPath);
 		PolicyObject->SetStringField(TEXT("reason"), Policy.Reason);
+		PolicyObject->SetBoolField(TEXT("explicitRegistryEntry"), HasExplicitToolRegistryEntry(ToolName));
 		return PolicyObject;
 	}
 
@@ -281,6 +347,7 @@ namespace UnrealMcp
 		TArray<TSharedPtr<FJsonValue>> EntryValues;
 		TArray<TSharedPtr<FJsonValue>> HiddenValues;
 		TArray<TSharedPtr<FJsonValue>> AliasValues;
+		int32 ExplicitEntryCount = 0;
 
 		for (const FToolRegistryEntry& Entry : GetToolRegistryEntries())
 		{
@@ -290,11 +357,13 @@ namespace UnrealMcp
 			EntryObject->SetStringField(TEXT("handlerName"), Entry.HandlerName.IsEmpty() ? Entry.Name : Entry.HandlerName);
 			EntryObject->SetStringField(TEXT("exposure"), Entry.Exposure == EToolExposure::Visible ? TEXT("visible") : TEXT("legacy_hidden"));
 			EntryObject->SetStringField(TEXT("notes"), Entry.Notes);
+			EntryObject->SetBoolField(TEXT("explicitRegistryEntry"), Entry.bLoadedFromExplicitRegistry);
 			EntryObject->SetObjectField(TEXT("policy"), MakeToolPolicyObject(Entry.Name));
 
 			TSharedPtr<FJsonValue> EntryValue = MakeShared<FJsonValueObject>(EntryObject);
 			EntryValues.Add(EntryValue);
 
+			ExplicitEntryCount += Entry.bLoadedFromExplicitRegistry ? 1 : 0;
 			if (Entry.Exposure == EToolExposure::LegacyHidden)
 			{
 				HiddenValues.Add(EntryValue);
@@ -305,7 +374,9 @@ namespace UnrealMcp
 			}
 		}
 
+		StructuredContent->SetStringField(TEXT("toolRegistrySourcePath"), GetToolRegistrySourcePath());
 		StructuredContent->SetNumberField(TEXT("toolRegistryEntryCount"), GetToolRegistryEntries().Num());
+		StructuredContent->SetNumberField(TEXT("explicitToolRegistryEntryCount"), ExplicitEntryCount);
 		StructuredContent->SetNumberField(TEXT("legacyHiddenToolCount"), HiddenValues.Num());
 		StructuredContent->SetNumberField(TEXT("handlerAliasCount"), AliasValues.Num());
 		StructuredContent->SetArrayField(TEXT("toolRegistryEntries"), EntryValues);

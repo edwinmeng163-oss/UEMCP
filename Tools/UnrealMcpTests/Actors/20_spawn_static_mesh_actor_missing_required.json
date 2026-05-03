@@ -1,0 +1,19 @@
+{
+  "name": "spawn_static_mesh_actor_missing_required",
+  "description": "Static mesh actor spawn missing staticMeshPath should fail safely.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 302,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.spawn_static_mesh_actor",
+      "arguments": {
+        "label": "UEvolve_MissingMesh_Test"
+      }
+    }
+  }
+}

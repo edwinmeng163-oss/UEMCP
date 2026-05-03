@@ -1,0 +1,20 @@
+{
+  "name": "mcp_apply_scaffold_missing_required",
+  "description": "Self-extension apply without toolName/scaffoldDir should fail safely.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 401,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_apply_scaffold",
+      "arguments": {
+        "dryRun": true,
+        "skipLock": true
+      }
+    }
+  }
+}

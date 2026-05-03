@@ -28,6 +28,7 @@ public class UnrealMcp : ModuleRules
 			"JsonUtilities",
 			"Kismet",
 			"KismetCompiler",
+			"Projects",
 			"PythonScriptPlugin",
 			"Settings",
 			"Slate",

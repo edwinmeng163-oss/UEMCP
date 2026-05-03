@@ -1,0 +1,20 @@
+{
+  "name": "widget_add_missing_required",
+  "description": "Widget add missing Widget Blueprint path should fail safely.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 202,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.widget_add",
+      "arguments": {
+        "widgetClass": "TextBlock",
+        "widgetName": "Label"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "mcp_rollback_last_extension_dry_run_valid",
+  "description": "Rollback dry-run should be callable; it may return an error if no manifest exists, so this fixture is list-only by default.",
+  "category": "rollback_manual",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 403,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_rollback_last_extension",
+      "arguments": {
+        "dryRun": true,
+        "skipLock": true
+      }
+    }
+  }
+}

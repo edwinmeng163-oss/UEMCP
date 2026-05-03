@@ -30,6 +30,12 @@ namespace UnrealMcp
 		bool bRequiresRestart = false;
 		bool bRequiresProjectMemory = false;
 		bool bRequiresLock = false;
+		bool bDryRunSupport = false;
+		bool bPreflightSupport = false;
+		bool bPostcheckSupport = false;
+		FString TestCoverage;
+		FString Owner;
+		FString DocsPath;
 		FString Reason;
 	};
 
@@ -40,10 +46,14 @@ namespace UnrealMcp
 		FString HandlerName;
 		EToolExposure Exposure = EToolExposure::Visible;
 		FString Notes;
+		FToolPolicy Policy;
+		bool bLoadedFromExplicitRegistry = false;
 	};
 
 	const TArray<FToolRegistryEntry>& GetToolRegistryEntries();
 	const FToolRegistryEntry* FindToolRegistryEntry(const FString& ToolName);
+	bool HasExplicitToolRegistryEntry(const FString& ToolName);
+	FString GetToolRegistrySourcePath();
 	bool ShouldExposeToolToAi(const FString& ToolName);
 	FString ResolveToolHandlerName(const FString& ToolName);
 	FToolPolicy GetToolPolicy(const FString& ToolName);

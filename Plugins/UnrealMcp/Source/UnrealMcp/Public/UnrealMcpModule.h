@@ -97,6 +97,7 @@ private:
 
 	void AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& ToolsArray) const;
 	FUnrealMcpExecutionResult ExecuteTool(const FString& ToolName, const FJsonObject& Arguments) const;
+	FUnrealMcpExecutionResult ExecuteToolInternal(const FString& ToolName, const FJsonObject& Arguments) const;
 	FUnrealMcpExecutionResult RunMcpToolTest(const FJsonObject& Arguments) const;
 	FUnrealMcpExecutionResult RunMcpTestSuite(const FJsonObject& Arguments) const;
 	FUnrealMcpExecutionResult RunMcpExtensionPipeline(const FJsonObject& Arguments) const;

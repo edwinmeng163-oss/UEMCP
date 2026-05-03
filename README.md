@@ -33,7 +33,7 @@ The repository currently contains:
 - Project-level README and ignore rules suitable for public GitHub hosting.
 - Self-extension safety rails: schema validation, snippet validation, dry-run diffs, backups, build/test handoff, rollback manifests, project memory, and project-local skills.
 - Versioned core MCP test fixtures under `Tools/UnrealMcpTests`.
-- ToolRegistry policy metadata for risk level, write/build/process/restart/memory/lock requirements.
+- Explicit ToolRegistry metadata under `Tools/UnrealMcpToolRegistry/tools.json` for category, handler alias, risk level, write/build/process/restart/memory/lock requirements, dry-run support, owner, docs path, and test coverage.
 
 ## Planning Docs
 
@@ -134,10 +134,10 @@ Unreal MCP currently supports:
   - `unreal.mcp_run_test_suite`
   - `unreal.mcp_extension_pipeline`
   - `unreal.mcp_pipeline_status`
-  - `unreal.mcp_workbench_status`
-  - `unreal.mcp_diff_last_apply`
-  - `unreal.mcp_clean_test_artifacts`
-  - `unreal.mcp_tool_audit`
+- `unreal.mcp_workbench_status`
+- `unreal.mcp_diff_last_apply`
+- `unreal.mcp_clean_test_artifacts`
+- `unreal.mcp_tool_audit`
 - Restart-resilient project memory:
   - `unreal.project_memory_write`
   - `unreal.project_memory_read`
@@ -286,7 +286,8 @@ Build/test handoff note:
 - `unreal.mcp_pipeline_status` summarizes the current extension memory entry, last apply manifest, latest build log, saved test scaffolds, extension backups, and recommended next step.
 - `unreal.mcp_workbench_status` aggregates tool audit health, ToolRegistry legacy-hidden tools, pipeline state, latest build/supervisor artifacts, test scaffold counts, and project memory into one self-extension dashboard response.
 - `Window > Unreal MCP Workbench` provides a thin Slate control panel over existing MCP tools. It can refresh workbench status, run audit, run the versioned core tests, inspect pipeline/lock state, inspect Skill Activity, distill a draft, run promote dry-runs, and copy the last structured result without duplicating backend logic.
-- `tools/list`, `unreal.mcp_tool_audit`, and `unreal.mcp_workbench_status` include per-tool policy metadata such as `riskLevel`, `requiresWrite`, `requiresBuild`, `requiresExternalProcess`, `requiresRestart`, `requiresProjectMemory`, and `requiresLock`.
+- `tools/list`, `unreal.mcp_tool_audit`, and `unreal.mcp_workbench_status` include per-tool policy metadata such as `category`, `handlerName`, `riskLevel`, `requiresWrite`, `requiresBuild`, `requiresExternalProcess`, `requiresRestart`, `requiresProjectMemory`, `requiresLock`, `dryRunSupport`, `preflightSupport`, `postcheckSupport`, `testCoverage`, `owner`, and `docsPath`.
+- Write/build/process tools attach generic `preflight` and `postcheck` metadata to structured results so Chat can show what was expected to change and whether the tool returned success. Tool-specific verifiers are still a follow-up item for stronger proof.
 - Stable core MCP test fixtures live in `Tools/UnrealMcpTests/Core`; runtime-generated test scaffolds stay under ignored `Saved/UnrealMcp`.
 - `unreal.mcp_diff_last_apply` reads `Saved/UnrealMcp/LastExtensionApply.json` and returns a before/after source diff preview from the backup snapshots created by `mcp_apply_scaffold`.
 - `unreal.mcp_clean_test_artifacts` defaults to `dryRun:true` and only previews generated `Saved/UnrealMcp/TestScaffolds`; destructive cleanup must explicitly set `dryRun:false`, and optional filters such as `nameContains` should be used for targeted cleanup.

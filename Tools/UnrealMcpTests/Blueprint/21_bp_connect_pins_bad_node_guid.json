@@ -1,0 +1,24 @@
+{
+  "name": "bp_connect_pins_bad_node_guid",
+  "description": "Blueprint graph bad node guid should fail without mutating assets. Requires a missing test Blueprint path, so this validates error handling.",
+  "category": "error_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 103,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_connect_pins",
+      "arguments": {
+        "blueprintPath": "/Game/UEvolveMcpTests/Blueprint/BP_DoesNotExist",
+        "graphName": "EventGraph",
+        "fromNodeGuid": "not-a-guid",
+        "fromPin": "Then",
+        "toNodeGuid": "also-not-a-guid",
+        "toPin": "Execute"
+      }
+    }
+  }
+}

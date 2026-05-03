@@ -1,0 +1,19 @@
+{
+  "name": "bp_add_variable_missing_required",
+  "description": "Blueprint graph missing required blueprintPath/name should fail safely.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 102,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_add_variable",
+      "arguments": {
+        "pinCategory": "bool"
+      }
+    }
+  }
+}

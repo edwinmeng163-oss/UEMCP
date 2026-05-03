@@ -93,6 +93,7 @@
 #include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpSkillTools.h"
+#include "UnrealMcpToolExecutionGuard.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpWorkbenchPanel.h"
 #include "UObject/Package.h"
@@ -689,6 +690,21 @@ namespace UnrealMcp
 		ToolObject->SetStringField(TEXT("name"), Name);
 		ToolObject->SetStringField(TEXT("title"), Title);
 		ToolObject->SetStringField(TEXT("description"), Description);
+		if (const FToolRegistryEntry* RegistryEntry = FindToolRegistryEntry(Name))
+		{
+			ToolObject->SetStringField(TEXT("category"), RegistryEntry->Category);
+			ToolObject->SetStringField(TEXT("handlerName"), RegistryEntry->HandlerName.IsEmpty() ? Name : RegistryEntry->HandlerName);
+			ToolObject->SetStringField(TEXT("exposure"), RegistryEntry->Exposure == EToolExposure::Visible ? TEXT("visible") : TEXT("legacy_hidden"));
+			ToolObject->SetBoolField(TEXT("explicitRegistryEntry"), RegistryEntry->bLoadedFromExplicitRegistry);
+			ToolObject->SetStringField(TEXT("registryNotes"), RegistryEntry->Notes);
+		}
+		else
+		{
+			ToolObject->SetStringField(TEXT("category"), TEXT("unregistered"));
+			ToolObject->SetStringField(TEXT("handlerName"), Name);
+			ToolObject->SetStringField(TEXT("exposure"), TEXT("visible"));
+			ToolObject->SetBoolField(TEXT("explicitRegistryEntry"), false);
+		}
 		ToolObject->SetObjectField(TEXT("inputSchema"), InputSchema);
 		ToolObject->SetObjectField(TEXT("policy"), MakeToolPolicyObject(Name));
 		ToolsArray.Add(MakeShared<FJsonValueObject>(ToolObject));
@@ -3705,6 +3721,7 @@ namespace UnrealMcp
 			TArray<TSharedPtr<FJsonValue>> ToolReports;
 			TArray<FString> MissingHandlers;
 			TArray<FString> MissingDocs;
+			TArray<FString> MissingRegistryEntries;
 			TArray<FString> IncompatibleSchemas;
 			int32 CompatibleCount = 0;
 			int32 WarningCount = 0;
@@ -3735,11 +3752,14 @@ namespace UnrealMcp
 				ToolObject->TryGetStringField(TEXT("title"), Title);
 				ToolObject->TryGetStringField(TEXT("description"), Description);
 
-				const FString HandlerNeedle = FString::Printf(TEXT("ToolName == TEXT(\"%s\")"), *Name);
+				const FString HandlerName = ResolveToolHandlerName(Name);
+				const FString HandlerNeedle = FString::Printf(TEXT("ToolName == TEXT(\"%s\")"), *HandlerName);
 				const bool bHasHandler = SourceText.Contains(HandlerNeedle, ESearchCase::CaseSensitive);
 				const bool bDocumentedInPluginReadme = PluginReadme.Contains(Name, ESearchCase::CaseSensitive);
 				const bool bDocumentedInRootReadme = RootReadme.Contains(Name, ESearchCase::CaseSensitive);
 				const bool bDocumented = bDocumentedInPluginReadme || bDocumentedInRootReadme;
+				const FToolRegistryEntry* RegistryEntry = FindToolRegistryEntry(Name);
+				const bool bHasExplicitRegistryEntry = RegistryEntry && RegistryEntry->bLoadedFromExplicitRegistry;
 
 				const TSharedPtr<FJsonObject>* SchemaObject = nullptr;
 				TArray<TSharedPtr<FJsonValue>> Issues;
@@ -3772,6 +3792,10 @@ namespace UnrealMcp
 				if (!bDocumented)
 				{
 					MissingDocs.Add(Name);
+				}
+				if (!bHasExplicitRegistryEntry)
+				{
+					MissingRegistryEntries.Add(Name);
 				}
 				if (Issues.Num() > 0)
 				{
@@ -3808,9 +3832,12 @@ namespace UnrealMcp
 
 				TSharedPtr<FJsonObject> ReportObject = MakeShared<FJsonObject>();
 				ReportObject->SetStringField(TEXT("name"), Name);
+				ReportObject->SetStringField(TEXT("handlerName"), HandlerName);
 				ReportObject->SetStringField(TEXT("title"), Title);
 				ReportObject->SetStringField(TEXT("description"), Description);
 				ReportObject->SetBoolField(TEXT("hasHandler"), bHasHandler);
+				ReportObject->SetBoolField(TEXT("hasExplicitRegistryEntry"), bHasExplicitRegistryEntry);
+				ReportObject->SetStringField(TEXT("registryCategory"), RegistryEntry ? RegistryEntry->Category : TEXT(""));
 				ReportObject->SetBoolField(TEXT("documentedInPluginReadme"), bDocumentedInPluginReadme);
 				ReportObject->SetBoolField(TEXT("documentedInRootReadme"), bDocumentedInRootReadme);
 				ReportObject->SetBoolField(TEXT("schemaCompatible"), bCompatible);
@@ -3828,6 +3855,8 @@ namespace UnrealMcp
 			StructuredContent->SetNumberField(TEXT("toolsWithSchemaIssues"), WarningCount);
 			StructuredContent->SetNumberField(TEXT("missingHandlerCount"), MissingHandlers.Num());
 			StructuredContent->SetNumberField(TEXT("missingDocumentationCount"), MissingDocs.Num());
+			StructuredContent->SetNumberField(TEXT("missingRegistryEntryCount"), MissingRegistryEntries.Num());
+			StructuredContent->SetStringField(TEXT("toolRegistrySourcePath"), GetToolRegistrySourcePath());
 			TSharedPtr<FJsonObject> RiskCountsObject = MakeShared<FJsonObject>();
 			RiskCountsObject->SetNumberField(TEXT("readOnly"), ReadOnlyRiskCount);
 			RiskCountsObject->SetNumberField(TEXT("low"), LowRiskCount);
@@ -3856,14 +3885,16 @@ namespace UnrealMcp
 			AddStringArray(StructuredContent, TEXT("schemaIncompatibleTools"), IncompatibleSchemas);
 			AddStringArray(StructuredContent, TEXT("missingHandlerTools"), MissingHandlers);
 			AddStringArray(StructuredContent, TEXT("missingDocumentationTools"), MissingDocs);
+			AddStringArray(StructuredContent, TEXT("missingRegistryEntryTools"), MissingRegistryEntries);
 
 			const FString Text = FString::Printf(
-				TEXT("Audited %d MCP tools. schemaCompatible=%d incompatible=%d missingHandlers=%d missingDocs=%d"),
+				TEXT("Audited %d MCP tools. schemaCompatible=%d incompatible=%d missingHandlers=%d missingDocs=%d missingRegistry=%d"),
 				ToolsArray.Num(),
 				CompatibleCount,
 				IncompatibleSchemas.Num(),
 				MissingHandlers.Num(),
-				MissingDocs.Num());
+				MissingDocs.Num(),
+				MissingRegistryEntries.Num());
 			return MakeExecutionResult(Text, StructuredContent, false);
 		}
 
@@ -12743,29 +12774,30 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolFromEditorUI(const FStrin
 FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName, const FJsonObject& Arguments) const
 {
 	const FString RegisteredHandlerName = UnrealMcp::ResolveToolHandlerName(ToolName);
-	if (!RegisteredHandlerName.Equals(ToolName, ESearchCase::CaseSensitive))
+	const UnrealMcp::FToolPolicy ActivityPolicy = UnrealMcp::GetToolPolicy(ToolName);
+	if (ActivityPolicy.RiskLevel != UnrealMcp::EToolRiskLevel::ReadOnly)
 	{
-		return ExecuteTool(RegisteredHandlerName, Arguments);
-	}
-
-	{
-		const UnrealMcp::FToolPolicy ActivityPolicy = UnrealMcp::GetToolPolicy(ToolName);
-		if (ActivityPolicy.RiskLevel != UnrealMcp::EToolRiskLevel::ReadOnly)
+		TArray<FString> ArgumentKeys;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Arguments.Values)
 		{
-			TArray<FString> ArgumentKeys;
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Arguments.Values)
-			{
-				ArgumentKeys.Add(Pair.Key);
-			}
-			ArgumentKeys.Sort();
-			TSharedPtr<FJsonObject> ActivityDetails = MakeShared<FJsonObject>();
-			ActivityDetails->SetStringField(TEXT("toolName"), ToolName);
-			ActivityDetails->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
-			ActivityDetails->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
-			UnrealMcp::RecordSkillActivityEvent(TEXT("mcp_tool_call"), FString::Printf(TEXT("Called MCP tool %s."), *ToolName), ActivityDetails);
+			ArgumentKeys.Add(Pair.Key);
 		}
+		ArgumentKeys.Sort();
+		TSharedPtr<FJsonObject> ActivityDetails = MakeShared<FJsonObject>();
+		ActivityDetails->SetStringField(TEXT("toolName"), ToolName);
+		ActivityDetails->SetStringField(TEXT("handlerName"), RegisteredHandlerName);
+		ActivityDetails->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
+		ActivityDetails->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
+		UnrealMcp::RecordSkillActivityEvent(TEXT("mcp_tool_call"), FString::Printf(TEXT("Called MCP tool %s."), *ToolName), ActivityDetails);
 	}
 
+	FUnrealMcpExecutionResult Result = ExecuteToolInternal(RegisteredHandlerName, Arguments);
+	UnrealMcp::AttachToolExecutionCheck(ToolName, Arguments, Result);
+	return Result;
+}
+
+FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& ToolName, const FJsonObject& Arguments) const
+{
 	UEditorAssetSubsystem* EditorAssetSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
 	UEditorActorSubsystem* EditorActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
 	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;

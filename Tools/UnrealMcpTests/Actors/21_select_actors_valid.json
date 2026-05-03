@@ -1,0 +1,21 @@
+{
+  "name": "select_actors_valid",
+  "description": "Actor selection query should safely handle no matches.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 303,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.select_actors",
+      "arguments": {
+        "filter": "UEvolveMcpSmokeNonexistent",
+        "clearSelection": true,
+        "limit": 5
+      }
+    }
+  }
+}
