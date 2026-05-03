@@ -67,6 +67,14 @@ Every AI-facing tool should have reviewed policy metadata:
 
 Tools that mutate source, run builds, restart the editor, or roll back manifests must acquire the extension session lock unless there is a deliberate, documented exception.
 
+Validate the versioned registry before committing tool changes:
+
+```bash
+python3 Tools/validate_tool_registry.py
+```
+
+The validator checks required metadata, duplicate names, reviewed categories, docs paths, write-tool preflight/postcheck coverage, and the plugin-resource mirror at `Plugins/UnrealMcp/Resources/ToolRegistry/tools.json`.
+
 ## Test and Documentation Names
 
 - Stable test files live in `Tools/UnrealMcpTests/<Area>/<tool_or_case>.json`.

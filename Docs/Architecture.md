@@ -9,7 +9,7 @@ Core layers:
 - `FUnrealMcpModule`: module startup, HTTP routing, MCP protocol handling, Chat command dispatch, and current tool execution.
 - Tool helpers in `UnrealMcpModule.cpp`: editor, actor, Blueprint, widget, scaffold, self-extension, memory, skill, build, and test logic.
 - `UnrealMcpToolRegistry`: explicit metadata for visibility, handler aliases, risk policy, owners, docs, dry-run support, and test coverage.
-- `UnrealMcpToolExecutionGuard` plus `UnrealMcp*OutcomeVerifier`: shared execution checks with category-specific state verification for Blueprint, Widget, and Actor tools.
+- `UnrealMcpToolExecutionGuard` plus `UnrealMcp*OutcomeVerifier`: shared execution checks with category-specific state verification for Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
 - `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
@@ -80,6 +80,8 @@ status output:
 - `owner`
 - `docsPath`
 
+`Tools/validate_tool_registry.py` provides an editor-independent check for required metadata, duplicate names, known categories, documentation files, write-tool execution-check coverage, and the mirrored plugin resource registry.
+
 ## Data and State
 
 Local runtime state remains under `Saved/UnrealMcp` and is ignored by Git.
@@ -96,4 +98,4 @@ Write-capable tools receive structured execution guard metadata:
 - `preflight`: expected mutation areas plus category-specific readiness evidence when available.
 - `postcheck`: generic success metadata or category-specific state verification when available.
 
-Blueprint verifiers load the target Blueprint, inspect function/event graphs, member variables, node GUIDs, pin links, and pin defaults. Widget verifiers load the Widget Blueprint and inspect the WidgetTree, variable exposure, slots, and event binding evidence. Actor verifiers inspect the current editor world, selection state, spawned actors, reported transforms, and static mesh assignments.
+Blueprint verifiers load the target Blueprint, inspect function/event graphs, member variables, node GUIDs, pin links, and pin defaults. Widget verifiers load the Widget Blueprint and inspect the WidgetTree, variable exposure, slots, and event binding evidence. Actor verifiers inspect the current editor world, selection state, spawned actors, reported transforms, and static mesh assignments. Workflow verifiers inspect project memory keys, skill draft/promote files, scaffold output folders/files, source apply manifests, rollback flags, build logs, and test/pipeline success fields.

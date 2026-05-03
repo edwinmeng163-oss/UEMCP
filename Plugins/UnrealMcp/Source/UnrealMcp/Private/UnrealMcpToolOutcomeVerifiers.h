@@ -22,6 +22,11 @@ namespace UnrealMcp
 		const FJsonObject& Arguments,
 		const TSharedPtr<FJsonObject>& GenericPreflight);
 
+	TSharedPtr<FJsonObject> BuildWorkflowToolPreflight(
+		const FString& ToolName,
+		const FJsonObject& Arguments,
+		const TSharedPtr<FJsonObject>& GenericPreflight);
+
 	TSharedPtr<FJsonObject> VerifyBlueprintToolOutcome(
 		const FString& ToolName,
 		const FJsonObject& Arguments,
@@ -33,6 +38,11 @@ namespace UnrealMcp
 		const FUnrealMcpExecutionResult& Result);
 
 	TSharedPtr<FJsonObject> VerifyActorToolOutcome(
+		const FString& ToolName,
+		const FJsonObject& Arguments,
+		const FUnrealMcpExecutionResult& Result);
+
+	TSharedPtr<FJsonObject> VerifyWorkflowToolOutcome(
 		const FString& ToolName,
 		const FJsonObject& Arguments,
 		const FUnrealMcpExecutionResult& Result);

@@ -162,6 +162,10 @@ namespace UnrealMcp
 		{
 			Preflight = ActorPreflight;
 		}
+		else if (TSharedPtr<FJsonObject> WorkflowPreflight = BuildWorkflowToolPreflight(RequestedToolName, Arguments, Preflight))
+		{
+			Preflight = WorkflowPreflight;
+		}
 		Result.StructuredContent->SetObjectField(TEXT("preflight"), Preflight);
 
 		TSharedPtr<FJsonObject> Postcheck = VerifyBlueprintToolOutcome(RequestedToolName, Arguments, Result);
@@ -172,6 +176,10 @@ namespace UnrealMcp
 		if (!Postcheck.IsValid())
 		{
 			Postcheck = VerifyActorToolOutcome(RequestedToolName, Arguments, Result);
+		}
+		if (!Postcheck.IsValid())
+		{
+			Postcheck = VerifyWorkflowToolOutcome(RequestedToolName, Arguments, Result);
 		}
 		if (!Postcheck.IsValid())
 		{

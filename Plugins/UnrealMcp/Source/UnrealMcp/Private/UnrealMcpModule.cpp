@@ -3712,11 +3712,7 @@ namespace UnrealMcp
 		FUnrealMcpExecutionResult AuditMcpTools(const TArray<TSharedPtr<FJsonValue>>& ToolsArray)
 		{
 			FString SourceText;
-			FString PluginReadme;
-			FString RootReadme;
 			LoadProjectTextFile(TEXT("Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpModule.cpp"), SourceText);
-			LoadProjectTextFile(TEXT("Plugins/UnrealMcp/README.md"), PluginReadme);
-			LoadProjectTextFile(TEXT("README.md"), RootReadme);
 
 			TArray<TSharedPtr<FJsonValue>> ToolReports;
 			TArray<FString> MissingHandlers;
@@ -3755,11 +3751,17 @@ namespace UnrealMcp
 				const FString HandlerName = ResolveToolHandlerName(Name);
 				const FString HandlerNeedle = FString::Printf(TEXT("ToolName == TEXT(\"%s\")"), *HandlerName);
 				const bool bHasHandler = SourceText.Contains(HandlerNeedle, ESearchCase::CaseSensitive);
-				const bool bDocumentedInPluginReadme = PluginReadme.Contains(Name, ESearchCase::CaseSensitive);
-				const bool bDocumentedInRootReadme = RootReadme.Contains(Name, ESearchCase::CaseSensitive);
-				const bool bDocumented = bDocumentedInPluginReadme || bDocumentedInRootReadme;
 				const FToolRegistryEntry* RegistryEntry = FindToolRegistryEntry(Name);
 				const bool bHasExplicitRegistryEntry = RegistryEntry && RegistryEntry->bLoadedFromExplicitRegistry;
+				const FString DocsPath = RegistryEntry ? RegistryEntry->Policy.DocsPath : FString();
+				FString DocsFilePath = DocsPath;
+				FString DocsAnchor;
+				if (DocsPath.Split(TEXT("#"), &DocsFilePath, &DocsAnchor))
+				{
+					// Keep only the versioned file path portion for existence checks.
+				}
+				const bool bDocumented = !DocsFilePath.TrimStartAndEnd().IsEmpty()
+					&& FPaths::FileExists(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), DocsFilePath)));
 
 				const TSharedPtr<FJsonObject>* SchemaObject = nullptr;
 				TArray<TSharedPtr<FJsonValue>> Issues;
@@ -3836,10 +3838,12 @@ namespace UnrealMcp
 				ReportObject->SetStringField(TEXT("title"), Title);
 				ReportObject->SetStringField(TEXT("description"), Description);
 				ReportObject->SetBoolField(TEXT("hasHandler"), bHasHandler);
+				ReportObject->SetStringField(TEXT("handlerCheckSource"), TEXT("legacy_source_scan"));
 				ReportObject->SetBoolField(TEXT("hasExplicitRegistryEntry"), bHasExplicitRegistryEntry);
 				ReportObject->SetStringField(TEXT("registryCategory"), RegistryEntry ? RegistryEntry->Category : TEXT(""));
-				ReportObject->SetBoolField(TEXT("documentedInPluginReadme"), bDocumentedInPluginReadme);
-				ReportObject->SetBoolField(TEXT("documentedInRootReadme"), bDocumentedInRootReadme);
+				ReportObject->SetStringField(TEXT("docsPath"), DocsPath);
+				ReportObject->SetBoolField(TEXT("docsPathFileExists"), bDocumented);
+				ReportObject->SetStringField(TEXT("documentationCheckSource"), TEXT("explicit_registry_docsPath"));
 				ReportObject->SetBoolField(TEXT("schemaCompatible"), bCompatible);
 				ReportObject->SetStringField(TEXT("schemaReason"), Reason);
 				ReportObject->SetArrayField(TEXT("schemaIssues"), Issues);
@@ -3870,6 +3874,7 @@ namespace UnrealMcp
 			StructuredContent->SetNumberField(TEXT("requiresRestartCount"), RequiresRestartCount);
 			StructuredContent->SetNumberField(TEXT("requiresProjectMemoryCount"), RequiresProjectMemoryCount);
 			StructuredContent->SetNumberField(TEXT("requiresLockCount"), RequiresLockCount);
+			StructuredContent->SetObjectField(TEXT("toolRegistryValidation"), MakeToolRegistryValidationObject(&ToolsArray));
 			StructuredContent->SetArrayField(TEXT("tools"), ToolReports);
 
 			auto AddStringArray = [](TSharedPtr<FJsonObject> Object, const FString& FieldName, const TArray<FString>& Values)

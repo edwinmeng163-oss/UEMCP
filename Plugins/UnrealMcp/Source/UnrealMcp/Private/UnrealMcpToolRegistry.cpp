@@ -63,6 +63,53 @@ namespace UnrealMcp
 			return bValue;
 		}
 
+		void AddValidationIssue(
+			TArray<TSharedPtr<FJsonValue>>& Issues,
+			const FString& Severity,
+			const FString& Code,
+			const FString& ToolName,
+			const FString& Message)
+		{
+			TSharedPtr<FJsonObject> IssueObject = MakeShared<FJsonObject>();
+			IssueObject->SetStringField(TEXT("severity"), Severity);
+			IssueObject->SetStringField(TEXT("code"), Code);
+			IssueObject->SetStringField(TEXT("toolName"), ToolName);
+			IssueObject->SetStringField(TEXT("message"), Message);
+			Issues.Add(MakeShared<FJsonValueObject>(IssueObject));
+		}
+
+		bool IsKnownToolCategory(const FString& Category)
+		{
+			static const TSet<FString> KnownCategories = {
+				TEXT("actors"),
+				TEXT("blueprint"),
+				TEXT("editor"),
+				TEXT("memory"),
+				TEXT("scaffold"),
+				TEXT("self-extension"),
+				TEXT("skills"),
+				TEXT("widget")
+			};
+			return KnownCategories.Contains(Category);
+		}
+
+		FString StripDocsAnchor(const FString& DocsPath)
+		{
+			FString FilePath;
+			FString Anchor;
+			if (DocsPath.Split(TEXT("#"), &FilePath, &Anchor))
+			{
+				return FilePath;
+			}
+			return DocsPath;
+		}
+
+		bool RegistryDocsPathExists(const FString& DocsPath)
+		{
+			const FString FilePart = StripDocsAnchor(DocsPath).TrimStartAndEnd();
+			return !FilePart.IsEmpty() && FPaths::FileExists(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), FilePart)));
+		}
+
 		FToolPolicy MakeBuiltInPolicy(EToolRiskLevel RiskLevel, const FString& Reason)
 		{
 			FToolPolicy Policy;
@@ -337,6 +384,155 @@ namespace UnrealMcp
 		return PolicyObject;
 	}
 
+	TSharedPtr<FJsonObject> MakeToolRegistryValidationObject(const TArray<TSharedPtr<FJsonValue>>* VisibleToolsArray)
+	{
+		const TArray<FToolRegistryEntry>& Entries = GetToolRegistryEntries();
+		TArray<TSharedPtr<FJsonValue>> Issues;
+		TMap<FString, int32> NameCounts;
+		TSet<FString> VisibleToolNames;
+		TSet<FString> VisibleRegistryNames;
+		TMap<FString, int32> CategoryCounts;
+		TMap<FString, int32> TestCoverageCounts;
+		int32 ExplicitEntryCount = 0;
+		int32 HiddenEntryCount = 0;
+		int32 AliasEntryCount = 0;
+		int32 DocsPathExistsCount = 0;
+
+		if (VisibleToolsArray)
+		{
+			for (const TSharedPtr<FJsonValue>& ToolValue : *VisibleToolsArray)
+			{
+				if (!ToolValue.IsValid() || ToolValue->Type != EJson::Object || !ToolValue->AsObject().IsValid())
+				{
+					continue;
+				}
+				FString Name;
+				if (ToolValue->AsObject()->TryGetStringField(TEXT("name"), Name) && !Name.IsEmpty())
+				{
+					VisibleToolNames.Add(Name);
+				}
+			}
+		}
+
+		for (const FToolRegistryEntry& Entry : Entries)
+		{
+			NameCounts.FindOrAdd(Entry.Name)++;
+			CategoryCounts.FindOrAdd(Entry.Category)++;
+			TestCoverageCounts.FindOrAdd(Entry.Policy.TestCoverage)++;
+			ExplicitEntryCount += Entry.bLoadedFromExplicitRegistry ? 1 : 0;
+			HiddenEntryCount += Entry.Exposure == EToolExposure::LegacyHidden ? 1 : 0;
+			AliasEntryCount += (!Entry.HandlerName.IsEmpty() && !Entry.HandlerName.Equals(Entry.Name, ESearchCase::CaseSensitive)) ? 1 : 0;
+			DocsPathExistsCount += RegistryDocsPathExists(Entry.Policy.DocsPath) ? 1 : 0;
+			if (Entry.Exposure == EToolExposure::Visible)
+			{
+				VisibleRegistryNames.Add(Entry.Name);
+			}
+
+			if (Entry.Name.TrimStartAndEnd().IsEmpty())
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("missing_name"), Entry.Name, TEXT("Registry entry name is empty."));
+			}
+			if (Entry.Category.TrimStartAndEnd().IsEmpty())
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("missing_category"), Entry.Name, TEXT("Registry entry category is empty."));
+			}
+			else if (!IsKnownToolCategory(Entry.Category))
+			{
+				AddValidationIssue(Issues, TEXT("warning"), TEXT("unknown_category"), Entry.Name, FString::Printf(TEXT("Registry category '%s' is not in the reviewed category set."), *Entry.Category));
+			}
+			if (Entry.HandlerName.TrimStartAndEnd().IsEmpty())
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("missing_handler_name"), Entry.Name, TEXT("Registry entry handlerName is empty."));
+			}
+			if (Entry.Policy.Owner.TrimStartAndEnd().IsEmpty())
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("missing_owner"), Entry.Name, TEXT("Registry entry owner is empty."));
+			}
+			if (Entry.Policy.DocsPath.TrimStartAndEnd().IsEmpty())
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("missing_docs_path"), Entry.Name, TEXT("Registry entry docsPath is empty."));
+			}
+			else if (!RegistryDocsPathExists(Entry.Policy.DocsPath))
+			{
+				AddValidationIssue(Issues, TEXT("warning"), TEXT("docs_path_missing_file"), Entry.Name, FString::Printf(TEXT("docsPath file was not found: %s"), *Entry.Policy.DocsPath));
+			}
+			if (Entry.Policy.TestCoverage.TrimStartAndEnd().IsEmpty())
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("missing_test_coverage"), Entry.Name, TEXT("Registry entry testCoverage is empty."));
+			}
+			if (Entry.Policy.bDryRunSupport && !Entry.Policy.bRequiresWrite)
+			{
+				AddValidationIssue(Issues, TEXT("warning"), TEXT("dry_run_without_write"), Entry.Name, TEXT("dryRunSupport is true on a tool that is not marked requiresWrite."));
+			}
+			if ((Entry.Policy.bRequiresWrite || Entry.Policy.bRequiresBuild || Entry.Policy.bRequiresExternalProcess || Entry.Policy.bRequiresRestart)
+				&& (!Entry.Policy.bPreflightSupport || !Entry.Policy.bPostcheckSupport))
+			{
+				AddValidationIssue(Issues, TEXT("warning"), TEXT("side_effect_without_execution_checks"), Entry.Name, TEXT("Side-effect tool should normally enable both preflightSupport and postcheckSupport."));
+			}
+		}
+
+		for (const TPair<FString, int32>& Pair : NameCounts)
+		{
+			if (Pair.Value > 1)
+			{
+				AddValidationIssue(Issues, TEXT("error"), TEXT("duplicate_tool_name"), Pair.Key, FString::Printf(TEXT("Tool appears %d times in registry."), Pair.Value));
+			}
+		}
+
+		if (VisibleToolsArray)
+		{
+			for (const FString& VisibleToolName : VisibleToolNames)
+			{
+				if (!FindToolRegistryEntry(VisibleToolName))
+				{
+					AddValidationIssue(Issues, TEXT("error"), TEXT("visible_tool_missing_registry"), VisibleToolName, TEXT("AI-visible tool definition has no explicit registry entry."));
+				}
+				const FToolRegistryEntry* Entry = FindToolRegistryEntry(VisibleToolName);
+				if (Entry && Entry->Exposure == EToolExposure::LegacyHidden)
+				{
+					AddValidationIssue(Issues, TEXT("error"), TEXT("legacy_hidden_tool_visible"), VisibleToolName, TEXT("ToolRegistry marks this tool legacy_hidden but it appears in visible tools/list output."));
+				}
+			}
+
+			for (const FString& VisibleRegistryName : VisibleRegistryNames)
+			{
+				if (!VisibleToolNames.Contains(VisibleRegistryName))
+				{
+					AddValidationIssue(Issues, TEXT("warning"), TEXT("visible_registry_missing_tool_definition"), VisibleRegistryName, TEXT("ToolRegistry marks this tool visible but tools/list did not include a definition."));
+				}
+			}
+		}
+
+		auto MapToJsonObject = [](const TMap<FString, int32>& Counts)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			for (const TPair<FString, int32>& Pair : Counts)
+			{
+				Object->SetNumberField(Pair.Key, Pair.Value);
+			}
+			return Object;
+		};
+
+		TSharedPtr<FJsonObject> ValidationObject = MakeShared<FJsonObject>();
+		ValidationObject->SetBoolField(TEXT("complete"), Issues.Num() == 0 && ExplicitEntryCount == Entries.Num());
+		ValidationObject->SetStringField(TEXT("sourcePath"), GetToolRegistrySourcePath());
+		ValidationObject->SetNumberField(TEXT("entryCount"), Entries.Num());
+		ValidationObject->SetNumberField(TEXT("explicitEntryCount"), ExplicitEntryCount);
+		ValidationObject->SetNumberField(TEXT("legacyHiddenCount"), HiddenEntryCount);
+		ValidationObject->SetNumberField(TEXT("handlerAliasCount"), AliasEntryCount);
+		ValidationObject->SetNumberField(TEXT("docsPathExistsCount"), DocsPathExistsCount);
+		ValidationObject->SetNumberField(TEXT("issueCount"), Issues.Num());
+		ValidationObject->SetObjectField(TEXT("categoryCounts"), MapToJsonObject(CategoryCounts));
+		ValidationObject->SetObjectField(TEXT("testCoverageCounts"), MapToJsonObject(TestCoverageCounts));
+		ValidationObject->SetArrayField(TEXT("issues"), Issues);
+		if (VisibleToolsArray)
+		{
+			ValidationObject->SetNumberField(TEXT("visibleToolDefinitionCount"), VisibleToolNames.Num());
+			ValidationObject->SetNumberField(TEXT("visibleRegistryCount"), VisibleRegistryNames.Num());
+		}
+		return ValidationObject;
+	}
+
 	void AddToolRegistryStatus(const TSharedPtr<FJsonObject>& StructuredContent)
 	{
 		if (!StructuredContent.IsValid())
@@ -382,5 +578,6 @@ namespace UnrealMcp
 		StructuredContent->SetArrayField(TEXT("toolRegistryEntries"), EntryValues);
 		StructuredContent->SetArrayField(TEXT("legacyHiddenTools"), HiddenValues);
 		StructuredContent->SetArrayField(TEXT("handlerAliases"), AliasValues);
+		StructuredContent->SetObjectField(TEXT("toolRegistryValidation"), MakeToolRegistryValidationObject());
 	}
 }

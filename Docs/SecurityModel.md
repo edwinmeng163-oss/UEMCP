@@ -58,11 +58,11 @@ Self-extension tools should preserve these rules:
 
 ## Tool Outcome Verification
 
-Write-capable tools attach structured `preflight` and `postcheck` results. Generic checks come from ToolRegistry metadata. Blueprint, Widget, and Actor tools additionally inspect real editor state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, or mesh assignment actually exists as expected."
+Write-capable tools attach structured `preflight` and `postcheck` results. Generic checks come from ToolRegistry metadata. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools additionally inspect real editor/file/workflow state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, memory key, skill file, manifest, build log, or test result actually exists as expected."
 
 ## Remaining Hardening Work
 
-- Replace heuristic policy classification with explicit reviewed metadata for every tool.
+- Replace the remaining source-scan handler audit with a first-class handler registration map.
 - Add optional policy enforcement that blocks high-risk tools unless enabled.
 - Add an audit log for all write-capable tool calls.
 - Add CI checks for schema compatibility and missing documentation.

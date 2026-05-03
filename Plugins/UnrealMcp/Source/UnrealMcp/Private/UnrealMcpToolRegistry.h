@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class FJsonObject;
+class FJsonValue;
 
 namespace UnrealMcp
 {
@@ -59,5 +60,6 @@ namespace UnrealMcp
 	FToolPolicy GetToolPolicy(const FString& ToolName);
 	FString LexToString(EToolRiskLevel RiskLevel);
 	TSharedPtr<FJsonObject> MakeToolPolicyObject(const FString& ToolName);
+	TSharedPtr<FJsonObject> MakeToolRegistryValidationObject(const TArray<TSharedPtr<FJsonValue>>* VisibleToolsArray = nullptr);
 	void AddToolRegistryStatus(const TSharedPtr<FJsonObject>& StructuredContent);
 }
