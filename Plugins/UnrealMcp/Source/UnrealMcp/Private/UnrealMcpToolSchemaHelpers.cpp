@@ -4,7 +4,7 @@
 
 namespace UnrealMcp
 {
-	static constexpr int32 DefaultListLimit = 200;
+	static constexpr int32 SchemaDefaultListLimit = 200;
 
 	bool TryGetStringArrayField(const FJsonObject& Arguments, const FString& FieldName, TArray<FString>& OutValues);
 }
@@ -232,7 +232,7 @@ namespace UnrealMcp
 			return FString();
 		}
 
-	TSharedPtr<FJsonObject> MakeStringProperty(const FString& Description, const FString& DefaultValue = FString())
+	TSharedPtr<FJsonObject> MakeStringProperty(const FString& Description, const FString& DefaultValue)
 	{
 		TSharedPtr<FJsonObject> Property = MakeShared<FJsonObject>();
 		Property->SetStringField(TEXT("type"), TEXT("string"));
@@ -298,14 +298,14 @@ namespace UnrealMcp
 
 		void AddActorQuerySchemaFields(
 			const TSharedPtr<FJsonObject>& PropertiesObject,
-			bool bIncludeClassPath = true,
-			bool bIncludePaths = true,
-			bool bIncludeSelectedOnly = true)
+			bool bIncludeClassPath,
+			bool bIncludePaths,
+			bool bIncludeSelectedOnly)
 		{
-			PropertiesObject->SetObjectField(TEXT("filter"), MakeStringProperty(TEXT("Optional substring filter applied to actor labels, names, classes, and paths.")));
+			PropertiesObject->SetObjectField(TEXT("filter"), MakeStringProperty(TEXT("Optional substring filter applied to actor labels, names, classes, and paths."), FString()));
 			if (bIncludeClassPath)
 			{
-				PropertiesObject->SetObjectField(TEXT("classPath"), MakeStringProperty(TEXT("Optional class path filter, for example /Script/Engine.PointLight.")));
+				PropertiesObject->SetObjectField(TEXT("classPath"), MakeStringProperty(TEXT("Optional class path filter, for example /Script/Engine.PointLight."), FString()));
 			}
 			if (bIncludePaths)
 			{
@@ -316,7 +316,7 @@ namespace UnrealMcp
 				PropertiesObject->SetObjectField(TEXT("selectedOnly"), MakeBoolProperty(TEXT("Whether to target only the currently selected actors. If no selectors are provided, selected actors are used automatically."), false));
 			}
 
-			PropertiesObject->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum number of actors to affect."), DefaultListLimit));
+			PropertiesObject->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum number of actors to affect."), SchemaDefaultListLimit));
 		}
 
 		TSharedPtr<FJsonObject> MakeSpawnActorBasicProperties(bool bIncludeClassPath)
@@ -324,7 +324,7 @@ namespace UnrealMcp
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
 			if (bIncludeClassPath)
 			{
-				PropertiesObject->SetObjectField(TEXT("classPath"), MakeStringProperty(TEXT("Native or Blueprint actor class path to spawn.")));
+				PropertiesObject->SetObjectField(TEXT("classPath"), MakeStringProperty(TEXT("Native or Blueprint actor class path to spawn."), FString()));
 			}
 
 			PropertiesObject->SetObjectField(TEXT("x"), MakeNumberProperty(TEXT("Spawn location X."), 0.0));
@@ -336,7 +336,7 @@ namespace UnrealMcp
 			PropertiesObject->SetObjectField(TEXT("sx"), MakeNumberProperty(TEXT("Spawn scale X."), 1.0));
 			PropertiesObject->SetObjectField(TEXT("sy"), MakeNumberProperty(TEXT("Spawn scale Y."), 1.0));
 			PropertiesObject->SetObjectField(TEXT("sz"), MakeNumberProperty(TEXT("Spawn scale Z."), 1.0));
-			PropertiesObject->SetObjectField(TEXT("label"), MakeStringProperty(TEXT("Optional actor label after spawning.")));
+			PropertiesObject->SetObjectField(TEXT("label"), MakeStringProperty(TEXT("Optional actor label after spawning."), FString()));
 			return PropertiesObject;
 		}
 

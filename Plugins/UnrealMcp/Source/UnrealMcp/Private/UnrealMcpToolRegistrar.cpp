@@ -6,7 +6,7 @@
 namespace UnrealMcp
 {
 	TSharedPtr<FJsonObject> MakeObjectSchema();
-	TSharedPtr<FJsonObject> MakeStringProperty(const FString& Description, const FString& DefaultValue = FString());
+	TSharedPtr<FJsonObject> MakeStringProperty(const FString& Description, const FString& DefaultValue);
 	TSharedPtr<FJsonObject> MakeBoolProperty(const FString& Description, bool bDefaultValue);
 	TSharedPtr<FJsonObject> MakeNumberProperty(const FString& Description, double DefaultValue);
 	TSharedPtr<FJsonObject> MakeStringArrayProperty(const FString& Description);
@@ -87,8 +87,8 @@ namespace UnrealMcp
 		{
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to inspect.")));
-				Properties->SetObjectField(TEXT("graphName"), MakeStringProperty(TEXT("Optional graph name. If omitted, all standard Blueprint graphs are listed.")));
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to inspect."), FString()));
+				Properties->SetObjectField(TEXT("graphName"), MakeStringProperty(TEXT("Optional graph name. If omitted, all standard Blueprint graphs are listed."), FString()));
 				Properties->SetObjectField(TEXT("includePins"), MakeBoolProperty(TEXT("Whether to include pin details and links for each node."), true));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
@@ -105,10 +105,10 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to inspect.")));
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to inspect."), FString()));
 				Properties->SetObjectField(TEXT("graphName"), MakeStringProperty(TEXT("Graph name containing the node."), TEXT("EventGraph")));
-				Properties->SetObjectField(TEXT("nodeGuid"), MakeStringProperty(TEXT("Node GUID to inspect.")));
-				Properties->SetObjectField(TEXT("pinName"), MakeStringProperty(TEXT("Optional pin name. If omitted, all node pins are traced.")));
+				Properties->SetObjectField(TEXT("nodeGuid"), MakeStringProperty(TEXT("Node GUID to inspect."), FString()));
+				Properties->SetObjectField(TEXT("pinName"), MakeStringProperty(TEXT("Optional pin name. If omitted, all node pins are traced."), FString()));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
 				Registrar.Add(
@@ -126,7 +126,7 @@ namespace UnrealMcp
 		void RegisterWidgetInspectorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-			Properties->SetObjectField(TEXT("widgetBlueprintPath"), MakeStringProperty(TEXT("Widget Blueprint asset path to inspect.")));
+			Properties->SetObjectField(TEXT("widgetBlueprintPath"), MakeStringProperty(TEXT("Widget Blueprint asset path to inspect."), FString()));
 			Properties->SetObjectField(TEXT("includeDesignerTree"), MakeBoolProperty(TEXT("Whether to include recursive designer tree children."), true));
 			Properties->SetObjectField(TEXT("includeGraphNodes"), MakeBoolProperty(TEXT("Whether to include EventGraph node summaries."), false));
 			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
@@ -172,7 +172,7 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("task"), MakeStringProperty(TEXT("Natural-language task to turn into a structured change plan.")));
+				Properties->SetObjectField(TEXT("task"), MakeStringProperty(TEXT("Natural-language task to turn into a structured change plan."), FString()));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
 				Registrar.Add(
@@ -188,7 +188,7 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("snapshotName"), MakeStringProperty(TEXT("Optional snapshot name. Defaults to a UTC timestamp.")));
+				Properties->SetObjectField(TEXT("snapshotName"), MakeStringProperty(TEXT("Optional snapshot name. Defaults to a UTC timestamp."), FString()));
 				Properties->SetObjectField(TEXT("assetPath"), MakeStringProperty(TEXT("Content path to scan for assets."), TEXT("/Game")));
 				Properties->SetObjectField(TEXT("includeActors"), MakeBoolProperty(TEXT("Include current level actors."), true));
 				Properties->SetObjectField(TEXT("includeAssets"), MakeBoolProperty(TEXT("Include assets under assetPath."), true));
@@ -215,8 +215,8 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("beforeSnapshotPath"), MakeStringProperty(TEXT("Before snapshot path. If omitted, the previous latest snapshot is used.")));
-				Properties->SetObjectField(TEXT("afterSnapshotPath"), MakeStringProperty(TEXT("After snapshot path. If omitted, the latest snapshot is used.")));
+				Properties->SetObjectField(TEXT("beforeSnapshotPath"), MakeStringProperty(TEXT("Before snapshot path. If omitted, the previous latest snapshot is used."), FString()));
+				Properties->SetObjectField(TEXT("afterSnapshotPath"), MakeStringProperty(TEXT("After snapshot path. If omitted, the latest snapshot is used."), FString()));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
 				Registrar.Add(
@@ -232,13 +232,13 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("task"), MakeStringProperty(TEXT("Original task goal to verify.")));
-				Properties->SetObjectField(TEXT("beforeSnapshotPath"), MakeStringProperty(TEXT("Optional before snapshot path.")));
-				Properties->SetObjectField(TEXT("afterSnapshotPath"), MakeStringProperty(TEXT("Optional after snapshot path.")));
+				Properties->SetObjectField(TEXT("task"), MakeStringProperty(TEXT("Original task goal to verify."), FString()));
+				Properties->SetObjectField(TEXT("beforeSnapshotPath"), MakeStringProperty(TEXT("Optional before snapshot path."), FString()));
+				Properties->SetObjectField(TEXT("afterSnapshotPath"), MakeStringProperty(TEXT("Optional after snapshot path."), FString()));
 				Properties->SetObjectField(TEXT("expectedChangedAreas"), MakeStringArrayProperty(TEXT("Areas expected to change: actors, assets, blueprints, widgets, memory, or skills.")));
 				Properties->SetObjectField(TEXT("expectedTools"), MakeStringArrayProperty(TEXT("Tool names expected to exist in tools/list.")));
-				Properties->SetObjectField(TEXT("evidenceText"), MakeStringProperty(TEXT("Optional tool output or summary text to inspect.")));
-				Properties->SetObjectField(TEXT("requiredEvidenceText"), MakeStringProperty(TEXT("Optional substring that must appear in evidenceText.")));
+				Properties->SetObjectField(TEXT("evidenceText"), MakeStringProperty(TEXT("Optional tool output or summary text to inspect."), FString()));
+				Properties->SetObjectField(TEXT("requiredEvidenceText"), MakeStringProperty(TEXT("Optional substring that must appear in evidenceText."), FString()));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
 				Registrar.Add(
@@ -254,8 +254,8 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("text"), MakeStringProperty(TEXT("Raw error text to classify.")));
-				Properties->SetObjectField(TEXT("logPath"), MakeStringProperty(TEXT("Optional project-local log file to tail and classify.")));
+				Properties->SetObjectField(TEXT("text"), MakeStringProperty(TEXT("Raw error text to classify."), FString()));
+				Properties->SetObjectField(TEXT("logPath"), MakeStringProperty(TEXT("Optional project-local log file to tail and classify."), FString()));
 				Properties->SetObjectField(TEXT("tailLines"), MakeNumberProperty(TEXT("Lines to read from logPath."), 200.0));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
