@@ -31,16 +31,26 @@ Shared contracts:
 
 ## Normal Flow
 
-1. Scaffold.
+1. Preview the change plan with `unreal.preview_change_plan`.
 2. Validate schema.
 3. Generate tests.
 4. Dry-run apply.
-5. Apply with backup.
-6. Write project memory.
-7. Build editor.
-8. Restart if new plugin code must be loaded.
-9. Run test suite.
-10. Audit and inspect workbench status.
+5. Capture a before snapshot when real work will run.
+6. Apply with backup.
+7. Write project memory.
+8. Build editor.
+9. Restart if new plugin code must be loaded.
+10. Run test suite.
+11. Capture an after snapshot, diff it, and run `unreal.verify_task_outcome` when no restart deferral is needed.
+12. Audit and inspect workbench status.
+
+`unreal.mcp_extension_pipeline` now treats this as the default gate:
+
+```text
+preview_change_plan -> validate_schema -> generate_tests -> apply_dry_run -> capture_before_snapshot -> apply -> build -> test_suite -> capture_after_snapshot -> diff_project_snapshot -> verify_task_outcome
+```
+
+The gate can be relaxed with `enforceGate=false`, `captureSnapshots=false`, or `verifyOutcome=false`, but normal self-extension work should keep all three enabled.
 
 Run the versioned core suite when validating baseline health:
 
@@ -67,6 +77,10 @@ python3 Tools/unreal_mcp_supervisor.py install --platform all --output-dir Tools
 The generated launchers are local and ignored; versioned templates are stored under `Tools/UnrealMcpSupervisorTemplates`.
 
 ## Failure Flow
+
+When a pipeline step fails, `unreal.mcp_extension_pipeline` attaches `failureAnalyses`.
+Each analysis includes `unreal.mcp_classify_error` output and next-step guidance.
+If source changes were already applied, the pipeline also attaches a dry-run rollback plan using `unreal.mcp_rollback_to_manifest`.
 
 If build fails:
 

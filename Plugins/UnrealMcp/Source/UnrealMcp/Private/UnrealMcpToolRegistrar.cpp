@@ -274,13 +274,15 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
 				Properties->SetObjectField(TEXT("contentPath"), MakeStringProperty(TEXT("Sandbox Content Browser path. Must be under /Game/__UEvolve*."), TEXT("/Game/__UEvolveMcpTest")));
 				Properties->SetObjectField(TEXT("reset"), MakeBoolProperty(TEXT("Whether to delete and recreate the sandbox directory."), true));
+				Properties->SetObjectField(TEXT("resetActors"), MakeBoolProperty(TEXT("Whether to delete level actors whose labels start with actorLabelPrefix."), false));
+				Properties->SetObjectField(TEXT("actorLabelPrefix"), MakeStringProperty(TEXT("Safe actor label prefix for disposable actor tests. Must start with UEvolveMcpTest_ when resetActors=true."), TEXT("UEvolveMcpTest_")));
 				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview sandbox preparation without mutating assets."), false));
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.mcp_prepare_test_sandbox"),
 					TEXT("Prepare MCP Test Sandbox"),
-					TEXT("Creates or resets a constrained /Game/__UEvolve* asset sandbox for disposable happy-path tests."),
+					TEXT("Creates or resets constrained /Game/__UEvolve* asset and UEvolveMcpTest_* actor sandboxes for disposable happy-path tests."),
 					TEXT("self-extension"),
 					TEXT("UnrealMcpSelfExtensionPrecisionTools.cpp"),
 					EUnrealMcpToolRisk::Medium);

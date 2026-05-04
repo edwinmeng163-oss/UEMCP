@@ -10,7 +10,7 @@ Core layers:
 - Split implementation files own protocol routing, tool dispatch, tool categories, UI, registry, execution guards, verifiers, and self-extension workflows. New tool work should happen in the relevant category file, not in `UnrealMcpModule.cpp`.
 - `UnrealMcpToolDescriptor` plus `UnrealMcpToolRegistrar`: code-owned default descriptors for tool name, title, description, category, handler, source file, risk, side effects, docs, and test coverage.
 - `UnrealMcpToolRegistry`: reviewed JSON overrides for visibility, handler aliases, risk policy, owners, docs, dry-run support, and test coverage.
-- `UnrealMcpToolHandlerRegistry`: explicit handler registration map used by audit and registry validation instead of source-text scanning.
+- `UnrealMcpToolHandlerRegistry`: explicit handler registration map used by audit and registry validation. Descriptor-backed tools register handler metadata through `UnrealMcpToolRegistrar`; remaining legacy handlers stay in the compatibility map until migrated.
 - `UnrealMcpToolExecutionGuard` plus `UnrealMcp*OutcomeVerifier`: shared execution checks with category-specific state verification for Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools.
 - Precision tools: `unreal.preview_change_plan`, `unreal.capture_project_snapshot`, `unreal.diff_project_snapshot`, `unreal.verify_task_outcome`, `unreal.mcp_classify_error`, Blueprint graph inspectors, and Widget tree dumping give Chat a read-back loop before and after edits.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
@@ -83,7 +83,7 @@ The first descriptor-backed migration covers low-risk/read-only tools:
 New tools should move through this path unless there is a deliberate compatibility reason not to:
 
 1. Add `FUnrealMcpToolDescriptor` plus fixed schema in `UnrealMcpToolRegistrar.cpp`.
-2. Add or confirm handler coverage in `UnrealMcpToolHandlerRegistry`.
+2. Prefer descriptor-backed handler coverage through the same descriptor. Only add a legacy `MakeHandlerEntry` when migrating an old non-descriptor tool.
 3. Add reviewed policy override in `Tools/UnrealMcpToolRegistry/tools.json` when the default descriptor metadata is not enough.
 4. Validate with `python3 Tools/validate_tool_registry.py`, build, restart Editor, run audit, and run the relevant test suite.
 
@@ -104,7 +104,7 @@ status output:
 - `owner`
 - `docsPath`
 
-`Tools/validate_tool_registry.py` provides an editor-independent check for the registry schema file, required metadata, duplicate names, known categories, documentation files, handler map coverage, write-tool execution-check coverage, committed test fixture coverage, and exact mirror parity with the plugin resource registry.
+`Tools/validate_tool_registry.py` provides an editor-independent check for the registry schema file, required metadata, duplicate names, known categories, documentation files, descriptor-backed and legacy handler map coverage, write-tool execution-check coverage, committed test fixture coverage, and exact mirror parity with the plugin resource registry.
 
 ## Data and State
 
@@ -137,4 +137,4 @@ For non-trivial Chat work, prefer this loop:
 7. `unreal.verify_task_outcome` turns the plan, tool visibility, snapshot diff, and textual evidence into a pass/fail result.
 8. `unreal.mcp_classify_error` categorizes failures into UBT, MCP protocol, schema, UE Python, HTTP endpoint, OpenAI API, or editor-state issues with next-step suggestions.
 
-Automated happy-path tests use `unreal.mcp_prepare_test_sandbox` to create or reset `/Game/__UEvolve*` disposable content before writing test assets. The sandbox reset deletes registered assets before recreating the folder, which keeps repeated test suite runs deterministic.
+Automated happy-path tests use `unreal.mcp_prepare_test_sandbox` to create or reset `/Game/__UEvolve*` disposable content before writing test assets. The same tool can also remove level actors whose labels start with `UEvolveMcpTest_`, which gives Actor write tools a repeatable sandbox without touching unrelated user actors.

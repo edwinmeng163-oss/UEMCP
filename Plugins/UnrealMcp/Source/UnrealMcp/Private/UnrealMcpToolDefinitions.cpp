@@ -1680,6 +1680,7 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 			PropertiesObject->SetObjectField(TEXT("testRequestPath"), UnrealMcp::MakeStringProperty(TEXT("Optional TestRequest.json path. Defaults to scaffoldDir/TestRequest.json.")));
 			PropertiesObject->SetObjectField(TEXT("testsDir"), UnrealMcp::MakeStringProperty(TEXT("Optional Tests directory. Defaults to scaffoldDir/Tests.")));
 			PropertiesObject->SetObjectField(TEXT("memoryKey"), UnrealMcp::MakeStringProperty(TEXT("Project memory key for restart handoff."), TEXT("mcp.extension.pipeline")));
+			PropertiesObject->SetObjectField(TEXT("task"), UnrealMcp::MakeStringProperty(TEXT("Natural-language task goal used by preview_change_plan and verify_task_outcome gates.")));
 			PropertiesObject->SetObjectField(TEXT("apply"), UnrealMcp::MakeBoolProperty(TEXT("Whether to apply scaffold snippets after dry run."), true));
 			PropertiesObject->SetObjectField(TEXT("build"), UnrealMcp::MakeBoolProperty(TEXT("Whether to run Unreal Build Tool after applying snippets."), true));
 			PropertiesObject->SetObjectField(TEXT("runTest"), UnrealMcp::MakeBoolProperty(TEXT("Whether to run the generated tool test when safe in the current editor session."), true));
@@ -1691,6 +1692,10 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 			PropertiesObject->SetObjectField(TEXT("createBackup"), UnrealMcp::MakeBoolProperty(TEXT("Whether to create rollback backup during real apply."), true));
 			PropertiesObject->SetObjectField(TEXT("backupProjectState"), UnrealMcp::MakeBoolProperty(TEXT("Create a broad project-state snapshot before real apply/build/test changes."), true));
 			PropertiesObject->SetObjectField(TEXT("writeProjectMemory"), UnrealMcp::MakeBoolProperty(TEXT("Whether to write pipeline state into project memory."), true));
+			PropertiesObject->SetObjectField(TEXT("enforceGate"), UnrealMcp::MakeBoolProperty(TEXT("Require preview_change_plan before schema validation and dry-run/apply."), true));
+			PropertiesObject->SetObjectField(TEXT("captureSnapshots"), UnrealMcp::MakeBoolProperty(TEXT("Capture before/after project snapshots around real pipeline work."), true));
+			PropertiesObject->SetObjectField(TEXT("verifyOutcome"), UnrealMcp::MakeBoolProperty(TEXT("Run verify_task_outcome after tests when no restart deferral is required."), true));
+			PropertiesObject->SetObjectField(TEXT("classifyFailures"), UnrealMcp::MakeBoolProperty(TEXT("Classify failed pipeline steps and attach fix/rollback guidance."), true));
 
 			TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
 			InputSchema->SetObjectField(TEXT("properties"), PropertiesObject);

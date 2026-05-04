@@ -1,0 +1,31 @@
+{
+  "name": "spawn_static_mesh_actor_happy_path_valid",
+  "description": "Spawn a disposable StaticMeshActor with an Engine mesh so actor write tools have a real automated happy path.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "label": "UEvolveMcpTest_StaticMeshActor",
+    "staticMeshPath": "/Engine/BasicShapes/Cube.Cube",
+    "postcheck.verified": true
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 304,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.spawn_static_mesh_actor",
+      "arguments": {
+        "staticMeshPath": "/Engine/BasicShapes/Cube.Cube",
+        "label": "UEvolveMcpTest_StaticMeshActor",
+        "x": 0,
+        "y": 0,
+        "z": 120,
+        "sx": 1,
+        "sy": 1,
+        "sz": 1
+      }
+    }
+  }
+}

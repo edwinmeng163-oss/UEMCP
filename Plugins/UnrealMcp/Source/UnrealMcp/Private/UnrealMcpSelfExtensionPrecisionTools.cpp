@@ -787,10 +787,16 @@ namespace UnrealMcp
 	{
 		const FString ContentPath = GetStringArgument(Arguments, TEXT("contentPath"), TEXT("/Game/__UEvolveMcpTest"));
 		const bool bReset = GetBoolArgument(Arguments, TEXT("reset"), true);
+		const bool bResetActors = GetBoolArgument(Arguments, TEXT("resetActors"), false);
+		const FString ActorLabelPrefix = GetStringArgument(Arguments, TEXT("actorLabelPrefix"), TEXT("UEvolveMcpTest_"));
 		const bool bDryRun = GetBoolArgument(Arguments, TEXT("dryRun"), false);
 		if (!ContentPath.StartsWith(TEXT("/Game/__UEvolve"), ESearchCase::CaseSensitive))
 		{
 			return MakeExecutionResult(TEXT("contentPath must be under /Game/__UEvolve* for sandbox safety."), nullptr, true);
+		}
+		if (bResetActors && !ActorLabelPrefix.StartsWith(TEXT("UEvolveMcpTest_"), ESearchCase::CaseSensitive))
+		{
+			return MakeExecutionResult(TEXT("actorLabelPrefix must start with UEvolveMcpTest_ when resetActors=true."), nullptr, true);
 		}
 
 		UEditorAssetSubsystem* EditorAssetSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
@@ -798,11 +804,45 @@ namespace UnrealMcp
 		{
 			return MakeExecutionResult(TEXT("EditorAssetSubsystem is unavailable."), nullptr, true);
 		}
+		UEditorActorSubsystem* EditorActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
+		if (bResetActors && !EditorActorSubsystem)
+		{
+			return MakeExecutionResult(TEXT("EditorActorSubsystem is unavailable."), nullptr, true);
+		}
 
 		const bool bExistedBefore = EditorAssetSubsystem->DoesDirectoryExist(ContentPath);
 		int32 DeletedAssetCount = 0;
+		int32 ActorCandidateCount = 0;
+		int32 DeletedActorCount = 0;
 		bool bDeleted = false;
 		bool bCreated = false;
+		if (bResetActors && EditorActorSubsystem)
+		{
+			TArray<AActor*> ActorsToDelete;
+			for (AActor* Actor : EditorActorSubsystem->GetAllLevelActors())
+			{
+				if (!Actor)
+				{
+					continue;
+				}
+				const FString Label = Actor->GetActorLabel();
+				if (Label.StartsWith(ActorLabelPrefix, ESearchCase::CaseSensitive))
+				{
+					ActorsToDelete.Add(Actor);
+				}
+			}
+			ActorCandidateCount = ActorsToDelete.Num();
+			if (!bDryRun && ActorsToDelete.Num() > 0)
+			{
+				for (AActor* Actor : ActorsToDelete)
+				{
+					if (Actor && EditorActorSubsystem->DestroyActor(Actor))
+					{
+						++DeletedActorCount;
+					}
+				}
+			}
+		}
 		if (!bDryRun)
 		{
 			if (bReset)
@@ -838,8 +878,12 @@ namespace UnrealMcp
 		StructuredContent->SetStringField(TEXT("contentPath"), ContentPath);
 		StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 		StructuredContent->SetBoolField(TEXT("reset"), bReset);
+		StructuredContent->SetBoolField(TEXT("resetActors"), bResetActors);
+		StructuredContent->SetStringField(TEXT("actorLabelPrefix"), ActorLabelPrefix);
 		StructuredContent->SetBoolField(TEXT("existedBefore"), bExistedBefore);
 		StructuredContent->SetNumberField(TEXT("deletedAssetCount"), DeletedAssetCount);
+		StructuredContent->SetNumberField(TEXT("actorCandidateCount"), ActorCandidateCount);
+		StructuredContent->SetNumberField(TEXT("deletedActorCount"), DeletedActorCount);
 		StructuredContent->SetBoolField(TEXT("deleted"), bDeleted);
 		StructuredContent->SetBoolField(TEXT("created"), bCreated);
 		StructuredContent->SetBoolField(TEXT("existsAfter"), bExistsAfter);

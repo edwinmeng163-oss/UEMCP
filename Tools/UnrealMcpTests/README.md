@@ -34,9 +34,11 @@ Run a category suite from Editor Chat:
 /tool unreal.mcp_run_test_suite {"testsDir":"Tools/UnrealMcpTests/Blueprint","readProjectMemory":false,"writeProjectMemory":false}
 ```
 
-Some happy-path write fixtures are marked `executeTool:false` because they create
-Blueprint or Widget assets and should be run only in a disposable validation
-project. Error-path and dry-run fixtures are safe to run repeatedly.
+Happy-path write fixtures should use disposable sandboxes instead of
+`executeTool:false` whenever the tool can be made deterministic. Current actor,
+Blueprint, and Widget happy-path suites create/reset `/Game/__UEvolveMcpTest*`
+content and `UEvolveMcpTest_*` level actors before writing. If a future fixture
+cannot be made safe, mark it manual and explain why in the test description.
 
 Wrapped test cases can include `expectToolCallStructuredFields` to assert scalar
 fields inside the executed tool's `structuredContent` using dot-separated paths,

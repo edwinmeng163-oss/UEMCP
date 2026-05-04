@@ -2839,6 +2839,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	FString TestRequestPath;
 	FString TestsDir;
 	FString MemoryKey = TEXT("mcp.extension.pipeline");
+	FString Task;
 	bool bApply = true;
 	bool bBuild = true;
 	bool bRunTest = true;
@@ -2850,6 +2851,10 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	bool bCreateBackup = true;
 	bool bBackupProjectState = true;
 	bool bWriteProjectMemory = true;
+	bool bEnforceGate = true;
+	bool bCaptureSnapshots = true;
+	bool bVerifyOutcome = true;
+	bool bClassifyFailures = true;
 
 	Arguments.TryGetStringField(TEXT("mode"), Mode);
 	Arguments.TryGetStringField(TEXT("toolName"), ToolName);
@@ -2859,6 +2864,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	Arguments.TryGetStringField(TEXT("testRequestPath"), TestRequestPath);
 	Arguments.TryGetStringField(TEXT("testsDir"), TestsDir);
 	Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
+	Arguments.TryGetStringField(TEXT("task"), Task);
 	Arguments.TryGetBoolField(TEXT("apply"), bApply);
 	Arguments.TryGetBoolField(TEXT("build"), bBuild);
 	Arguments.TryGetBoolField(TEXT("runTest"), bRunTest);
@@ -2870,6 +2876,10 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	Arguments.TryGetBoolField(TEXT("createBackup"), bCreateBackup);
 	Arguments.TryGetBoolField(TEXT("backupProjectState"), bBackupProjectState);
 	Arguments.TryGetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
+	Arguments.TryGetBoolField(TEXT("enforceGate"), bEnforceGate);
+	Arguments.TryGetBoolField(TEXT("captureSnapshots"), bCaptureSnapshots);
+	Arguments.TryGetBoolField(TEXT("verifyOutcome"), bVerifyOutcome);
+	Arguments.TryGetBoolField(TEXT("classifyFailures"), bClassifyFailures);
 
 	Mode = Mode.TrimStartAndEnd().ToLower();
 	ToolName = ToolName.TrimStartAndEnd();
@@ -2878,6 +2888,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	TestRequestPath = TestRequestPath.TrimStartAndEnd();
 	TestsDir = TestsDir.TrimStartAndEnd();
 	MemoryKey = MemoryKey.TrimStartAndEnd();
+	Task = Task.TrimStartAndEnd();
 	if (Mode.IsEmpty())
 	{
 		Mode = TEXT("auto");
@@ -2889,15 +2900,75 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 
 	TArray<TSharedPtr<FJsonValue>> Steps;
 	TArray<TSharedPtr<FJsonValue>> Issues;
+	TArray<TSharedPtr<FJsonValue>> FailureAnalyses;
 	bool bSucceeded = true;
 	bool bRequiresRestart = false;
 	bool bAppliedSourceChanges = false;
 	bool bBuildSucceeded = false;
+	FString BeforeSnapshotPath;
+	FString AfterSnapshotPath;
+	FString PipelineEvidenceText;
 
 	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 	StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_extension_pipeline"));
 	StructuredContent->SetStringField(TEXT("mode"), Mode);
 	StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
+	StructuredContent->SetBoolField(TEXT("enforceGate"), bEnforceGate);
+	StructuredContent->SetBoolField(TEXT("captureSnapshots"), bCaptureSnapshots);
+	StructuredContent->SetBoolField(TEXT("verifyOutcome"), bVerifyOutcome);
+
+	auto MakePipelineStringArray = [](const TArray<FString>& Values)
+	{
+		TArray<TSharedPtr<FJsonValue>> Result;
+		for (const FString& Value : Values)
+		{
+			Result.Add(MakeShared<FJsonValueString>(Value));
+		}
+		return Result;
+	};
+
+	auto AddFailureAnalysis = [&FailureAnalyses, &Steps, bClassifyFailures, this](const FString& StepName, const FUnrealMcpExecutionResult& FailedResult)
+	{
+		if (!bClassifyFailures || !FailedResult.bIsError)
+		{
+			return;
+		}
+
+		TSharedPtr<FJsonObject> Analysis = MakeShared<FJsonObject>();
+		Analysis->SetStringField(TEXT("step"), StepName);
+		Analysis->SetStringField(TEXT("errorText"), FailedResult.Text);
+
+		TSharedPtr<FJsonObject> ClassifyArguments = MakeShared<FJsonObject>();
+		ClassifyArguments->SetStringField(TEXT("text"), FailedResult.Text);
+		const FUnrealMcpExecutionResult ClassifyResult = UnrealMcp::ClassifyMcpError(*ClassifyArguments);
+		if (ClassifyResult.StructuredContent.IsValid())
+		{
+			Analysis->SetObjectField(TEXT("classification"), ClassifyResult.StructuredContent);
+		}
+
+		if (StepName == TEXT("build"))
+		{
+			TSharedPtr<FJsonObject> FixPlanArguments = MakeShared<FJsonObject>();
+			FixPlanArguments->SetBoolField(TEXT("dryRun"), true);
+			const FUnrealMcpExecutionResult FixPlanResult = UnrealMcp::CompileErrorFixPlan(*FixPlanArguments);
+			Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+				TEXT("compile_error_fix_plan"),
+				FixPlanResult.bIsError ? TEXT("failed") : TEXT("completed"),
+				FixPlanResult.Text,
+				&FixPlanResult)));
+			if (FixPlanResult.StructuredContent.IsValid())
+			{
+				Analysis->SetObjectField(TEXT("fixPlan"), FixPlanResult.StructuredContent);
+			}
+		}
+
+		TArray<TSharedPtr<FJsonValue>> NextSteps;
+		NextSteps.Add(MakeShared<FJsonValueString>(TEXT("Inspect the failed pipeline step structuredContent before patching.")));
+		NextSteps.Add(MakeShared<FJsonValueString>(TEXT("Run unreal.mcp_classify_error on the complete log if this summary is insufficient.")));
+		NextSteps.Add(MakeShared<FJsonValueString>(TEXT("If source was applied, run unreal.mcp_rollback_to_manifest with dryRun=true before deciding whether to roll back.")));
+		Analysis->SetArrayField(TEXT("nextSteps"), NextSteps);
+		FailureAnalyses.Add(MakeShared<FJsonValueObject>(Analysis));
+	};
 
 	if (Mode == TEXT("resume_test") || Mode == TEXT("test") || Mode == TEXT("test_only"))
 	{
@@ -2946,6 +3017,10 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	}
 
 	ToolName = ResolvedToolName;
+	if (Task.IsEmpty())
+	{
+		Task = FString::Printf(TEXT("Extend Unreal MCP with tool %s."), ToolName.IsEmpty() ? TEXT("<unknown>") : *ToolName);
+	}
 	if (TestRequestPath.IsEmpty())
 	{
 		TestRequestPath = FPaths::Combine(ResolvedScaffoldDir, TEXT("TestRequest.json"));
@@ -2955,6 +3030,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		TestsDir = FPaths::Combine(ResolvedScaffoldDir, TEXT("Tests"));
 	}
 	StructuredContent->SetStringField(TEXT("toolName"), ToolName);
+	StructuredContent->SetStringField(TEXT("task"), Task);
 	StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
 	StructuredContent->SetStringField(TEXT("testRequestPath"), TestRequestPath);
 	StructuredContent->SetStringField(TEXT("testsDir"), TestsDir);
@@ -2967,6 +3043,31 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	AppendToolDefinitions(ToolsArray);
 	const bool bToolAlreadyListed = UnrealMcp::FindToolDefinitionByName(ToolsArray, ToolName).IsValid();
 	StructuredContent->SetBoolField(TEXT("toolAlreadyListed"), bToolAlreadyListed);
+
+	if (bEnforceGate)
+	{
+		TSharedPtr<FJsonObject> PreviewArguments = MakeShared<FJsonObject>();
+		PreviewArguments->SetStringField(TEXT("task"), Task);
+		const FUnrealMcpExecutionResult PreviewResult = UnrealMcp::PreviewChangePlan(*PreviewArguments, ToolsArray);
+		PipelineEvidenceText += TEXT("\n[preview_change_plan] ") + PreviewResult.Text;
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("preview_change_plan"),
+			PreviewResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			PreviewResult.Text,
+			&PreviewResult)));
+		if (PreviewResult.bIsError)
+		{
+			bSucceeded = false;
+			AddFailureAnalysis(TEXT("preview_change_plan"), PreviewResult);
+		}
+	}
+	else
+	{
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("preview_change_plan"),
+			TEXT("skipped"),
+			TEXT("enforceGate=false."))));
+	}
 
 	if (SchemaJson.IsEmpty())
 	{
@@ -2986,6 +3087,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		}
 		ValidateArguments->SetBoolField(TEXT("returnNormalizedSchema"), true);
 		const FUnrealMcpExecutionResult ValidateResult = UnrealMcp::ValidateMcpToolSchema(*ValidateArguments, ToolsArray);
+		PipelineEvidenceText += TEXT("\n[validate_schema] ") + ValidateResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			TEXT("validate_schema"),
 			ValidateResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -2994,6 +3096,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (ValidateResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(TEXT("validate_schema"), ValidateResult);
 		}
 	}
 	else
@@ -3020,6 +3123,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		GenerateArguments->SetBoolField(TEXT("overwrite"), bOverwriteTests);
 		GenerateArguments->SetBoolField(TEXT("dryRun"), bDryRunOnly);
 		const FUnrealMcpExecutionResult GenerateTestsResult = UnrealMcp::GenerateMcpTests(*GenerateArguments, ToolsArray);
+		PipelineEvidenceText += TEXT("\n[generate_tests] ") + GenerateTestsResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			TEXT("generate_tests"),
 			GenerateTestsResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -3028,6 +3132,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (GenerateTestsResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(TEXT("generate_tests"), GenerateTestsResult);
 		}
 	}
 	else if (!bGenerateTests)
@@ -3044,6 +3149,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		DryRunArguments->SetBoolField(TEXT("applyChatCommand"), bApplyChatCommand);
 		DryRunArguments->SetBoolField(TEXT("createBackup"), bCreateBackup);
 		const FUnrealMcpExecutionResult DryRunResult = UnrealMcp::ApplyMcpScaffold(*DryRunArguments);
+		PipelineEvidenceText += TEXT("\n[apply_dry_run] ") + DryRunResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			TEXT("apply_dry_run"),
 			DryRunResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -3052,6 +3158,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (DryRunResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(TEXT("apply_dry_run"), DryRunResult);
 		}
 	}
 
@@ -3066,6 +3173,43 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 			TEXT("dryRunOnly=true; skipped apply/build/test."))));
 	}
 
+	if (bSucceeded && !bDryRunOnly && bCaptureSnapshots && (bApply || bBuild || bRunTest))
+	{
+		TSharedPtr<FJsonObject> SnapshotArguments = MakeShared<FJsonObject>();
+		SnapshotArguments->SetStringField(TEXT("snapshotName"), FString::Printf(TEXT("pipeline_%s_before"), *ToolName));
+		SnapshotArguments->SetStringField(TEXT("assetPath"), TEXT("/Game"));
+		SnapshotArguments->SetBoolField(TEXT("includeActors"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeAssets"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeBlueprints"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeWidgets"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeMemory"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeSkills"), true);
+		const FUnrealMcpExecutionResult SnapshotResult = UnrealMcp::CaptureProjectSnapshot(*SnapshotArguments);
+		PipelineEvidenceText += TEXT("\n[capture_before_snapshot] ") + SnapshotResult.Text;
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("capture_before_snapshot"),
+			SnapshotResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			SnapshotResult.Text,
+			&SnapshotResult)));
+		if (SnapshotResult.StructuredContent.IsValid())
+		{
+			SnapshotResult.StructuredContent->TryGetStringField(TEXT("snapshotPath"), BeforeSnapshotPath);
+			StructuredContent->SetStringField(TEXT("beforeSnapshotPath"), BeforeSnapshotPath);
+		}
+		if (SnapshotResult.bIsError)
+		{
+			bSucceeded = false;
+			AddFailureAnalysis(TEXT("capture_before_snapshot"), SnapshotResult);
+		}
+	}
+	else if (!bCaptureSnapshots)
+	{
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("capture_before_snapshot"),
+			TEXT("skipped"),
+			TEXT("captureSnapshots=false."))));
+	}
+
 	if (bSucceeded && !bDryRunOnly && bBackupProjectState && (bApply || bBuild || bRunTest))
 	{
 		TSharedPtr<FJsonObject> BackupArguments = MakeShared<FJsonObject>();
@@ -3073,6 +3217,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		BackupArguments->SetStringField(TEXT("reason"), FString::Printf(TEXT("Pre-pipeline snapshot before applying/building/testing MCP tool %s."), *ToolName));
 		BackupArguments->SetBoolField(TEXT("includeBuildLogs"), false);
 		const FUnrealMcpExecutionResult BackupResult = UnrealMcp::BackupProjectState(*BackupArguments);
+		PipelineEvidenceText += TEXT("\n[backup_project_state] ") + BackupResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			TEXT("backup_project_state"),
 			BackupResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -3081,6 +3226,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (BackupResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(TEXT("backup_project_state"), BackupResult);
 		}
 	}
 	else if (bDryRunOnly || !bBackupProjectState)
@@ -3100,6 +3246,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		ApplyArguments->SetBoolField(TEXT("applyChatCommand"), bApplyChatCommand);
 		ApplyArguments->SetBoolField(TEXT("createBackup"), bCreateBackup);
 		const FUnrealMcpExecutionResult ApplyResult = UnrealMcp::ApplyMcpScaffold(*ApplyArguments);
+		PipelineEvidenceText += TEXT("\n[apply] ") + ApplyResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			TEXT("apply"),
 			ApplyResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -3108,6 +3255,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (ApplyResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(TEXT("apply"), ApplyResult);
 		}
 		else if (ApplyResult.StructuredContent.IsValid())
 		{
@@ -3153,6 +3301,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		BuildArguments->SetStringField(TEXT("memoryKey"), MemoryKey);
 		BuildArguments->SetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
 		const FUnrealMcpExecutionResult BuildResult = UnrealMcp::BuildEditor(*BuildArguments);
+		PipelineEvidenceText += TEXT("\n[build] ") + BuildResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			TEXT("build"),
 			BuildResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -3161,6 +3310,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (BuildResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(TEXT("build"), BuildResult);
 		}
 		else if (BuildResult.StructuredContent.IsValid())
 		{
@@ -3196,6 +3346,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		TestArguments->SetBoolField(TEXT("readProjectMemory"), false);
 		TestArguments->SetBoolField(TEXT("writeProjectMemory"), bWriteProjectMemory);
 		const FUnrealMcpExecutionResult TestResult = bRunTestSuite ? RunMcpTestSuite(*TestArguments) : RunMcpToolTest(*TestArguments);
+		PipelineEvidenceText += FString::Printf(TEXT("\n[%s] %s"), bRunTestSuite ? TEXT("test_suite") : TEXT("test"), *TestResult.Text);
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
 			bRunTestSuite ? TEXT("test_suite") : TEXT("test"),
 			TestResult.bIsError ? TEXT("failed") : TEXT("completed"),
@@ -3204,11 +3355,123 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		if (TestResult.bIsError)
 		{
 			bSucceeded = false;
+			AddFailureAnalysis(bRunTestSuite ? TEXT("test_suite") : TEXT("test"), TestResult);
 		}
 	}
 	else if (!bRunTest)
 	{
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("test"), TEXT("skipped"), TEXT("runTest=false."))));
+	}
+
+	if (bSucceeded && !bRequiresRestart && bCaptureSnapshots && bVerifyOutcome)
+	{
+		TSharedPtr<FJsonObject> SnapshotArguments = MakeShared<FJsonObject>();
+		SnapshotArguments->SetStringField(TEXT("snapshotName"), FString::Printf(TEXT("pipeline_%s_after"), *ToolName));
+		SnapshotArguments->SetStringField(TEXT("assetPath"), TEXT("/Game"));
+		SnapshotArguments->SetBoolField(TEXT("includeActors"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeAssets"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeBlueprints"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeWidgets"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeMemory"), true);
+		SnapshotArguments->SetBoolField(TEXT("includeSkills"), true);
+		const FUnrealMcpExecutionResult SnapshotResult = UnrealMcp::CaptureProjectSnapshot(*SnapshotArguments);
+		PipelineEvidenceText += TEXT("\n[capture_after_snapshot] ") + SnapshotResult.Text;
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("capture_after_snapshot"),
+			SnapshotResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			SnapshotResult.Text,
+			&SnapshotResult)));
+		if (SnapshotResult.StructuredContent.IsValid())
+		{
+			SnapshotResult.StructuredContent->TryGetStringField(TEXT("snapshotPath"), AfterSnapshotPath);
+			StructuredContent->SetStringField(TEXT("afterSnapshotPath"), AfterSnapshotPath);
+		}
+		if (SnapshotResult.bIsError)
+		{
+			bSucceeded = false;
+			AddFailureAnalysis(TEXT("capture_after_snapshot"), SnapshotResult);
+		}
+	}
+
+	if (bSucceeded && !bRequiresRestart && bCaptureSnapshots && bVerifyOutcome && !BeforeSnapshotPath.IsEmpty() && !AfterSnapshotPath.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> DiffArguments = MakeShared<FJsonObject>();
+		DiffArguments->SetStringField(TEXT("beforeSnapshotPath"), BeforeSnapshotPath);
+		DiffArguments->SetStringField(TEXT("afterSnapshotPath"), AfterSnapshotPath);
+		const FUnrealMcpExecutionResult DiffResult = UnrealMcp::DiffProjectSnapshot(*DiffArguments);
+		PipelineEvidenceText += TEXT("\n[diff_project_snapshot] ") + DiffResult.Text;
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("diff_project_snapshot"),
+			DiffResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			DiffResult.Text,
+			&DiffResult)));
+		if (DiffResult.bIsError)
+		{
+			bSucceeded = false;
+			AddFailureAnalysis(TEXT("diff_project_snapshot"), DiffResult);
+		}
+	}
+
+	if (bSucceeded && !bRequiresRestart && bVerifyOutcome)
+	{
+		TSharedPtr<FJsonObject> VerifyArguments = MakeShared<FJsonObject>();
+		VerifyArguments->SetStringField(TEXT("task"), Task);
+		VerifyArguments->SetStringField(TEXT("beforeSnapshotPath"), BeforeSnapshotPath);
+		VerifyArguments->SetStringField(TEXT("afterSnapshotPath"), AfterSnapshotPath);
+		VerifyArguments->SetStringField(TEXT("evidenceText"), PipelineEvidenceText);
+		if (!ToolName.IsEmpty())
+		{
+			TArray<FString> ExpectedTools;
+			ExpectedTools.Add(ToolName);
+			VerifyArguments->SetArrayField(TEXT("expectedTools"), MakePipelineStringArray(ExpectedTools));
+		}
+		const FUnrealMcpExecutionResult VerifyResult = UnrealMcp::VerifyTaskOutcome(*VerifyArguments, ToolsArray);
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("verify_task_outcome"),
+			VerifyResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			VerifyResult.Text,
+			&VerifyResult)));
+		if (VerifyResult.bIsError)
+		{
+			bSucceeded = false;
+			AddFailureAnalysis(TEXT("verify_task_outcome"), VerifyResult);
+		}
+	}
+	else if (bRequiresRestart && bVerifyOutcome)
+	{
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("verify_task_outcome"),
+			TEXT("deferred"),
+			TEXT("Verification is deferred until the post-restart resume_test run can see the newly loaded tool definitions."))));
+	}
+	else if (!bVerifyOutcome)
+	{
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("verify_task_outcome"),
+			TEXT("skipped"),
+			TEXT("verifyOutcome=false."))));
+	}
+
+	if (!bSucceeded && bAppliedSourceChanges)
+	{
+		TSharedPtr<FJsonObject> RollbackArguments = MakeShared<FJsonObject>();
+		RollbackArguments->SetBoolField(TEXT("dryRun"), true);
+		RollbackArguments->SetBoolField(TEXT("createPreRollbackBackup"), false);
+		const FUnrealMcpExecutionResult RollbackPreviewResult = UnrealMcp::RollbackToManifest(*RollbackArguments);
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("rollback_preview"),
+			RollbackPreviewResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			RollbackPreviewResult.Text,
+			&RollbackPreviewResult)));
+		TSharedPtr<FJsonObject> RollbackPlan = MakeShared<FJsonObject>();
+		RollbackPlan->SetStringField(TEXT("recommendedTool"), TEXT("unreal.mcp_rollback_to_manifest"));
+		RollbackPlan->SetBoolField(TEXT("dryRunRecommendedFirst"), true);
+		RollbackPlan->SetStringField(TEXT("reason"), TEXT("Pipeline failed after source changes were applied."));
+		if (RollbackPreviewResult.StructuredContent.IsValid())
+		{
+			RollbackPlan->SetObjectField(TEXT("dryRunPreview"), RollbackPreviewResult.StructuredContent);
+		}
+		StructuredContent->SetObjectField(TEXT("rollbackPlan"), RollbackPlan);
 	}
 
 	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);
@@ -3222,6 +3485,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	StructuredContent->SetStringField(TEXT("supervisorCommand"), FString::Printf(TEXT("python3 Tools/unreal_mcp_supervisor.py resume-test --memory-key %s"), *MemoryKey));
 	StructuredContent->SetArrayField(TEXT("steps"), Steps);
 	StructuredContent->SetArrayField(TEXT("issues"), Issues);
+	StructuredContent->SetArrayField(TEXT("failureAnalyses"), FailureAnalyses);
 
 	const FString Text = bRequiresRestart
 		? TEXT("MCP extension pipeline applied and built changes. Restart Unreal Editor, then resume test.")
