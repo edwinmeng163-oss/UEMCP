@@ -7,7 +7,7 @@ The plugin runs inside Unreal Editor and exposes a local HTTP JSON-RPC MCP endpo
 Core layers:
 
 - `FUnrealMcpModule`: module startup, HTTP routing, MCP protocol handling, Chat command dispatch, and current tool execution.
-- Tool helpers in `UnrealMcpModule.cpp`: editor, actor, Blueprint, widget, scaffold, self-extension, memory, skill, build, and test logic.
+- Tool helpers in `UnrealMcpModule.cpp` plus split tool files: Blueprint graph, widget, scaffold, memory, and remaining self-extension logic still have module-local pieces, while editor, actor, Blueprint asset, skill, and major self-extension flows are moving into category files.
 - `UnrealMcpToolRegistry`: explicit metadata for visibility, handler aliases, risk policy, owners, docs, dry-run support, and test coverage.
 - `UnrealMcpToolHandlerRegistry`: explicit handler registration map used by audit and registry validation instead of source-text scanning.
 - `UnrealMcpToolExecutionGuard` plus `UnrealMcp*OutcomeVerifier`: shared execution checks with category-specific state verification for Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools.
@@ -39,7 +39,7 @@ Recommended split:
 - `Private/Tools/SelfExtension`: self-extension workbench, pipeline status, MCP test execution, and extension pipeline helpers. The first split moved `unreal.mcp_workbench_status`, `unreal.mcp_pipeline_status`, `unreal.mcp_run_tool_test`, `unreal.mcp_run_test_suite`, and `unreal.mcp_extension_pipeline` into `UnrealMcpSelfExtensionTools.cpp`.
 - `Private/Tools/Editor`: status, logs, maps, assets, PIE, console, Python, Content Browser focus, map/asset opening, and save-dirty-packages. These editor tools now live in `UnrealMcpEditorTools.cpp`.
 - `Private/Tools/Actors`: actor selection, transforms, spawning, layout, batch edits. Actor query/selection, basic write tools, batch edits, point-light edits, static-mesh actor configuration, actor layout tools, and spawn tools now live in `UnrealMcpActorTools.cpp`.
-- `Private/Tools/Blueprint`: Blueprint class and graph editing.
+- `Private/Tools/Blueprint`: Blueprint class and graph editing. Blueprint asset operations (`compile_blueprint`, `compile_blueprints_in_path`, `create_blueprint_class`) now live in `UnrealMcpBlueprintTools.cpp`; graph-node editing remains in `UnrealMcpModule.cpp` until the next split.
 - `Private/Tools/Widget`: Widget Blueprint hierarchy, layout, event binding.
 - `Private/Tools/Scaffold`: gameplay scaffolds and MCP tool scaffolds.
 - `Private/Tools/SelfExtension`: validate, apply, build, test, audit, rollback, pipeline.
