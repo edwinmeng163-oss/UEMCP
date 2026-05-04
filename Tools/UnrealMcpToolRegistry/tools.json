@@ -1309,7 +1309,7 @@
       "name": "unreal.scaffold_autobattler_ai",
       "category": "scaffold",
       "handlerName": "unreal.scaffold_autobattler_ai",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "medium",
       "requiresWrite": true,
       "requiresBuild": false,
@@ -1323,14 +1323,14 @@
       "testCoverage": "missing",
       "owner": "UEvolve Core",
       "docsPath": "README.md#tool-coverage",
-      "reason": "Explicit registry: scaffold tool with controlled write or workflow side effects.",
-      "notes": ""
+      "reason": "Legacy gameplay/demo scaffold retained for direct compatibility; hidden from AI-facing tools/list so UEvolve can focus on the MCP self-extension loop.",
+      "notes": "Legacy demo/gameplay content scaffold. Prefer unreal.scaffold_mcp_tool and mcp_* self-extension tools for product work."
     },
     {
       "name": "unreal.scaffold_economy_system",
       "category": "scaffold",
       "handlerName": "unreal.scaffold_economy_system",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "medium",
       "requiresWrite": true,
       "requiresBuild": false,
@@ -1344,8 +1344,8 @@
       "testCoverage": "missing",
       "owner": "UEvolve Core",
       "docsPath": "README.md#tool-coverage",
-      "reason": "Explicit registry: scaffold tool with controlled write or workflow side effects.",
-      "notes": ""
+      "reason": "Legacy gameplay/demo scaffold retained for direct compatibility; hidden from AI-facing tools/list so UEvolve can focus on the MCP self-extension loop.",
+      "notes": "Legacy demo/gameplay content scaffold. Prefer unreal.scaffold_mcp_tool and mcp_* self-extension tools for product work."
     },
     {
       "name": "unreal.scaffold_mcp_tool",
@@ -1372,7 +1372,7 @@
       "name": "unreal.scaffold_result_ui",
       "category": "scaffold",
       "handlerName": "unreal.scaffold_result_ui",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "medium",
       "requiresWrite": true,
       "requiresBuild": false,
@@ -1386,14 +1386,14 @@
       "testCoverage": "missing",
       "owner": "UEvolve Core",
       "docsPath": "README.md#tool-coverage",
-      "reason": "Explicit registry: scaffold tool with controlled write or workflow side effects.",
-      "notes": ""
+      "reason": "Legacy gameplay/demo scaffold retained for direct compatibility; hidden from AI-facing tools/list so UEvolve can focus on the MCP self-extension loop.",
+      "notes": "Legacy demo/gameplay content scaffold. Prefer unreal.scaffold_mcp_tool and mcp_* self-extension tools for product work."
     },
     {
       "name": "unreal.scaffold_round_system",
       "category": "scaffold",
       "handlerName": "unreal.scaffold_round_system",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "medium",
       "requiresWrite": true,
       "requiresBuild": false,
@@ -1407,14 +1407,14 @@
       "testCoverage": "missing",
       "owner": "UEvolve Core",
       "docsPath": "README.md#tool-coverage",
-      "reason": "Explicit registry: scaffold tool with controlled write or workflow side effects.",
-      "notes": ""
+      "reason": "Legacy gameplay/demo scaffold retained for direct compatibility; hidden from AI-facing tools/list so UEvolve can focus on the MCP self-extension loop.",
+      "notes": "Legacy demo/gameplay content scaffold. Prefer unreal.scaffold_mcp_tool and mcp_* self-extension tools for product work."
     },
     {
       "name": "unreal.scaffold_shop_system",
       "category": "scaffold",
       "handlerName": "unreal.scaffold_shop_system",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "medium",
       "requiresWrite": true,
       "requiresBuild": false,
@@ -1428,8 +1428,8 @@
       "testCoverage": "missing",
       "owner": "UEvolve Core",
       "docsPath": "README.md#tool-coverage",
-      "reason": "Explicit registry: scaffold tool with controlled write or workflow side effects.",
-      "notes": ""
+      "reason": "Legacy gameplay/demo scaffold retained for direct compatibility; hidden from AI-facing tools/list so UEvolve can focus on the MCP self-extension loop.",
+      "notes": "Legacy demo/gameplay content scaffold. Prefer unreal.scaffold_mcp_tool and mcp_* self-extension tools for product work."
     },
     {
       "name": "unreal.select_actors",

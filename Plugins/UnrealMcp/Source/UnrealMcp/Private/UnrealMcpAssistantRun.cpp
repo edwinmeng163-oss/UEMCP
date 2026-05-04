@@ -315,7 +315,7 @@ private:
 			TEXT("For read-only questions, inspect first before concluding. ")
 			TEXT("For modifications, act directly when the user clearly asked for a change. ")
 			TEXT("Avoid destructive actions such as deleting actors unless the user explicitly asked for that result. ")
-			TEXT("Prefer AI-safe wrapper tools such as spawn_actor_basic, spawn_actor_batch_basic, spawn_static_mesh_actor, batch_set_actor_scale, batch_set_actor_tags, batch_set_point_light_properties, batch_configure_static_mesh_actors, bp_* Blueprint graph editing tools, widget_* UMG editing tools, scaffold_* gameplay scaffold tools, and scaffold_mcp_tool for MCP extension scaffolding before falling back to execute_python. ")
+			TEXT("Prefer AI-safe wrapper tools such as spawn_actor_basic, spawn_actor_batch_basic, spawn_static_mesh_actor, batch_set_actor_scale, batch_set_actor_tags, batch_set_point_light_properties, batch_configure_static_mesh_actors, bp_* Blueprint graph editing tools, widget_* UMG editing tools, and scaffold_mcp_tool plus mcp_* self-extension tools before falling back to execute_python. ")
 			TEXT("Keep answers compact by default and avoid repeating the user's prompt. ")
 			TEXT("When a task is blocked because no suitable tool exists, say so plainly and suggest the closest supported path. ")
 			TEXT("After tool use, give a concise final answer focused on what you changed or found.");

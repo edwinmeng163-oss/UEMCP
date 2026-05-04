@@ -112,12 +112,6 @@ Unreal MCP currently supports:
   - `unreal.widget_bind_event`
   - `unreal.widget_bind_blueprint_variable`
   - `unreal.widget_build_template`
-- Gameplay scaffold helpers:
-  - `unreal.scaffold_round_system`
-  - `unreal.scaffold_shop_system`
-  - `unreal.scaffold_economy_system`
-  - `unreal.scaffold_autobattler_ai`
-  - `unreal.scaffold_result_ui`
 - MCP extension scaffolding:
   - `unreal.scaffold_mcp_tool`
   - `unreal.mcp_list_scaffolds`
@@ -142,6 +136,13 @@ Unreal MCP currently supports:
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
+- Legacy/demo gameplay scaffold helpers are retained for direct compatibility
+  but hidden from AI-facing `tools/list`:
+  - `unreal.scaffold_round_system`
+  - `unreal.scaffold_shop_system`
+  - `unreal.scaffold_economy_system`
+  - `unreal.scaffold_autobattler_ai`
+  - `unreal.scaffold_result_ui`
 - Restart-resilient project memory:
   - `unreal.project_memory_write`
   - `unreal.project_memory_read`

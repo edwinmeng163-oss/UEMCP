@@ -41,7 +41,7 @@ Recommended split:
 - `Private/Tools/Actors`: actor selection, transforms, spawning, layout, batch edits. Actor query/selection, basic write tools, batch edits, point-light edits, static-mesh actor configuration, actor layout tools, and spawn tools now live in `UnrealMcpActorTools.cpp`.
 - `Private/Tools/Blueprint`: Blueprint class and graph editing in `UnrealMcpBlueprintTools.cpp`, with outcome verification in `UnrealMcpBlueprintOutcomeVerifier.cpp`.
 - `Private/Tools/Widget`: Widget Blueprint hierarchy, layout, event binding, and template helpers in `UnrealMcpWidgetTools.cpp`, with outcome verification in `UnrealMcpWidgetOutcomeVerifier.cpp`.
-- `Private/Tools/Scaffold`: gameplay scaffolds and MCP tool scaffolds in `UnrealMcpScaffoldTools.cpp`.
+- `Private/Tools/Scaffold`: `scaffold_mcp_tool` for MCP self-extension scaffolds plus legacy-hidden gameplay/demo scaffolds retained for direct compatibility in `UnrealMcpScaffoldTools.cpp`.
 - `Private/Tools/SelfExtension`: validate, apply, build, test, audit, rollback, pipeline.
 - `Private/Tools/Memory`: project memory CRUD in `UnrealMcpMemoryTools.cpp`.
 - `Private/Tools/Skills`: project skill discovery, application, local activity recording, and skill distillation. Skill dispatch now lives in `UnrealMcpSkillTools.cpp`; promote still receives its extension-lock behavior through an explicit module callback.

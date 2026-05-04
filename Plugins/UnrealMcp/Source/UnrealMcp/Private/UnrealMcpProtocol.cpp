@@ -295,7 +295,7 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleInitialize(const TShared
 			ResultObject->SetStringField(
 				TEXT("instructions"),
 				FString::Printf(
-				TEXT("Connected to Unreal Editor. This server can inspect assets, drive PIE sessions, tail logs, run console commands, batch-edit actor properties, lay out and spawn actors in bulk (grid and circle), execute Python commands or script files, open maps and assets, create/compile blueprints, edit Blueprint graphs with bp_* tools, edit UMG Widget Blueprints with widget_* tools, scaffold gameplay systems with scaffold_* tools, and save dirty packages. Inside the editor you can also open Window > Unreal MCP Chat. Endpoint: %s"),
+				TEXT("Connected to Unreal Editor. This server can inspect assets, drive PIE sessions, tail logs, run console commands, batch-edit actor properties, lay out and spawn actors in bulk (grid and circle), execute Python commands or script files, open maps and assets, create/compile blueprints, edit Blueprint graphs with bp_* tools, edit UMG Widget Blueprints with widget_* tools, scaffold MCP tool extensions with scaffold_mcp_tool and mcp_* pipeline tools, and save dirty packages. Inside the editor you can also open Window > Unreal MCP Chat. Endpoint: %s"),
 					*EndpointUrl));
 
 	return MakeJsonRpcResult(Id, ResultObject, NegotiatedProtocolVersion);
