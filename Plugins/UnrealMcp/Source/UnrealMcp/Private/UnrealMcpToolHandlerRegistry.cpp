@@ -106,13 +106,13 @@ namespace UnrealMcp
 			MakeHandlerEntry(TEXT("unreal.stop_pie"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.sync_content_browser"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.tail_log"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_add"), TEXT("widget")),
-			MakeHandlerEntry(TEXT("unreal.widget_bind_blueprint_variable"), TEXT("widget")),
-			MakeHandlerEntry(TEXT("unreal.widget_bind_event"), TEXT("widget")),
-			MakeHandlerEntry(TEXT("unreal.widget_build_template"), TEXT("widget")),
-			MakeHandlerEntry(TEXT("unreal.widget_remove"), TEXT("widget")),
-			MakeHandlerEntry(TEXT("unreal.widget_set_property"), TEXT("widget")),
-			MakeHandlerEntry(TEXT("unreal.widget_set_slot_layout"), TEXT("widget")),
+			MakeHandlerEntry(TEXT("unreal.widget_add"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
+			MakeHandlerEntry(TEXT("unreal.widget_bind_blueprint_variable"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
+			MakeHandlerEntry(TEXT("unreal.widget_bind_event"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
+			MakeHandlerEntry(TEXT("unreal.widget_build_template"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
+			MakeHandlerEntry(TEXT("unreal.widget_remove"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
+			MakeHandlerEntry(TEXT("unreal.widget_set_property"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
+			MakeHandlerEntry(TEXT("unreal.widget_set_slot_layout"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
 		};
 		return Entries;
 	}

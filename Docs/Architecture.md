@@ -40,7 +40,7 @@ Recommended split:
 - `Private/Tools/Editor`: status, logs, maps, assets, PIE, console, Python, Content Browser focus, map/asset opening, and save-dirty-packages. These editor tools now live in `UnrealMcpEditorTools.cpp`.
 - `Private/Tools/Actors`: actor selection, transforms, spawning, layout, batch edits. Actor query/selection, basic write tools, batch edits, point-light edits, static-mesh actor configuration, actor layout tools, and spawn tools now live in `UnrealMcpActorTools.cpp`.
 - `Private/Tools/Blueprint`: Blueprint class and graph editing. Blueprint asset operations and Blueprint graph-node editing tools now live in `UnrealMcpBlueprintTools.cpp`; shared Blueprint/Widget helpers remain in `UnrealMcpModule.cpp` until the Widget split can promote them into a small utility file.
-- `Private/Tools/Widget`: Widget Blueprint hierarchy, layout, event binding.
+- `Private/Tools/Widget`: Widget Blueprint hierarchy, layout, event binding. Widget handler tools now live in `UnrealMcpWidgetTools.cpp`; shared WidgetTree/template helpers remain in `UnrealMcpModule.cpp` while Scaffold still depends on them.
 - `Private/Tools/Scaffold`: gameplay scaffolds and MCP tool scaffolds.
 - `Private/Tools/SelfExtension`: validate, apply, build, test, audit, rollback, pipeline.
 - `Private/Tools/Memory`: project memory CRUD.
