@@ -2168,6 +2168,88 @@ namespace UnrealMcp
 
 			return ActorToolMakeExecutionResult(Text, StructuredContent, false);
 		}
+
+		FUnrealMcpExecutionResult ExecuteBatchSetActorProperties(const FString& ToolName, const FJsonObject& Arguments)
+		{
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			UEditorActorSubsystem* EditorActorSubsystem = ActorToolGetEditorActorSubsystem();
+			if (!EditorActorSubsystem)
+			{
+				return ActorToolMakeExecutionResult(TEXT("EditorActorSubsystem is unavailable."), nullptr, true);
+			}
+
+			const TSharedPtr<FJsonObject>* PropertyValuesObject = nullptr;
+			if (!Arguments.TryGetObjectField(TEXT("properties"), PropertyValuesObject) || !PropertyValuesObject || (*PropertyValuesObject)->Values.Num() == 0)
+			{
+				return ActorToolMakeExecutionResult(TEXT("The properties argument must be a non-empty object."), nullptr, true);
+			}
+
+			FActorToolQueryResult Query;
+			FString FailureReason;
+			if (!ActorToolResolveActorsFromArguments(EditorActorSubsystem, Arguments, Query, FailureReason))
+			{
+				return ActorToolMakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			FScopedTransaction Transaction(NSLOCTEXT("UnrealMcp", "BatchSetActorProperties", "Unreal MCP Batch Set Actor Properties"));
+
+			int32 TotalSuccessCount = 0;
+			int32 TotalFailureCount = 0;
+			TArray<TSharedPtr<FJsonValue>> ActorResults;
+			TArray<FString> TextLines;
+
+			for (AActor* Actor : Query.Actors)
+			{
+				int32 ActorSuccessCount = 0;
+				int32 ActorFailureCount = 0;
+				TArray<TSharedPtr<FJsonValue>> EditResults;
+				ApplyPropertyMapToActor(Actor, **PropertyValuesObject, EditResults, ActorSuccessCount, ActorFailureCount);
+
+				TotalSuccessCount += ActorSuccessCount;
+				TotalFailureCount += ActorFailureCount;
+
+				TSharedPtr<FJsonObject> ActorObject = ActorToolMakeActorObject(Actor);
+				ActorObject->SetNumberField(TEXT("propertySuccessCount"), ActorSuccessCount);
+				ActorObject->SetNumberField(TEXT("propertyFailureCount"), ActorFailureCount);
+				ActorObject->SetArrayField(TEXT("propertyEdits"), EditResults);
+				ActorResults.Add(MakeShared<FJsonValueObject>(ActorObject));
+
+				TextLines.Add(FString::Printf(
+					TEXT("%s: propertySuccess=%d propertyFailure=%d"),
+					*Actor->GetActorLabel(),
+					ActorSuccessCount,
+					ActorFailureCount));
+			}
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("filter"), Query.FilterText);
+			StructuredContent->SetStringField(TEXT("classPath"), Query.ClassPathFilter);
+			StructuredContent->SetBoolField(TEXT("selectedOnly"), Query.bSelectedOnly);
+			StructuredContent->SetNumberField(TEXT("matchCount"), Query.MatchCount);
+			StructuredContent->SetNumberField(TEXT("returnedCount"), Query.Actors.Num());
+			StructuredContent->SetBoolField(TEXT("truncated"), Query.bTruncated);
+			StructuredContent->SetNumberField(TEXT("propertyCount"), (*PropertyValuesObject)->Values.Num());
+			StructuredContent->SetNumberField(TEXT("successCount"), TotalSuccessCount);
+			StructuredContent->SetNumberField(TEXT("failureCount"), TotalFailureCount);
+			StructuredContent->SetArrayField(TEXT("actors"), ActorResults);
+
+			FString Text = FString::Printf(
+				TEXT("Applied %d property edits across %d actors. success=%d failure=%d"),
+				(TotalSuccessCount + TotalFailureCount),
+				Query.Actors.Num(),
+				TotalSuccessCount,
+				TotalFailureCount);
+			if (TextLines.Num() > 0)
+			{
+				Text += TEXT("\n") + FString::Join(TextLines, TEXT("\n"));
+			}
+
+			return ActorToolMakeExecutionResult(Text, StructuredContent, TotalFailureCount > 0);
+		}
 	}
 
 	bool TryExecuteActorTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
@@ -2259,6 +2341,12 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.spawn_static_mesh_actor"))
 		{
 			OutResult = ExecuteSpawnStaticMeshActor(ToolName, Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.batch_set_actor_properties"))
+		{
+			OutResult = ExecuteBatchSetActorProperties(ToolName, Arguments);
 			return true;
 		}
 
