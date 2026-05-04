@@ -24,6 +24,7 @@ namespace UnrealMcp
 	FString GetMcpBuildLogRoot();
 	FString GetLatestMcpExtensionManifestPath();
 	FString GetMcpProjectStateBackupRoot();
+	FString HashTextForManifest(const FString& Text);
 	FString MakePathRelativeToProject(const FString& Path);
 	FString FileTimeToIsoString(const FDateTime& Time);
 	bool IsPathInsideDirectory(const FString& Path, const FString& Directory);
@@ -733,6 +734,289 @@ namespace UnrealMcp
 				Skipped.Num(),
 				DeleteErrors.Num());
 			return MakeExecutionResult(Text, StructuredContent, DeleteErrors.Num() > 0);
+		}
+
+		void BuildSimpleLineDiffPreview(
+			const FString& BeforeText,
+			const FString& AfterText,
+			int32 MaxPreviewLines,
+			TArray<TSharedPtr<FJsonValue>>& OutChangedLines,
+			FString& OutPreviewText,
+			int32& OutChangedLineCount,
+			bool& bOutTruncated)
+		{
+			TArray<FString> BeforeLines;
+			TArray<FString> AfterLines;
+			BeforeText.ParseIntoArrayLines(BeforeLines, false);
+			AfterText.ParseIntoArrayLines(AfterLines, false);
+
+			const int32 SafeMaxPreviewLines = FMath::Max(1, MaxPreviewLines);
+			TArray<FString> PreviewLines;
+			OutChangedLineCount = 0;
+			bOutTruncated = false;
+
+			auto AddPreviewLine = [&](
+				const FString& Kind,
+				int32 BeforeLineNumber,
+				int32 AfterLineNumber,
+				const FString& BeforeLine,
+				const FString& AfterLine)
+			{
+				++OutChangedLineCount;
+				if (OutChangedLines.Num() >= SafeMaxPreviewLines)
+				{
+					bOutTruncated = true;
+					return;
+				}
+
+				TSharedPtr<FJsonObject> LineObject = MakeShared<FJsonObject>();
+				LineObject->SetStringField(TEXT("kind"), Kind);
+				if (BeforeLineNumber > 0)
+				{
+					LineObject->SetNumberField(TEXT("beforeLine"), BeforeLineNumber);
+				}
+				LineObject->SetStringField(TEXT("before"), BeforeLine.Left(1000));
+				if (AfterLineNumber > 0)
+				{
+					LineObject->SetNumberField(TEXT("afterLine"), AfterLineNumber);
+				}
+				LineObject->SetStringField(TEXT("after"), AfterLine.Left(1000));
+				OutChangedLines.Add(MakeShared<FJsonValueObject>(LineObject));
+
+				PreviewLines.Add(FString::Printf(TEXT("@@ %s before:%d after:%d @@"), *Kind, BeforeLineNumber, AfterLineNumber));
+				if (!BeforeLine.IsEmpty())
+				{
+					PreviewLines.Add(TEXT("- ") + BeforeLine.Left(1000));
+				}
+				if (!AfterLine.IsEmpty())
+				{
+					PreviewLines.Add(TEXT("+ ") + AfterLine.Left(1000));
+				}
+			};
+
+			auto FindLineForward = [](const TArray<FString>& Lines, const FString& Needle, int32 StartIndex, int32 Lookahead) -> int32
+			{
+				const int32 EndIndex = FMath::Min(Lines.Num(), StartIndex + Lookahead);
+				for (int32 Index = StartIndex; Index < EndIndex; ++Index)
+				{
+					if (Lines[Index] == Needle)
+					{
+						return Index;
+					}
+				}
+				return INDEX_NONE;
+			};
+
+			const int32 Lookahead = 300;
+			int32 BeforeIndex = 0;
+			int32 AfterIndex = 0;
+			while (BeforeIndex < BeforeLines.Num() || AfterIndex < AfterLines.Num())
+			{
+				if (BeforeIndex < BeforeLines.Num()
+					&& AfterIndex < AfterLines.Num()
+					&& BeforeLines[BeforeIndex] == AfterLines[AfterIndex])
+				{
+					++BeforeIndex;
+					++AfterIndex;
+					continue;
+				}
+
+				bool bHandled = false;
+				if (BeforeIndex < BeforeLines.Num() && AfterIndex < AfterLines.Num())
+				{
+					const int32 MatchingAfterIndex = FindLineForward(AfterLines, BeforeLines[BeforeIndex], AfterIndex + 1, Lookahead);
+					if (MatchingAfterIndex != INDEX_NONE)
+					{
+						for (int32 InsertIndex = AfterIndex; InsertIndex < MatchingAfterIndex; ++InsertIndex)
+						{
+							AddPreviewLine(TEXT("inserted"), BeforeIndex + 1, InsertIndex + 1, FString(), AfterLines[InsertIndex]);
+						}
+						AfterIndex = MatchingAfterIndex;
+						bHandled = true;
+					}
+				}
+
+				if (!bHandled && BeforeIndex < BeforeLines.Num() && AfterIndex < AfterLines.Num())
+				{
+					const int32 MatchingBeforeIndex = FindLineForward(BeforeLines, AfterLines[AfterIndex], BeforeIndex + 1, Lookahead);
+					if (MatchingBeforeIndex != INDEX_NONE)
+					{
+						for (int32 DeleteIndex = BeforeIndex; DeleteIndex < MatchingBeforeIndex; ++DeleteIndex)
+						{
+							AddPreviewLine(TEXT("deleted"), DeleteIndex + 1, AfterIndex + 1, BeforeLines[DeleteIndex], FString());
+						}
+						BeforeIndex = MatchingBeforeIndex;
+						bHandled = true;
+					}
+				}
+
+				if (bHandled)
+				{
+					continue;
+				}
+
+				const FString BeforeLine = BeforeLines.IsValidIndex(BeforeIndex) ? BeforeLines[BeforeIndex] : FString();
+				const FString AfterLine = AfterLines.IsValidIndex(AfterIndex) ? AfterLines[AfterIndex] : FString();
+				AddPreviewLine(
+					BeforeLines.IsValidIndex(BeforeIndex) && AfterLines.IsValidIndex(AfterIndex) ? TEXT("changed") : (BeforeLines.IsValidIndex(BeforeIndex) ? TEXT("deleted") : TEXT("inserted")),
+					BeforeLines.IsValidIndex(BeforeIndex) ? BeforeIndex + 1 : 0,
+					AfterLines.IsValidIndex(AfterIndex) ? AfterIndex + 1 : 0,
+					BeforeLine,
+					AfterLine);
+				if (BeforeLines.IsValidIndex(BeforeIndex))
+				{
+					++BeforeIndex;
+				}
+				if (AfterLines.IsValidIndex(AfterIndex))
+				{
+					++AfterIndex;
+				}
+			}
+
+			if (bOutTruncated)
+			{
+				PreviewLines.Add(FString::Printf(TEXT("... truncated after %d changed preview lines ..."), SafeMaxPreviewLines));
+			}
+			OutPreviewText = FString::Join(PreviewLines, TEXT("\n"));
+		}
+
+		TSharedPtr<FJsonObject> MakeTextDiffObject(const FString& BeforeText, const FString& AfterText, int32 MaxPreviewLines)
+		{
+			TArray<FString> BeforeLines;
+			TArray<FString> AfterLines;
+			BeforeText.ParseIntoArrayLines(BeforeLines, false);
+			AfterText.ParseIntoArrayLines(AfterLines, false);
+
+			TArray<TSharedPtr<FJsonValue>> ChangedLines;
+			FString PreviewText;
+			int32 ChangedLineCount = 0;
+			bool bTruncated = false;
+			BuildSimpleLineDiffPreview(BeforeText, AfterText, MaxPreviewLines, ChangedLines, PreviewText, ChangedLineCount, bTruncated);
+
+			TSharedPtr<FJsonObject> DiffObject = MakeShared<FJsonObject>();
+			DiffObject->SetNumberField(TEXT("beforeLineCount"), BeforeLines.Num());
+			DiffObject->SetNumberField(TEXT("afterLineCount"), AfterLines.Num());
+			DiffObject->SetNumberField(TEXT("changedLineCount"), ChangedLineCount);
+			DiffObject->SetBoolField(TEXT("hasChanges"), ChangedLineCount > 0);
+			DiffObject->SetBoolField(TEXT("truncated"), bTruncated);
+			DiffObject->SetStringField(TEXT("previewText"), PreviewText);
+			DiffObject->SetArrayField(TEXT("changedLines"), ChangedLines);
+			return DiffObject;
+		}
+
+		FUnrealMcpExecutionResult DiffLastMcpApply(const FJsonObject& Arguments)
+		{
+			FString ManifestPath = GetLatestMcpExtensionManifestPath();
+			bool bIncludeFullText = false;
+			Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath);
+			Arguments.TryGetBoolField(TEXT("includeFullText"), bIncludeFullText);
+			const int32 MaxPreviewLines = FMath::Min(GetPositiveIntArgument(Arguments, TEXT("maxPreviewLines"), 120), 1000);
+
+			FString ResolvedManifestPath;
+			FString FailureReason;
+			if (!ResolveProjectPathInsideProject(ManifestPath, ResolvedManifestPath, FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			TSharedPtr<FJsonObject> ManifestObject;
+			if (!LoadJsonObjectFromFile(ResolvedManifestPath, ManifestObject, FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			FString ToolName;
+			FString SourcePath;
+			FString BackupSourcePath;
+			FString AfterSourcePath;
+			FString SourceHashBefore;
+			FString SourceHashAfter;
+			ManifestObject->TryGetStringField(TEXT("toolName"), ToolName);
+			ManifestObject->TryGetStringField(TEXT("sourcePath"), SourcePath);
+			ManifestObject->TryGetStringField(TEXT("backupSourcePath"), BackupSourcePath);
+			ManifestObject->TryGetStringField(TEXT("afterSourcePath"), AfterSourcePath);
+			ManifestObject->TryGetStringField(TEXT("sourceHashBefore"), SourceHashBefore);
+			ManifestObject->TryGetStringField(TEXT("sourceHashAfter"), SourceHashAfter);
+
+			if (BackupSourcePath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Manifest is missing backupSourcePath."), nullptr, true);
+			}
+			if (AfterSourcePath.IsEmpty())
+			{
+				AfterSourcePath = SourcePath;
+			}
+			if (AfterSourcePath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Manifest is missing afterSourcePath and sourcePath."), nullptr, true);
+			}
+
+			FString ResolvedBeforePath;
+			FString ResolvedAfterPath;
+			if (!ResolveProjectPathInsideProject(BackupSourcePath, ResolvedBeforePath, FailureReason)
+				|| !ResolveProjectPathInsideProject(AfterSourcePath, ResolvedAfterPath, FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			FString BeforeText;
+			FString AfterText;
+			if (!FFileHelper::LoadFileToString(BeforeText, *ResolvedBeforePath))
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Failed to read before snapshot '%s'."), *ResolvedBeforePath), nullptr, true);
+			}
+			if (!FFileHelper::LoadFileToString(AfterText, *ResolvedAfterPath))
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Failed to read after snapshot '%s'."), *ResolvedAfterPath), nullptr, true);
+			}
+
+			TArray<FString> BeforeLines;
+			TArray<FString> AfterLines;
+			BeforeText.ParseIntoArrayLines(BeforeLines, false);
+			AfterText.ParseIntoArrayLines(AfterLines, false);
+
+			TArray<TSharedPtr<FJsonValue>> ChangedLines;
+			FString PreviewText;
+			int32 ChangedLineCount = 0;
+			bool bTruncated = false;
+			BuildSimpleLineDiffPreview(BeforeText, AfterText, MaxPreviewLines, ChangedLines, PreviewText, ChangedLineCount, bTruncated);
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_diff_last_apply"));
+			StructuredContent->SetStringField(TEXT("toolName"), ToolName);
+			StructuredContent->SetStringField(TEXT("manifestPath"), ResolvedManifestPath);
+			StructuredContent->SetStringField(TEXT("sourcePath"), SourcePath);
+			StructuredContent->SetStringField(TEXT("beforePath"), ResolvedBeforePath);
+			StructuredContent->SetStringField(TEXT("afterPath"), ResolvedAfterPath);
+			StructuredContent->SetStringField(TEXT("sourceHashBefore"), SourceHashBefore);
+			StructuredContent->SetStringField(TEXT("sourceHashAfter"), SourceHashAfter);
+			StructuredContent->SetStringField(TEXT("computedBeforeHash"), HashTextForManifest(BeforeText));
+			StructuredContent->SetStringField(TEXT("computedAfterHash"), HashTextForManifest(AfterText));
+			StructuredContent->SetNumberField(TEXT("beforeLineCount"), BeforeLines.Num());
+			StructuredContent->SetNumberField(TEXT("afterLineCount"), AfterLines.Num());
+			StructuredContent->SetNumberField(TEXT("changedLineCount"), ChangedLineCount);
+			StructuredContent->SetBoolField(TEXT("hasChanges"), ChangedLineCount > 0);
+			StructuredContent->SetBoolField(TEXT("truncated"), bTruncated);
+			StructuredContent->SetStringField(TEXT("previewText"), PreviewText);
+			StructuredContent->SetArrayField(TEXT("changedLines"), ChangedLines);
+			const TArray<TSharedPtr<FJsonValue>>* ManifestChanges = nullptr;
+			if (ManifestObject->TryGetArrayField(TEXT("changes"), ManifestChanges) && ManifestChanges)
+			{
+				StructuredContent->SetArrayField(TEXT("manifestChanges"), *ManifestChanges);
+			}
+			if (bIncludeFullText)
+			{
+				StructuredContent->SetStringField(TEXT("beforeText"), BeforeText);
+				StructuredContent->SetStringField(TEXT("afterText"), AfterText);
+			}
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Last MCP apply diff for %s: changedLineCount=%d truncated=%s."),
+					ToolName.IsEmpty() ? TEXT("<unknown>") : *ToolName,
+					ChangedLineCount,
+					bTruncated ? TEXT("true") : TEXT("false")),
+				StructuredContent,
+				false);
 		}
 
 	namespace
