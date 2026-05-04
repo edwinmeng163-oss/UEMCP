@@ -12840,7 +12840,19 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 	}
 
 	FUnrealMcpExecutionResult SkillToolResult;
-	if (UnrealMcp::TryExecuteSkillTool(ToolName, Arguments, SkillToolResult))
+	if (UnrealMcp::TryExecuteSkillTool(
+		ToolName,
+		Arguments,
+		[&ToolName](const FJsonObject& ToolArguments)
+		{
+			UnrealMcp::FScopedMcpExtensionSessionLock ScopedLock(ToolName, ToolArguments);
+			if (!ScopedLock.IsAcquired())
+			{
+				return UnrealMcp::MakeExecutionResult(ScopedLock.GetFailureReason(), ScopedLock.MakeStructuredContent(TEXT("mcp_extension_lock_failed")), true);
+			}
+			return UnrealMcp::SkillPromoteDraft(ToolArguments);
+		},
+		SkillToolResult))
 	{
 		return SkillToolResult;
 	}
@@ -12859,16 +12871,6 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 	{
 		return SelfExtensionToolResult;
 	}
-
-			if (ToolName == TEXT("unreal.skill_promote_draft"))
-			{
-				UnrealMcp::FScopedMcpExtensionSessionLock ScopedLock(ToolName, Arguments);
-				if (!ScopedLock.IsAcquired())
-				{
-					return UnrealMcp::MakeExecutionResult(ScopedLock.GetFailureReason(), ScopedLock.MakeStructuredContent(TEXT("mcp_extension_lock_failed")), true);
-				}
-				return UnrealMcp::SkillPromoteDraft(Arguments);
-			}
 
 	return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("Unknown tool '%s'."), *ToolName), nullptr, true);
 }

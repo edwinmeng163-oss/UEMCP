@@ -22,7 +22,11 @@ namespace UnrealMcp
 	TArray<TSharedPtr<FJsonValue>> MakeJsonStringArray(const TArray<FString>& Values);
 	FUnrealMcpExecutionResult ProjectMemoryWrite(const FJsonObject& Arguments);
 
-	bool TryExecuteSkillTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
+	bool TryExecuteSkillTool(
+		const FString& ToolName,
+		const FJsonObject& Arguments,
+		const FSkillPromoteDraftRunner& PromoteDraft,
+		FUnrealMcpExecutionResult& OutResult)
 	{
 		if (ToolName == TEXT("unreal.skill_list"))
 		{
@@ -72,7 +76,12 @@ namespace UnrealMcp
 			return true;
 		}
 
-		// skill_promote_draft remains in the module dispatch for now because it owns the extension-session lock.
+		if (ToolName == TEXT("unreal.skill_promote_draft"))
+		{
+			OutResult = PromoteDraft(Arguments);
+			return true;
+		}
+
 		return false;
 	}
 

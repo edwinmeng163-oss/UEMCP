@@ -94,7 +94,7 @@ namespace UnrealMcp
 			MakeHandlerEntry(TEXT("unreal.skill_apply"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.skill_distill_from_activity"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.skill_list"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_promote_draft"), TEXT("skills")),
+			MakeHandlerEntry(TEXT("unreal.skill_promote_draft"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.skill_read"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.skill_recording_start"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
 			MakeHandlerEntry(TEXT("unreal.skill_recording_stop"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
