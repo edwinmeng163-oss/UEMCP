@@ -54,8 +54,12 @@ namespace UnrealMcp
 	FUnrealMcpExecutionResult ValidateMcpToolSchema(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	FUnrealMcpExecutionResult GenerateMcpTests(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	FUnrealMcpExecutionResult ApplyMcpScaffold(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult RollbackLastMcpExtension(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult LockExtensionSession(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult BackupProjectState(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult RollbackToManifest(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult BuildEditor(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult SupervisorInstall(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult ListMcpScaffolds(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	FUnrealMcpExecutionResult InspectMcpScaffold(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	FUnrealMcpExecutionResult ValidateCppSnippet(const FJsonObject& Arguments);
@@ -65,12 +69,120 @@ namespace UnrealMcp
 	FUnrealMcpExecutionResult CleanMcpTestArtifacts(const FJsonObject& Arguments);
 	bool IsEditorPlaying();
 	FUnrealMcpExecutionResult MakePieBlockedResult(const FString& ToolName);
+	FString GetMcpExtensionLockPath();
+	bool TryAcquireExtensionSessionLock(
+		const FString& Owner,
+		const FString& Reason,
+		int32 TtlSeconds,
+		bool bForce,
+		FString& OutSessionId,
+		TSharedPtr<FJsonObject>& OutLockObject,
+		FString& OutFailureReason);
+	bool ReleaseExtensionSessionLock(const FString& SessionId, bool bForce, FString& OutFailureReason);
 	bool ResolveMcpTestsDirectory(
 		const FJsonObject& Arguments,
 		FString& OutTestsDirectory,
 		FString& OutScaffoldDirectory,
 		FString& OutToolName,
 		FString& OutFailureReason);
+
+	namespace
+	{
+		class FScopedSelfExtensionToolLock
+		{
+		public:
+			FScopedSelfExtensionToolLock(const FString& ToolName, const FJsonObject& Arguments)
+			{
+				bool bSkipLock = false;
+				bool bForceLock = false;
+				double TtlSecondsDouble = 900.0;
+				FString Owner = TEXT("Unreal MCP Chat");
+				Arguments.TryGetBoolField(TEXT("skipLock"), bSkipLock);
+				Arguments.TryGetBoolField(TEXT("forceLock"), bForceLock);
+				Arguments.TryGetNumberField(TEXT("lockTtlSeconds"), TtlSecondsDouble);
+				Arguments.TryGetStringField(TEXT("lockOwner"), Owner);
+
+				if (bSkipLock)
+				{
+					bAcquired = true;
+					bOwnsLock = false;
+					return;
+				}
+
+				const int32 TtlSeconds = FMath::Clamp(static_cast<int32>(TtlSecondsDouble), 30, 86400);
+				const FString Reason = FString::Printf(TEXT("Executing %s"), *ToolName);
+				bAcquired = TryAcquireExtensionSessionLock(Owner, Reason, TtlSeconds, bForceLock, SessionId, LockObject, FailureReason);
+				bOwnsLock = bAcquired;
+			}
+
+			~FScopedSelfExtensionToolLock()
+			{
+				if (bOwnsLock && !SessionId.IsEmpty())
+				{
+					FString ReleaseFailure;
+					ReleaseExtensionSessionLock(SessionId, false, ReleaseFailure);
+				}
+			}
+
+			bool IsAcquired() const
+			{
+				return bAcquired;
+			}
+
+			FString GetFailureReason() const
+			{
+				return FailureReason;
+			}
+
+			TSharedPtr<FJsonObject> MakeStructuredContent(const FString& Action) const
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("action"), Action);
+				StructuredContent->SetBoolField(TEXT("locked"), bAcquired);
+				StructuredContent->SetStringField(TEXT("lockPath"), GetMcpExtensionLockPath());
+				StructuredContent->SetStringField(TEXT("sessionId"), SessionId);
+				if (LockObject.IsValid())
+				{
+					StructuredContent->SetObjectField(TEXT("lock"), LockObject);
+				}
+				return StructuredContent;
+			}
+
+		private:
+			bool bAcquired = false;
+			bool bOwnsLock = false;
+			FString SessionId;
+			FString FailureReason;
+			TSharedPtr<FJsonObject> LockObject;
+		};
+
+		bool IsSelfExtensionLockRequiredTool(const FString& ToolName)
+		{
+			return ToolName == TEXT("unreal.mcp_apply_scaffold")
+				|| ToolName == TEXT("unreal.mcp_rollback_last_extension")
+				|| ToolName == TEXT("unreal.mcp_backup_project_state")
+				|| ToolName == TEXT("unreal.mcp_rollback_to_manifest")
+				|| ToolName == TEXT("unreal.mcp_supervisor_install")
+				|| ToolName == TEXT("unreal.mcp_generate_tests")
+				|| ToolName == TEXT("unreal.mcp_build_editor");
+		}
+
+		bool IsSelfExtensionPieBlockedTool(const FString& ToolName)
+		{
+			return ToolName == TEXT("unreal.mcp_apply_scaffold")
+				|| ToolName == TEXT("unreal.mcp_rollback_last_extension")
+				|| ToolName == TEXT("unreal.mcp_rollback_to_manifest")
+				|| ToolName == TEXT("unreal.mcp_generate_tests");
+		}
+
+		FUnrealMcpExecutionResult MakeSelfExtensionLockFailure(const FString& Action, const FScopedSelfExtensionToolLock& ScopedLock)
+		{
+			return MakeExecutionResult(
+				ScopedLock.GetFailureReason(),
+				ScopedLock.MakeStructuredContent(Action),
+				true);
+		}
+	}
 
 	bool TryExecuteSelfExtensionTool(
 		const FString& ToolName,
@@ -141,6 +253,67 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.mcp_clean_test_artifacts"))
 		{
 			OutResult = CleanMcpTestArtifacts(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.mcp_lock_extension_session"))
+		{
+			OutResult = LockExtensionSession(Arguments);
+			return true;
+		}
+
+		if (IsSelfExtensionLockRequiredTool(ToolName))
+		{
+			if (IsSelfExtensionPieBlockedTool(ToolName) && IsEditorPlaying())
+			{
+				OutResult = MakePieBlockedResult(ToolName);
+				return true;
+			}
+
+			FScopedSelfExtensionToolLock ScopedLock(ToolName, Arguments);
+			if (!ScopedLock.IsAcquired())
+			{
+				OutResult = MakeSelfExtensionLockFailure(TEXT("mcp_extension_lock_failed"), ScopedLock);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.mcp_apply_scaffold"))
+			{
+				OutResult = ApplyMcpScaffold(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.mcp_rollback_last_extension"))
+			{
+				OutResult = RollbackLastMcpExtension(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.mcp_backup_project_state"))
+			{
+				OutResult = BackupProjectState(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.mcp_rollback_to_manifest"))
+			{
+				OutResult = RollbackToManifest(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.mcp_supervisor_install"))
+			{
+				OutResult = SupervisorInstall(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.mcp_generate_tests"))
+			{
+				OutResult = GenerateMcpTests(Arguments, ToolsArray);
+				return true;
+			}
+
+			OutResult = BuildEditor(Arguments);
 			return true;
 		}
 
