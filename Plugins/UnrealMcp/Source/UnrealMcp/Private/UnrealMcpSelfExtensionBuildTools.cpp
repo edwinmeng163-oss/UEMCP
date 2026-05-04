@@ -429,7 +429,7 @@ namespace UnrealMcp
 			const FString& StepName,
 			const FString& Status,
 			const FString& Message,
-			const FUnrealMcpExecutionResult* Result = nullptr)
+			const FUnrealMcpExecutionResult* Result)
 		{
 			TSharedPtr<FJsonObject> StepObject = MakeShared<FJsonObject>();
 			StepObject->SetStringField(TEXT("step"), StepName);
