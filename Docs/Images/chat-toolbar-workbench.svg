@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">UEvolve Chat Toolbar and Workbench overview</title>
+  <desc id="desc">Screenshot-style overview of the Unreal MCP Chat toolbar and the Unreal MCP Workbench panel.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141821"/>
+      <stop offset="0.55" stop-color="#1d2430"/>
+      <stop offset="1" stop-color="#111419"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#283140"/>
+      <stop offset="1" stop-color="#1b222d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#70d6ff"/>
+      <stop offset="1" stop-color="#ffd166"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f5f7fb; }
+      .subtitle { font: 500 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #aeb9c8; }
+      .label { font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #e9edf5; }
+      .small { font: 500 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #aeb9c8; }
+      .button { fill: #344256; stroke: #56657a; stroke-width: 1; }
+      .button-hot { fill: #465a72; stroke: #70d6ff; stroke-width: 1.5; }
+      .card { fill: #222b38; stroke: #3b485a; stroke-width: 1; }
+      .ok { fill: #7bd88f; }
+      .warn { fill: #ffd166; }
+      .danger { fill: #ff6b6b; }
+      .line { stroke: #46556a; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <rect x="40" y="36" width="1200" height="648" rx="28" fill="#0d1117" opacity="0.55"/>
+  <rect x="64" y="64" width="1152" height="592" rx="22" fill="url(#panel)" filter="url(#shadow)"/>
+
+  <rect x="64" y="64" width="1152" height="48" rx="22" fill="#111821"/>
+  <circle cx="90" cy="88" r="7" fill="#ff6b6b"/>
+  <circle cx="114" cy="88" r="7" fill="#ffd166"/>
+  <circle cx="138" cy="88" r="7" fill="#7bd88f"/>
+  <text x="170" y="96" class="title">UEvolve Unreal MCP</text>
+  <text x="476" y="96" class="subtitle">Chat Toolbar + Self-Extension Workbench</text>
+
+  <rect x="92" y="140" width="600" height="460" rx="18" fill="#171f2a" stroke="#344256"/>
+  <text x="120" y="178" class="title">Unreal MCP Chat</text>
+  <text x="120" y="204" class="subtitle">Window &gt; Unreal MCP Chat</text>
+
+  <rect x="120" y="226" width="544" height="56" rx="14" fill="#202a36" stroke="#405066"/>
+  <rect x="140" y="242" width="94" height="26" rx="8" class="button-hot"/>
+  <text x="154" y="260" class="small">AI Settings</text>
+  <rect x="244" y="242" width="76" height="26" rx="8" class="button"/>
+  <text x="263" y="260" class="small">Test AI</text>
+  <rect x="330" y="242" width="104" height="26" rx="8" class="button"/>
+  <text x="349" y="260" class="small">Refresh Skills</text>
+  <rect x="444" y="242" width="104" height="26" rx="8" class="button"/>
+  <text x="462" y="260" class="small">Apply: Ask</text>
+  <rect x="558" y="242" width="80" height="26" rx="8" class="button"/>
+  <text x="575" y="260" class="small">Memory</text>
+
+  <rect x="120" y="306" width="544" height="108" rx="14" class="card"/>
+  <text x="146" y="336" class="label">Selected Skill</text>
+  <text x="146" y="364" class="subtitle">mcp-self-extension</text>
+  <text x="146" y="390" class="small">Read Only, Apply to Memory, Insert Prompt, Ask Now</text>
+  <circle cx="624" cy="350" r="10" class="ok"/>
+  <text x="604" y="384" class="small">ready</text>
+
+  <rect x="120" y="438" width="544" height="116" rx="14" class="card"/>
+  <text x="146" y="470" class="label">Tool Result Card</text>
+  <text x="146" y="498" class="subtitle">unreal.mcp_workbench_status</text>
+  <text x="146" y="526" class="small">Registry OK, audit OK, pipeline idle, tests ready</text>
+  <rect x="518" y="474" width="92" height="26" rx="8" fill="#193528" stroke="#7bd88f"/>
+  <text x="537" y="492" class="small" fill="#7bd88f">issueCount 0</text>
+
+  <rect x="728" y="140" width="460" height="460" rx="18" fill="#171f2a" stroke="#344256"/>
+  <text x="756" y="178" class="title">Self-Extension Workbench</text>
+  <text x="756" y="204" class="subtitle">Window &gt; Unreal MCP Workbench</text>
+
+  <rect x="756" y="230" width="190" height="42" rx="10" class="button-hot"/>
+  <text x="796" y="257" class="label">Refresh Status</text>
+  <rect x="966" y="230" width="190" height="42" rx="10" class="button"/>
+  <text x="1019" y="257" class="label">Run Audit</text>
+
+  <rect x="756" y="292" width="190" height="42" rx="10" class="button"/>
+  <text x="811" y="319" class="label">Core Tests</text>
+  <rect x="966" y="292" width="190" height="42" rx="10" class="button"/>
+  <text x="1009" y="319" class="label">Pipeline</text>
+
+  <rect x="756" y="354" width="190" height="42" rx="10" class="button"/>
+  <text x="817" y="381" class="label">Skill Activity</text>
+  <rect x="966" y="354" width="190" height="42" rx="10" class="button"/>
+  <text x="1010" y="381" class="label">Promote Dry Run</text>
+
+  <rect x="756" y="426" width="400" height="104" rx="14" class="card"/>
+  <text x="782" y="458" class="label">Structured Status</text>
+  <line x1="782" y1="474" x2="1130" y2="474" class="line"/>
+  <circle cx="794" cy="502" r="8" class="ok"/>
+  <text x="812" y="506" class="small">tool registry validated</text>
+  <circle cx="970" cy="502" r="8" class="ok"/>
+  <text x="988" y="506" class="small">handler map loaded</text>
+
+  <rect x="92" y="620" width="1096" height="2" fill="url(#accent)"/>
+  <text x="92" y="646" class="small">Illustrative screenshot-style guide. Replace this SVG with a real editor screenshot at the same path when publishing a release page.</text>
+</svg>

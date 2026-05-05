@@ -182,6 +182,8 @@ The chat panel includes a small `AI Settings / Project Skills` bar:
 - `Read Memory` calls `unreal.project_memory_view` for recent project memory entries.
 - `Write Task Memory` saves the current task text, selected skill, and apply mode to `chat.current_task`.
 
+![UEvolve Chat Toolbar and Workbench overview](Docs/Images/chat-toolbar-workbench.svg)
+
 Examples:
 
 ```text
@@ -460,6 +462,19 @@ If binary assets look very small or fail to load in Unreal, run `git lfs pull` a
 
 ### 3. Install Into An Existing Project
 
+Use this path when you want UEvolve inside your own Unreal project rather than the repository's root development host.
+
+```mermaid
+flowchart LR
+    A["Clone UEvolve"] --> B["Copy or symlink Plugins/UnrealMcp"]
+    B --> C["Optional: copy Tools/ and Schemas/"]
+    C --> D["Open your own .uproject"]
+    D --> E["Allow C++ rebuild"]
+    E --> F["Enable Unreal MCP plugin"]
+    F --> G["Open Window > Unreal MCP Chat"]
+    G --> H["Verify /tool unreal.editor_status {}"]
+```
+
 Copy the plugin:
 
 ```bash
@@ -689,6 +704,31 @@ Use this checklist after a fresh clone, a clean build, or a supervisor restart:
 - `tools/list` includes `unreal.editor_status`, `unreal.mcp_workbench_status`, and `unreal.preview_change_plan`.
 - `/tool unreal.editor_status {}` returns the active project, engine version, map, PIE state, and endpoint.
 - `/tool unreal.mcp_workbench_status {"includeBuildLogTail":false}` reports registry, audit, memory, build/test, and supervisor status without critical errors.
+
+### From Zero To Endpoint Online
+
+Use these as short "follow-along" checklists when recording a setup video or walking a teammate through installation.
+
+macOS:
+
+1. Clone and enter the repository: `git clone https://github.com/edwinmeng163-oss/UEvolve.git && cd UEvolve`.
+2. Pull binary assets: `git lfs install && git lfs pull`.
+3. Open the root host: `./open_uevolve.command`, or double-click `UEvolve.uproject`.
+4. Allow Unreal to rebuild modules if prompted, then wait until the editor finishes loading.
+5. Open `Window > Unreal MCP Chat`.
+6. Run `/tool unreal.editor_status {}` and confirm the endpoint is `http://127.0.0.1:8765/mcp`.
+7. Run `/tool unreal.mcp_workbench_status {"includeBuildLogTail":false}` and confirm there are no critical registry or audit errors.
+
+Windows:
+
+1. Clone to a short path: `git clone https://github.com/edwinmeng163-oss/UEvolve.git C:\UnrealProjects\UEvolve`.
+2. Enter the checkout and pull assets: `cd C:\UnrealProjects\UEvolve`, then `git lfs install` and `git lfs pull`.
+3. Build from PowerShell with the `Build.bat` command above, or open `UEvolve.uproject` and allow the rebuild prompt.
+4. If build fails with Live Coding active, close Unreal Editor, disable Live Coding, and rebuild.
+5. Start the root host with `.\open_uevolve.ps1`, or double-click `UEvolve.uproject`.
+6. Open `Window > Unreal MCP Chat`.
+7. Run `/tool unreal.editor_status {}` inside Chat, or use the PowerShell `Invoke-WebRequest` example above.
+8. Run `/tool unreal.mcp_workbench_status {"includeBuildLogTail":false}` to confirm registry, audit, memory, build/test, and supervisor status.
 
 ### 8. Use The In-Editor Chat
 
