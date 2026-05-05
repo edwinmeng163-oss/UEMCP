@@ -27,7 +27,7 @@ The goal is not only to let AI call existing editor tools. The goal is to let AI
 - Tool policy is versioned in `Tools/UnrealMcpToolRegistry/tools.json` and mirrored into plugin resources for plugin-only installs.
 - Write/build/process tools now receive preflight/postcheck metadata in their structured tool result.
 - Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools have category-specific preflight/postcheck verifiers for real editor/file/workflow state checks.
-- Handler presence audit now uses an explicit ToolHandlerRegistry instead of scanning `UnrealMcpModule.cpp` text.
+- Handler presence audit and dispatch now use a ToolRegistry-derived ToolHandlerRegistry instead of scanning source text or maintaining a second hand-written handler list.
 - `unreal.mcp_workbench_status` provides a read-only dashboard summary for the self-extension system.
 
 ## Near-Term Priorities

@@ -8,6 +8,7 @@
 #include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpSkillTools.h"
 #include "UnrealMcpToolExecutionGuard.h"
+#include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpWidgetTools.h"
 
@@ -134,74 +135,107 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteTool(const FString& ToolName,
 
 FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& ToolName, const FJsonObject& Arguments) const
 {
-	FUnrealMcpExecutionResult EditorToolResult;
-	if (UnrealMcp::TryExecuteEditorTool(ToolName, Arguments, EditorToolResult))
+	const UnrealMcp::FToolHandlerRegistryEntry* HandlerEntry = UnrealMcp::FindToolHandlerRegistryEntry(ToolName);
+	if (!HandlerEntry)
 	{
-		return EditorToolResult;
+		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+		StructuredContent->SetStringField(TEXT("action"), TEXT("handler_dispatch_failed"));
+		StructuredContent->SetStringField(TEXT("handlerName"), ToolName);
+		StructuredContent->SetStringField(TEXT("reason"), TEXT("handler_not_registered"));
+		return UnrealMcp::MakeExecutionResult(
+			FString::Printf(TEXT("Handler '%s' is not registered in the explicit MCP handler registry."), *ToolName),
+			StructuredContent,
+			true);
 	}
 
-	FUnrealMcpExecutionResult ActorToolResult;
-	if (UnrealMcp::TryExecuteActorTool(ToolName, Arguments, ActorToolResult))
+	FUnrealMcpExecutionResult CategoryResult;
+	const FString& Category = HandlerEntry->Category;
+	if (Category == TEXT("editor"))
 	{
-		return ActorToolResult;
-	}
-
-	FUnrealMcpExecutionResult BlueprintToolResult;
-	if (UnrealMcp::TryExecuteBlueprintTool(ToolName, Arguments, BlueprintToolResult))
-	{
-		return BlueprintToolResult;
-	}
-
-	FUnrealMcpExecutionResult WidgetToolResult;
-	if (UnrealMcp::TryExecuteWidgetTool(ToolName, Arguments, WidgetToolResult))
-	{
-		return WidgetToolResult;
-	}
-
-	FUnrealMcpExecutionResult ScaffoldToolResult;
-	if (UnrealMcp::TryExecuteScaffoldTool(ToolName, Arguments, ScaffoldToolResult))
-	{
-		return ScaffoldToolResult;
-	}
-
-	FUnrealMcpExecutionResult MemoryToolResult;
-	if (UnrealMcp::TryExecuteMemoryTool(ToolName, Arguments, MemoryToolResult))
-	{
-		return MemoryToolResult;
-	}
-
-	FUnrealMcpExecutionResult SkillToolResult;
-	if (UnrealMcp::TryExecuteSkillTool(
-		ToolName,
-		Arguments,
-		[&ToolName](const FJsonObject& ToolArguments)
+		if (UnrealMcp::TryExecuteEditorTool(ToolName, Arguments, CategoryResult))
 		{
-			UnrealMcp::FScopedSkillPromotionLock ScopedLock(ToolName, ToolArguments);
-			if (!ScopedLock.IsAcquired())
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("actors"))
+	{
+		if (UnrealMcp::TryExecuteActorTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("blueprint"))
+	{
+		if (UnrealMcp::TryExecuteBlueprintTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("widget"))
+	{
+		if (UnrealMcp::TryExecuteWidgetTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("scaffold"))
+	{
+		if (UnrealMcp::TryExecuteScaffoldTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("memory"))
+	{
+		if (UnrealMcp::TryExecuteMemoryTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("skills"))
+	{
+		if (UnrealMcp::TryExecuteSkillTool(
+			ToolName,
+			Arguments,
+			[&ToolName](const FJsonObject& ToolArguments)
 			{
-				return UnrealMcp::MakeExecutionResult(ScopedLock.GetFailureReason(), ScopedLock.MakeStructuredContent(TEXT("mcp_extension_lock_failed")), true);
-			}
-			return UnrealMcp::SkillPromoteDraft(ToolArguments);
-		},
-		SkillToolResult))
+				UnrealMcp::FScopedSkillPromotionLock ScopedLock(ToolName, ToolArguments);
+				if (!ScopedLock.IsAcquired())
+				{
+					return UnrealMcp::MakeExecutionResult(ScopedLock.GetFailureReason(), ScopedLock.MakeStructuredContent(TEXT("mcp_extension_lock_failed")), true);
+				}
+				return UnrealMcp::SkillPromoteDraft(ToolArguments);
+			},
+			CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("self-extension"))
 	{
-		return SkillToolResult;
+		TArray<TSharedPtr<FJsonValue>> ToolDefinitions;
+		AppendToolDefinitions(ToolDefinitions);
+		if (UnrealMcp::TryExecuteSelfExtensionTool(
+			ToolName,
+			Arguments,
+			ToolDefinitions,
+			[this](const FJsonObject& ToolArguments) { return RunMcpToolTest(ToolArguments); },
+			[this](const FJsonObject& ToolArguments) { return RunMcpTestSuite(ToolArguments); },
+			[this](const FJsonObject& ToolArguments) { return RunMcpExtensionPipeline(ToolArguments); },
+			CategoryResult))
+		{
+			return CategoryResult;
+		}
 	}
 
-	TArray<TSharedPtr<FJsonValue>> ToolDefinitions;
-	AppendToolDefinitions(ToolDefinitions);
-	FUnrealMcpExecutionResult SelfExtensionToolResult;
-	if (UnrealMcp::TryExecuteSelfExtensionTool(
-		ToolName,
-		Arguments,
-		ToolDefinitions,
-		[this](const FJsonObject& ToolArguments) { return RunMcpToolTest(ToolArguments); },
-		[this](const FJsonObject& ToolArguments) { return RunMcpTestSuite(ToolArguments); },
-		[this](const FJsonObject& ToolArguments) { return RunMcpExtensionPipeline(ToolArguments); },
-		SelfExtensionToolResult))
-	{
-		return SelfExtensionToolResult;
-	}
-
-	return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("Unknown tool '%s'."), *ToolName), nullptr, true);
+	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+	StructuredContent->SetStringField(TEXT("action"), TEXT("handler_dispatch_failed"));
+	StructuredContent->SetStringField(TEXT("handlerName"), ToolName);
+	StructuredContent->SetStringField(TEXT("category"), Category);
+	StructuredContent->SetStringField(TEXT("sourceFile"), HandlerEntry->SourceFile);
+	StructuredContent->SetStringField(TEXT("reason"), TEXT("category_dispatcher_did_not_handle_registered_handler"));
+	return UnrealMcp::MakeExecutionResult(
+		FString::Printf(TEXT("Handler '%s' is registered under category '%s', but that category dispatcher did not handle it."), *ToolName, *Category),
+		StructuredContent,
+		true);
 }

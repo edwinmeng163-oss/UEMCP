@@ -10,7 +10,7 @@ Core layers:
 - Split implementation files own protocol routing, tool dispatch, tool categories, UI, registry, execution guards, verifiers, and self-extension workflows. New tool work should happen in the relevant category file, not in `UnrealMcpModule.cpp`.
 - `UnrealMcpToolDescriptor` plus `UnrealMcpToolRegistrar`: code-owned default descriptors for tool name, title, description, category, handler, source file, risk, side effects, docs, and test coverage.
 - `UnrealMcpToolRegistry`: reviewed JSON overrides for visibility, handler aliases, risk policy, owners, docs, dry-run support, and test coverage.
-- `UnrealMcpToolHandlerRegistry`: explicit handler registration map used by audit and registry validation. Descriptor-backed tools register handler metadata through `UnrealMcpToolRegistrar`; remaining legacy handlers stay in the compatibility map until migrated.
+- `UnrealMcpToolHandlerRegistry`: explicit handler registration view used by audit, registry validation, and dispatch. It is derived from the combined descriptor-plus-JSON ToolRegistry, so handler visibility, aliases, categories, and policy metadata stay on the same self-extension path.
 - `UnrealMcpToolExecutionGuard` plus `UnrealMcp*OutcomeVerifier`: shared execution checks with category-specific state verification for Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools.
 - Precision tools: `unreal.preview_change_plan`, `unreal.capture_project_snapshot`, `unreal.diff_project_snapshot`, `unreal.verify_task_outcome`, `unreal.mcp_classify_error`, Blueprint graph inspectors, and Widget tree dumping give Chat a read-back loop before and after edits.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
@@ -83,7 +83,7 @@ The first descriptor-backed migration covers low-risk/read-only tools:
 New tools should move through this path unless there is a deliberate compatibility reason not to:
 
 1. Add `FUnrealMcpToolDescriptor` plus fixed schema in `UnrealMcpToolRegistrar.cpp`.
-2. Prefer descriptor-backed handler coverage through the same descriptor. Only add a legacy `MakeHandlerEntry` when migrating an old non-descriptor tool.
+2. Add the handler implementation in the relevant category file. The handler registry is derived from the descriptor/JSON ToolRegistry; do not add a separate hand-written handler-map entry.
 3. Add reviewed policy override in `Tools/UnrealMcpToolRegistry/tools.json` when the default descriptor metadata is not enough.
 4. Validate with `python3 Tools/validate_tool_registry.py`, build, restart Editor, run audit, and run the relevant test suite.
 
@@ -104,7 +104,7 @@ status output:
 - `owner`
 - `docsPath`
 
-`Tools/validate_tool_registry.py` provides an editor-independent check for the registry schema file, required metadata, duplicate names, known categories, documentation files, descriptor-backed and legacy handler map coverage, write-tool execution-check coverage, committed test fixture coverage, and exact mirror parity with the plugin resource registry.
+`Tools/validate_tool_registry.py` provides an editor-independent check for the registry schema file, required metadata, duplicate names, known categories, documentation files, registry-derived handler map coverage, write-tool execution-check coverage, committed test fixture coverage, and exact mirror parity with the plugin resource registry.
 
 ## Data and State
 

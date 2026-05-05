@@ -11,7 +11,7 @@ Prefer small, reviewable tool changes over broad source edits. The self-extensio
 3. Add an `FUnrealMcpToolDescriptor` and fixed input schema through the C++ tool registrar.
 4. Use existing fixed-schema wrappers before adding flexible inputs.
 5. Prefer fixed schemas with `additionalProperties=false`.
-6. Add or confirm handler registry coverage.
+6. Confirm the descriptor/JSON ToolRegistry routes to the intended handler name and category.
 7. Add reviewed ToolRegistry JSON override metadata when the descriptor defaults are not enough.
 8. Add docs and at least one test request.
 9. Run schema validation, registry validation, build, restart, tests, and tool audit.
@@ -42,7 +42,7 @@ Suggested ownership domains:
 - Supervisor and cross-platform launch.
 - Documentation and tests.
 
-Avoid adding new tool logic to `UnrealMcpModule.cpp`; it is intentionally a thin lifecycle entrypoint. Add tool behavior to the relevant category file and update the descriptor registrar, explicit ToolRegistry override, handler registry, docs, and tests in the same change.
+Avoid adding new tool logic to `UnrealMcpModule.cpp`; it is intentionally a thin lifecycle entrypoint. Add tool behavior to the relevant category file and update the descriptor registrar, explicit ToolRegistry override, docs, and tests in the same change. The handler registry is generated from the combined descriptor-plus-JSON ToolRegistry, so separate hand-written handler map edits should not be needed.
 
 The repository also includes `.github/CODEOWNERS` so pull requests touching MCP source, supervisor launch, docs, tests, schemas, or project-local skills request review from the current project owner by default.
 

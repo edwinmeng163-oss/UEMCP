@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "Tools" / "UnrealMcpToolRegistry" / "tools.json"
 SCHEMA_PATH = ROOT / "Tools" / "UnrealMcpToolRegistry" / "schema.json"
 MIRROR_PATH = ROOT / "Plugins" / "UnrealMcp" / "Resources" / "ToolRegistry" / "tools.json"
-HANDLER_REGISTRY_PATH = ROOT / "Plugins" / "UnrealMcp" / "Source" / "UnrealMcp" / "Private" / "UnrealMcpToolHandlerRegistry.cpp"
 TOOL_REGISTRAR_PATH = ROOT / "Plugins" / "UnrealMcp" / "Source" / "UnrealMcp" / "Private" / "UnrealMcpToolRegistrar.cpp"
 TESTS_PATH = ROOT / "Tools" / "UnrealMcpTests"
 KNOWN_CATEGORIES = {
@@ -139,21 +138,25 @@ def expected_coverage_for_test(expectation: dict[str, Any]) -> str:
     return "missing"
 
 
-def collect_handler_entries() -> dict[str, str]:
-    """Collect legacy static handlers plus descriptor-backed handlers.
+def collect_handler_entries(tools: list[dict[str, Any]]) -> dict[str, str]:
+    """Mirror the runtime handler registry.
 
-    New tools should prefer `FUnrealMcpToolDescriptor` in
-    UnrealMcpToolRegistrar.cpp. The runtime handler registry imports those
-    descriptors automatically, so this validator mirrors that behavior instead
-    of relying only on legacy MakeHandlerEntry source scanning.
+    Runtime handler entries are now derived from the explicit ToolRegistry and
+    code descriptors, not from a hand-maintained source scan. This keeps the
+    self-extension path honest: if a tool is visible in the registry, audit,
+    dispatch, and validation all see the same handler/category mapping.
     """
     entries: dict[str, str] = {}
-    handler_registry_text = HANDLER_REGISTRY_PATH.read_text(encoding="utf-8")
-    for match in re.finditer(
-        r'MakeHandlerEntry\(TEXT\("(?P<name>[^"]+)"\),\s*TEXT\("(?P<category>[^"]+)"\)',
-        handler_registry_text,
-    ):
-        entries[match.group("name")] = match.group("category")
+    for tool in tools:
+        name = tool.get("name")
+        handler_name = tool.get("handlerName") or name
+        category = tool.get("category")
+        if not isinstance(handler_name, str) or not isinstance(category, str):
+            continue
+        if handler_name in entries and entries[handler_name] != category:
+            entries[handler_name] = f"{entries[handler_name]}|CONFLICT|{category}"
+        else:
+            entries[handler_name] = category
 
     registrar_text = TOOL_REGISTRAR_PATH.read_text(encoding="utf-8")
     descriptor_pattern = re.compile(
@@ -179,7 +182,7 @@ def main() -> int:
     validate_registry_shape(registry, schema, issues)
     if registry != mirror:
         issues.append("Registry mirror content differs from Tools/UnrealMcpToolRegistry/tools.json.")
-    handler_entries = collect_handler_entries()
+    handler_entries = collect_handler_entries(tools)
     test_expectations = collect_test_expectations()
 
     if [tool.get("name") for tool in tools] != [tool.get("name") for tool in mirror_tools]:

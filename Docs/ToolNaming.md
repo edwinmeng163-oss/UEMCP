@@ -59,6 +59,7 @@ New tools should be registered descriptor-first:
 
 - Add a fixed-schema tool definition through `FUnrealMcpToolDescriptor` and `FUnrealMcpToolRegistrar` in C++.
 - Keep the handler implementation in the relevant category file, not in `UnrealMcpModule.cpp`.
+- Let the handler registry derive from the combined descriptor-plus-JSON ToolRegistry; do not maintain a second hand-written handler list.
 - Let the reviewed JSON registry override policy metadata, legacy hiding, handler aliases, owners, docs, and test coverage.
 - Do not rely on source scanning or heuristic policy inference for new tools.
 
@@ -84,7 +85,7 @@ Validate the versioned registry before committing tool changes:
 python3 Tools/validate_tool_registry.py
 ```
 
-The validator checks the versioned schema file, required metadata, duplicate names, reviewed categories, docs paths, handler map coverage, write-tool preflight/postcheck coverage, committed test fixture coverage, and exact plugin-resource mirror parity at `Plugins/UnrealMcp/Resources/ToolRegistry/tools.json`.
+The validator checks the versioned schema file, required metadata, duplicate names, reviewed categories, docs paths, registry-derived handler map coverage, write-tool preflight/postcheck coverage, committed test fixture coverage, and exact plugin-resource mirror parity at `Plugins/UnrealMcp/Resources/ToolRegistry/tools.json`.
 
 ## Test and Documentation Names
 

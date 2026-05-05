@@ -2,29 +2,78 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "UnrealMcpToolRegistrar.h"
+#include "UnrealMcpToolRegistry.h"
 
 namespace UnrealMcp
 {
 	namespace
 	{
-		FToolHandlerRegistryEntry MakeHandlerEntry(const TCHAR* HandlerName, const TCHAR* Category, const TCHAR* SourceFile = TEXT("UnrealMcpModule.cpp"))
+		FString ResolveCategoryDispatcherSource(const FString& Category)
 		{
-			FToolHandlerRegistryEntry Entry;
-			Entry.HandlerName = HandlerName;
-			Entry.Category = Category;
-			Entry.SourceFile = SourceFile;
-			return Entry;
+			if (Category == TEXT("actors"))
+			{
+				return TEXT("UnrealMcpActorTools.cpp");
+			}
+			if (Category == TEXT("blueprint"))
+			{
+				return TEXT("UnrealMcpBlueprintTools.cpp");
+			}
+			if (Category == TEXT("editor"))
+			{
+				return TEXT("UnrealMcpEditorTools.cpp");
+			}
+			if (Category == TEXT("memory"))
+			{
+				return TEXT("UnrealMcpMemoryTools.cpp");
+			}
+			if (Category == TEXT("scaffold"))
+			{
+				return TEXT("UnrealMcpScaffoldTools.cpp");
+			}
+			if (Category == TEXT("self-extension"))
+			{
+				return TEXT("UnrealMcpSelfExtensionTools.cpp");
+			}
+			if (Category == TEXT("skills"))
+			{
+				return TEXT("UnrealMcpSkillTools.cpp");
+			}
+			if (Category == TEXT("widget"))
+			{
+				return TEXT("UnrealMcpWidgetTools.cpp");
+			}
+			return TEXT("<unknown category dispatcher>");
 		}
 
-		FToolHandlerRegistryEntry MakeHandlerEntryFromDescriptor(const FUnrealMcpToolDescriptor& Descriptor)
+		void AddOrUpdateHandlerEntry(
+			TArray<FToolHandlerRegistryEntry>& Entries,
+			TMap<FString, int32>& HandlerToIndex,
+			const FToolRegistryEntry& ToolEntry)
 		{
+			const FString HandlerName = ToolEntry.HandlerName.IsEmpty() ? ToolEntry.Name : ToolEntry.HandlerName;
+			if (HandlerName.IsEmpty())
+			{
+				return;
+			}
+
+			if (int32* ExistingIndex = HandlerToIndex.Find(HandlerName))
+			{
+				FToolHandlerRegistryEntry& ExistingEntry = Entries[*ExistingIndex];
+				ExistingEntry.bLoadedFromExplicitRegistry |= ToolEntry.bLoadedFromExplicitRegistry;
+				ExistingEntry.bLoadedFromDescriptor |= ToolEntry.bLoadedFromDescriptor;
+				ExistingEntry.ToolNames.AddUnique(ToolEntry.Name);
+				return;
+			}
+
 			FToolHandlerRegistryEntry Entry;
-			Entry.HandlerName = Descriptor.HandlerName.IsEmpty() ? Descriptor.Name : Descriptor.HandlerName;
-			Entry.Category = Descriptor.Category;
-			Entry.SourceFile = Descriptor.SourceFile;
-			Entry.bLoadedFromDescriptor = true;
-			return Entry;
+			Entry.HandlerName = HandlerName;
+			Entry.Category = ToolEntry.Category;
+			Entry.SourceFile = ResolveCategoryDispatcherSource(ToolEntry.Category);
+			Entry.ToolNames.Add(ToolEntry.Name);
+			Entry.bLoadedFromExplicitRegistry = ToolEntry.bLoadedFromExplicitRegistry;
+			Entry.bLoadedFromDescriptor = ToolEntry.bLoadedFromDescriptor;
+			HandlerToIndex.Add(HandlerName, Entries.Num());
+			Entries.Add(MoveTemp(Entry));
 		}
 	}
 
@@ -32,115 +81,11 @@ namespace UnrealMcp
 	{
 		static const TArray<FToolHandlerRegistryEntry> Entries = []()
 		{
-			TArray<FToolHandlerRegistryEntry> Result = {
-			MakeHandlerEntry(TEXT("unreal.batch_configure_static_mesh_actors"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.batch_set_actor_properties"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.batch_set_actor_scale"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.batch_set_actor_tags"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.batch_set_point_light_properties"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_add_branch_node"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_add_call_function_node"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_add_event_node"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_add_for_each_node"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_add_function"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_add_variable"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_arrange_graph"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_compile_save"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_connect_pins"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.bp_set_pin_default"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.clear_level_environment"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.compile_blueprint"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.compile_blueprints_in_path"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.create_blueprint_class"), TEXT("blueprint"), TEXT("UnrealMcpBlueprintTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.destroy_selected_actors"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.execute_console_command"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.execute_python"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.execute_python_file"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.layout_actors_circle"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.layout_actors_grid"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.list_assets"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.list_level_actors"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.map_check"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_apply_scaffold"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_backup_project_state"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_build_editor"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_clean_test_artifacts"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_compile_error_fix_plan"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_diff_last_apply"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_extension_pipeline"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_generate_tests"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_inspect_scaffold"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_list_scaffolds"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_lock_extension_session"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_patch_scaffold_snippet"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_pipeline_status"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_rollback_last_extension"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_rollback_to_manifest"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_run_test_suite"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_run_tool_test"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_supervisor_install"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_validate_cpp_snippet"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.mcp_validate_tool_schema"), TEXT("self-extension"), TEXT("UnrealMcpSelfExtensionTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.open_asset"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.open_map"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.project_memory_delete"), TEXT("memory"), TEXT("UnrealMcpMemoryTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.project_memory_edit"), TEXT("memory"), TEXT("UnrealMcpMemoryTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.project_memory_read"), TEXT("memory"), TEXT("UnrealMcpMemoryTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.project_memory_view"), TEXT("memory"), TEXT("UnrealMcpMemoryTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.project_memory_write"), TEXT("memory"), TEXT("UnrealMcpMemoryTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.save_dirty_packages"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.scaffold_autobattler_ai"), TEXT("scaffold"), TEXT("UnrealMcpScaffoldTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.scaffold_economy_system"), TEXT("scaffold"), TEXT("UnrealMcpScaffoldTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.scaffold_mcp_tool"), TEXT("scaffold"), TEXT("UnrealMcpScaffoldTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.scaffold_result_ui"), TEXT("scaffold"), TEXT("UnrealMcpScaffoldTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.scaffold_round_system"), TEXT("scaffold"), TEXT("UnrealMcpScaffoldTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.scaffold_shop_system"), TEXT("scaffold"), TEXT("UnrealMcpScaffoldTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.select_actors"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.set_actor_transform"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_activity_status"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_apply"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_distill_from_activity"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_list"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_promote_draft"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_read"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_recording_start"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_recording_stop"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.skill_save_draft"), TEXT("skills"), TEXT("UnrealMcpSkillTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.spawn_actor"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.spawn_actor_batch"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.spawn_static_mesh_actor"), TEXT("actors"), TEXT("UnrealMcpActorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.start_pie"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.stop_pie"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.sync_content_browser"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.tail_log"), TEXT("editor"), TEXT("UnrealMcpEditorTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_add"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_bind_blueprint_variable"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_bind_event"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_build_template"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_remove"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_set_property"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			MakeHandlerEntry(TEXT("unreal.widget_set_slot_layout"), TEXT("widget"), TEXT("UnrealMcpWidgetTools.cpp")),
-			};
-
+			TArray<FToolHandlerRegistryEntry> Result;
 			TMap<FString, int32> HandlerToIndex;
-			for (int32 Index = 0; Index < Result.Num(); ++Index)
+			for (const FToolRegistryEntry& ToolEntry : GetToolRegistryEntries())
 			{
-				HandlerToIndex.Add(Result[Index].HandlerName, Index);
-			}
-			for (const FRegisteredUnrealMcpToolDescriptor& RegisteredTool : GetRegisteredMcpToolDescriptors())
-			{
-				const FString HandlerName = RegisteredTool.Descriptor.HandlerName.IsEmpty()
-					? RegisteredTool.Descriptor.Name
-					: RegisteredTool.Descriptor.HandlerName;
-				if (int32* ExistingIndex = HandlerToIndex.Find(HandlerName))
-				{
-					Result[*ExistingIndex].bLoadedFromDescriptor = true;
-				}
-				else
-				{
-					Result.Add(MakeHandlerEntryFromDescriptor(RegisteredTool.Descriptor));
-					HandlerToIndex.Add(HandlerName, Result.Num() - 1);
-				}
+				AddOrUpdateHandlerEntry(Result, HandlerToIndex, ToolEntry);
 			}
 			return Result;
 		}();
@@ -170,11 +115,20 @@ namespace UnrealMcp
 		TMap<FString, int32> CategoryCounts;
 		for (const FToolHandlerRegistryEntry& Entry : GetToolHandlerRegistryEntries())
 		{
+			TArray<TSharedPtr<FJsonValue>> RoutedToolValues;
+			for (const FString& ToolName : Entry.ToolNames)
+			{
+				RoutedToolValues.Add(MakeShared<FJsonValueString>(ToolName));
+			}
+
 			TSharedPtr<FJsonObject> EntryObject = MakeShared<FJsonObject>();
 			EntryObject->SetStringField(TEXT("handlerName"), Entry.HandlerName);
 			EntryObject->SetStringField(TEXT("category"), Entry.Category);
 			EntryObject->SetStringField(TEXT("sourceFile"), Entry.SourceFile);
+			EntryObject->SetBoolField(TEXT("explicitRegistryBacked"), Entry.bLoadedFromExplicitRegistry);
 			EntryObject->SetBoolField(TEXT("descriptorBacked"), Entry.bLoadedFromDescriptor);
+			EntryObject->SetNumberField(TEXT("routedToolCount"), Entry.ToolNames.Num());
+			EntryObject->SetArrayField(TEXT("routedTools"), RoutedToolValues);
 			HandlerValues.Add(MakeShared<FJsonValueObject>(EntryObject));
 			CategoryCounts.FindOrAdd(Entry.Category)++;
 		}
@@ -189,6 +143,7 @@ namespace UnrealMcp
 		StatusObject->SetNumberField(TEXT("handlerCount"), GetToolHandlerRegistryEntries().Num());
 		StatusObject->SetObjectField(TEXT("categoryCounts"), CategoryCountsObject);
 		StatusObject->SetArrayField(TEXT("handlers"), HandlerValues);
+		StatusObject->SetStringField(TEXT("source"), GetToolRegistrySourcePath());
 		return StatusObject;
 	}
 }
