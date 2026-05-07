@@ -490,6 +490,8 @@ private:
 			}
 
 			ResetPerRequestState();
+			LastRequestInputItems = InputItems;
+			LastRequestPriorResponseId = PriorResponseId;
 		}
 
 		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
@@ -563,6 +565,12 @@ private:
 		{
 			Finish(TEXT("Failed to start the HTTP request to the AI provider."), FString(), true, false);
 		}
+	}
+
+	static bool IsMissingPreviousResponseError(const FString& ErrorMessage)
+	{
+		return ErrorMessage.Contains(TEXT("previous response"), ESearchCase::IgnoreCase)
+			&& ErrorMessage.Contains(TEXT("not found"), ESearchCase::IgnoreCase);
 	}
 
 	void ConsumeResponseBytes(const void* Ptr, int64 Length)
@@ -907,6 +915,31 @@ private:
 				ErrorMessage = StreamFailureMessageCopy;
 			}
 
+			TArray<TSharedPtr<FJsonValue>> RetryInputItems;
+			bool bRetryWithoutPreviousResponse = false;
+			{
+				const FScopeLock Lock(&StateMutex);
+				bRetryWithoutPreviousResponse =
+					ResponseCode == 400
+					&& !bRetriedWithoutPreviousResponse
+					&& !LastRequestPriorResponseId.TrimStartAndEnd().IsEmpty()
+					&& IsMissingPreviousResponseError(ErrorMessage);
+
+				if (bRetryWithoutPreviousResponse)
+				{
+					bRetriedWithoutPreviousResponse = true;
+					RetryInputItems = LastRequestInputItems;
+					ActiveResponseId.Reset();
+				}
+			}
+
+			if (bRetryWithoutPreviousResponse)
+			{
+				EmitStatus(TEXT("The saved AI conversation response id expired. Resetting the AI conversation state and retrying once."));
+				SendModelRequest(RetryInputItems, FString());
+				return;
+			}
+
 			Finish(FString::Printf(TEXT("AI request failed. HTTP %d: %s"), ResponseCode, *ErrorMessage), ResponseIdCopy, true, false);
 			return;
 		}
@@ -1225,6 +1258,8 @@ private:
 	TMap<FString, FString> FunctionNameToToolName;
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveRequest;
 	FCriticalSection StateMutex;
+	TArray<TSharedPtr<FJsonValue>> LastRequestInputItems;
+	FString LastRequestPriorResponseId;
 	TArray<uint8> RawResponseBytes;
 	TArray<uint8> PendingStreamBytes;
 	FString PendingSseData;
@@ -1245,6 +1280,7 @@ private:
 	bool bHadToolError = false;
 	bool bRememberedNearToolRoundLimit = false;
 	bool bPausedAtToolRoundLimit = false;
+	bool bRetriedWithoutPreviousResponse = false;
 };
 
 namespace UnrealMcp

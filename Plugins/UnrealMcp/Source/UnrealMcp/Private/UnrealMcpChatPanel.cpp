@@ -1479,6 +1479,13 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 				{
 					PinnedThis->LastAssistantResponseId = Result.ResponseId;
 				}
+				else if (Result.bIsError
+					&& Result.Text.Contains(TEXT("previous response"), ESearchCase::IgnoreCase)
+					&& Result.Text.Contains(TEXT("not found"), ESearchCase::IgnoreCase))
+				{
+					PinnedThis->LastAssistantResponseId.Reset();
+					PinnedThis->bHasInjectedPersistedContextThisSession = false;
+				}
 
 				if (PinnedThis->ActiveAssistantEntry.IsValid())
 				{
