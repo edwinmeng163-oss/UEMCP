@@ -94,7 +94,9 @@ private:
 	TSharedRef<SWidget> BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry) const;
 	void InvalidateEntryWidgets();
 	void ScrollTranscriptToEnd();
+	void ScrollToolLogToEnd();
 	EActiveTimerReturnType HandleDeferredTranscriptScroll(double InCurrentTime, float InDeltaTime);
+	EActiveTimerReturnType HandleDeferredToolLogScroll(double InCurrentTime, float InDeltaTime);
 	void LoadHistory();
 	void SaveHistory() const;
 	void ResetHistory(bool bAddReadyMessage);
@@ -123,6 +125,10 @@ private:
 	TSharedPtr<STextBlock> SkillDescriptionText;
 	TSharedPtr<SScrollBox> TranscriptScrollBox;
 	TSharedPtr<SVerticalBox> TranscriptEntriesBox;
+	TSharedPtr<SScrollBox> ToolLogScrollBox;
+	TSharedPtr<SVerticalBox> ToolLogEntriesBox;
 	bool bDeferredTranscriptScrollActive = false;
 	int32 DeferredTranscriptScrollFrames = 0;
+	bool bDeferredToolLogScrollActive = false;
+	int32 DeferredToolLogScrollFrames = 0;
 };

@@ -27,6 +27,7 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSpacer.h"
+#include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
@@ -645,7 +646,7 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 			[
 				SNew(STextBlock)
 				.AutoWrapText(true)
-				.Text(LOCTEXT("Subtitle", "Use the panel as either a command surface or an AI copilot. Plain text and /ask stream live model output, tool calls appear as cards, and /help still shows all direct slash commands."))
+				.Text(LOCTEXT("Subtitle", "Use the panel as either a command surface or an AI copilot. Conversation stays in the main pane, while tool calls and logs stream into the separate Tool Log pane."))
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -898,10 +899,61 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
-				SAssignNew(TranscriptScrollBox, SScrollBox)
-				+ SScrollBox::Slot()
+				SNew(SSplitter)
+				.Orientation(Orient_Horizontal)
+				+ SSplitter::Slot()
+				.Value(0.68f)
 				[
-					SAssignNew(TranscriptEntriesBox, SVerticalBox)
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.Padding(8.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("ConversationPaneTitle", "Conversation"))
+							.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+						]
+						+ SVerticalBox::Slot()
+						.FillHeight(1.0f)
+						[
+							SAssignNew(TranscriptScrollBox, SScrollBox)
+							+ SScrollBox::Slot()
+							[
+								SAssignNew(TranscriptEntriesBox, SVerticalBox)
+							]
+						]
+					]
+				]
+				+ SSplitter::Slot()
+				.Value(0.32f)
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.Padding(8.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("ToolLogPaneTitle", "Tool Log"))
+							.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+						]
+						+ SVerticalBox::Slot()
+						.FillHeight(1.0f)
+						[
+							SAssignNew(ToolLogScrollBox, SScrollBox)
+							+ SScrollBox::Slot()
+							[
+								SAssignNew(ToolLogEntriesBox, SVerticalBox)
+							]
+						]
+					]
 				]
 			]
 			+ SVerticalBox::Slot()
@@ -1537,7 +1589,14 @@ void SUnrealMcpChatPanel::UpdateToolEntryWithResult(
 	}
 
 	InvalidateEntryWidgets();
-	ScrollTranscriptToEnd();
+	if (Entry->Type == EUnrealMcpChatEntryType::Tool)
+	{
+		ScrollToolLogToEnd();
+	}
+	else
+	{
+		ScrollTranscriptToEnd();
+	}
 	SaveHistory();
 }
 
@@ -1645,7 +1704,10 @@ void SUnrealMcpChatPanel::SendCommand(const FString& CommandText)
 	{
 		LastLogText = Result.Text;
 	}
-	AppendMessage(EUnrealMcpChatEntryType::System, Result.bIsError ? TEXT("Unreal MCP Error") : TEXT("Unreal MCP"), Result.Text, Result.bIsError);
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("command"), TrimmedCommand);
+	AppendToolExecutionResult(TEXT("chat.command"), *Arguments, Result);
 }
 
 void SUnrealMcpChatPanel::StopAssistantRequest()
@@ -1718,7 +1780,7 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 								PinnedThis->LastLogText = Event.Text;
 							}
 							PinnedThis->InvalidateEntryWidgets();
-							PinnedThis->ScrollTranscriptToEnd();
+							PinnedThis->ScrollToolLogToEnd();
 							PinnedThis->SaveHistory();
 					}
 					else
@@ -1734,6 +1796,7 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 									PinnedThis->LastLogText = Event.Text;
 								}
 								PinnedThis->InvalidateEntryWidgets();
+								PinnedThis->ScrollToolLogToEnd();
 								PinnedThis->SaveHistory();
 							}
 					}
@@ -1834,19 +1897,33 @@ TSharedPtr<FUnrealMcpChatEntry> SUnrealMcpChatPanel::AppendToolCard(const FStrin
 
 void SUnrealMcpChatPanel::AddEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry)
 {
-	if (!TranscriptEntriesBox.IsValid() || !Entry.IsValid())
+	if (!Entry.IsValid())
 	{
 		return;
 	}
 
-	TranscriptEntriesBox->AddSlot()
+	const bool bIsToolEntry = Entry->Type == EUnrealMcpChatEntryType::Tool;
+	TSharedPtr<SVerticalBox> TargetEntriesBox = bIsToolEntry ? ToolLogEntriesBox : TranscriptEntriesBox;
+	if (!TargetEntriesBox.IsValid())
+	{
+		return;
+	}
+
+	TargetEntriesBox->AddSlot()
 	.AutoHeight()
 	.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 	[
 		BuildEntryWidget(Entry)
 	];
 
-	ScrollTranscriptToEnd();
+	if (bIsToolEntry)
+	{
+		ScrollToolLogToEnd();
+	}
+	else
+	{
+		ScrollTranscriptToEnd();
+	}
 }
 
 TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry) const
@@ -2174,6 +2251,16 @@ void SUnrealMcpChatPanel::InvalidateEntryWidgets()
 	{
 		TranscriptScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
 	}
+
+	if (ToolLogEntriesBox.IsValid())
+	{
+		ToolLogEntriesBox->Invalidate(EInvalidateWidgetReason::Prepass);
+	}
+
+	if (ToolLogScrollBox.IsValid())
+	{
+		ToolLogScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
+	}
 }
 
 void SUnrealMcpChatPanel::ScrollTranscriptToEnd()
@@ -2196,6 +2283,29 @@ void SUnrealMcpChatPanel::ScrollTranscriptToEnd()
 		RegisterActiveTimer(
 			0.0f,
 			FWidgetActiveTimerDelegate::CreateSP(this, &SUnrealMcpChatPanel::HandleDeferredTranscriptScroll));
+	}
+}
+
+void SUnrealMcpChatPanel::ScrollToolLogToEnd()
+{
+	if (ToolLogEntriesBox.IsValid())
+	{
+		ToolLogEntriesBox->Invalidate(EInvalidateWidgetReason::Prepass);
+	}
+
+	if (ToolLogScrollBox.IsValid())
+	{
+		ToolLogScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
+		ToolLogScrollBox->ScrollToEnd();
+	}
+
+	DeferredToolLogScrollFrames = FMath::Max(DeferredToolLogScrollFrames, 10);
+	if (!bDeferredToolLogScrollActive)
+	{
+		bDeferredToolLogScrollActive = true;
+		RegisterActiveTimer(
+			0.0f,
+			FWidgetActiveTimerDelegate::CreateSP(this, &SUnrealMcpChatPanel::HandleDeferredToolLogScroll));
 	}
 }
 
@@ -2222,6 +2332,32 @@ EActiveTimerReturnType SUnrealMcpChatPanel::HandleDeferredTranscriptScroll(doubl
 	}
 
 	bDeferredTranscriptScrollActive = false;
+	return EActiveTimerReturnType::Stop;
+}
+
+EActiveTimerReturnType SUnrealMcpChatPanel::HandleDeferredToolLogScroll(double InCurrentTime, float InDeltaTime)
+{
+	(void)InCurrentTime;
+	(void)InDeltaTime;
+
+	if (ToolLogEntriesBox.IsValid())
+	{
+		ToolLogEntriesBox->Invalidate(EInvalidateWidgetReason::Prepass);
+	}
+
+	if (ToolLogScrollBox.IsValid())
+	{
+		ToolLogScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
+		ToolLogScrollBox->ScrollToEnd();
+	}
+
+	--DeferredToolLogScrollFrames;
+	if (DeferredToolLogScrollFrames > 0)
+	{
+		return EActiveTimerReturnType::Continue;
+	}
+
+	bDeferredToolLogScrollActive = false;
 	return EActiveTimerReturnType::Stop;
 }
 
@@ -2326,10 +2462,19 @@ void SUnrealMcpChatPanel::ResetHistory(bool bAddReadyMessage)
 	ActiveAssistantEntry.Reset();
 	ActiveAssistantHandle.Reset();
 	bAssistantRequestInFlight = false;
+	bDeferredTranscriptScrollActive = false;
+	DeferredTranscriptScrollFrames = 0;
+	bDeferredToolLogScrollActive = false;
+	DeferredToolLogScrollFrames = 0;
 
 	if (TranscriptEntriesBox.IsValid())
 	{
 		TranscriptEntriesBox->ClearChildren();
+	}
+
+	if (ToolLogEntriesBox.IsValid())
+	{
+		ToolLogEntriesBox->ClearChildren();
 	}
 
 	SaveHistory();
