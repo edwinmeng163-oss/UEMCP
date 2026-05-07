@@ -19,6 +19,7 @@ Plugins/*/Saved/
 .idea/
 Config/DefaultEditorPerProjectUserSettings.ini
 Examples/*/Config/DefaultEditorPerProjectUserSettings.ini
+*.uproject.bak-*
 Examples/*/.vs/
 Examples/*/.vscode/
 Examples/*/.idea/

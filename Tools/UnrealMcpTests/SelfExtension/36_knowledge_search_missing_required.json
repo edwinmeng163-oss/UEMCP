@@ -1,0 +1,17 @@
+{
+  "name": "knowledge_search_missing_required",
+  "description": "knowledge_search should reject calls without a query.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 336,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.knowledge_search",
+      "arguments": {}
+    }
+  }
+}

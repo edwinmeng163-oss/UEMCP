@@ -216,13 +216,14 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 		TArray<TSharedPtr<FJsonValue>> ToolDefinitions;
 		AppendToolDefinitions(ToolDefinitions);
 		if (UnrealMcp::TryExecuteSelfExtensionTool(
-			ToolName,
-			Arguments,
-			ToolDefinitions,
-			[this](const FJsonObject& ToolArguments) { return RunMcpToolTest(ToolArguments); },
-			[this](const FJsonObject& ToolArguments) { return RunMcpTestSuite(ToolArguments); },
-			[this](const FJsonObject& ToolArguments) { return RunMcpExtensionPipeline(ToolArguments); },
-			CategoryResult))
+				ToolName,
+				Arguments,
+				ToolDefinitions,
+				[this](const FJsonObject& ToolArguments) { return RunMcpToolTest(ToolArguments); },
+				[this](const FJsonObject& ToolArguments) { return RunMcpTestSuite(ToolArguments); },
+				[this](const FJsonObject& ToolArguments) { return RunMcpExtensionPipeline(ToolArguments); },
+				[this](const FJsonObject& ToolArguments) { return RunWorkflow(ToolArguments); },
+				CategoryResult))
 		{
 			return CategoryResult;
 		}

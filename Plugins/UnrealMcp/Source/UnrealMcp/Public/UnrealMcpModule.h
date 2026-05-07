@@ -101,6 +101,7 @@ private:
 	FUnrealMcpExecutionResult RunMcpToolTest(const FJsonObject& Arguments) const;
 	FUnrealMcpExecutionResult RunMcpTestSuite(const FJsonObject& Arguments) const;
 	FUnrealMcpExecutionResult RunMcpExtensionPipeline(const FJsonObject& Arguments) const;
+	FUnrealMcpExecutionResult RunWorkflow(const FJsonObject& Arguments) const;
 
 	TUniquePtr<FHttpServerResponse> MakeJsonResponse(
 		const TSharedPtr<FJsonObject>& Payload,

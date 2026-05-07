@@ -1,0 +1,27 @@
+{
+  "name": "scaffold_recipe_mcp_pipeline_valid",
+  "description": "Generate the high-level MCP self-extension pipeline recipe without writing project memory.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "scaffold_recipe",
+    "recipeName": "mcp_self_extension_pipeline",
+    "memoryWritten": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 412,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.scaffold_recipe",
+      "arguments": {
+        "recipeName": "mcp_self_extension_pipeline",
+        "rootPath": "/Game/__UEvolveMcpTest/Recipes",
+        "writeMemory": false,
+        "includeToolCalls": true
+      }
+    }
+  }
+}

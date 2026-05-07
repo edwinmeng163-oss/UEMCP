@@ -46,6 +46,7 @@ The repository currently contains:
 - [Contributing](Docs/Contributing.md)
 - [Security Model](Docs/SecurityModel.md)
 - [Self-Extension Pipeline](Docs/SelfExtensionPipeline.md)
+- [Knowledge And RAG Plan](Docs/KnowledgeRag.md)
 - [Tool Naming](Docs/ToolNaming.md)
 - [Manifest Schema](Docs/ManifestSchema.md)
 - [External Supervisor](Docs/Supervisor.md)
@@ -113,6 +114,8 @@ Unreal MCP currently supports:
   - `unreal.widget_bind_blueprint_variable`
   - `unreal.widget_build_template`
 - MCP extension scaffolding:
+  - `unreal.scaffold_recipe`
+  - `unreal.workflow_run`
   - `unreal.scaffold_mcp_tool`
   - `unreal.mcp_list_scaffolds`
   - `unreal.mcp_inspect_scaffold`
@@ -136,6 +139,10 @@ Unreal MCP currently supports:
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
+- Local knowledge / RAG helpers:
+  - `unreal.knowledge_index_refresh`
+  - `unreal.knowledge_search`
+  - `unreal.tool_recommend`
 - Legacy/demo gameplay scaffold helpers are retained for direct compatibility
   but hidden from AI-facing `tools/list`:
   - `unreal.scaffold_round_system`
@@ -205,6 +212,11 @@ AI-assisted request example:
 ```text
 inspect the current project and summarize the maps, selected actors, and available Blueprint assets
 ```
+
+When an AI turn gets close to tool-loop limits, UEvolve writes a resume checkpoint to
+`chat.active_task`. If the limit is reached, the turn pauses with a concrete next
+step instead of failing hard; read `chat.active_task`, continue one bounded step, and
+verify before exploring further.
 
 ## Chat-Driven MCP Extension Workflow
 
@@ -294,6 +306,8 @@ Build/test handoff note:
 - `unreal.mcp_extension_pipeline` orchestrates validate, test generation, apply dry run, apply, memory write, build, restart handoff, and post-restart test suite resume.
 - `unreal.mcp_pipeline_status` summarizes the current extension memory entry, last apply manifest, latest build log, saved test scaffolds, extension backups, and recommended next step.
 - `unreal.mcp_workbench_status` aggregates tool audit health, ToolRegistry legacy-hidden tools, pipeline state, latest build/supervisor artifacts, test scaffold counts, and project memory into one self-extension dashboard response.
+- `unreal.scaffold_recipe` creates bounded high-level recipes that reduce open-ended Chat exploration. The first batch covers `first_person_ground_character`, `widget_hud`, and `mcp_self_extension_pipeline`; each recipe returns ordered tool steps, verification gates, example tool-call JSON, and can write `chat.active_task` for continuation.
+- `unreal.workflow_run` is the generic composition executor. It accepts inline `steps`, a `workflowJson` string, or a project-local `workflowPath`, defaults to `dryRun:true`, blocks nested workflows and high/critical step tools unless explicitly allowed, executes every step through the normal MCP handler path, and can write `chat.active_task` for planned/paused/completed workflows.
 - `Window > Unreal MCP Workbench` provides a thin Slate control panel over existing MCP tools. It can refresh workbench status, run audit, run the versioned core tests, inspect pipeline/lock state, inspect Skill Activity, distill a draft, run promote dry-runs, and copy the last structured result without duplicating backend logic.
 - `tools/list`, `unreal.mcp_tool_audit`, and `unreal.mcp_workbench_status` include per-tool policy metadata such as `category`, `handlerName`, `riskLevel`, `requiresWrite`, `requiresBuild`, `requiresExternalProcess`, `requiresRestart`, `requiresProjectMemory`, `requiresLock`, `dryRunSupport`, `preflightSupport`, `postcheckSupport`, `testCoverage`, `owner`, and `docsPath`.
 - Write/build/process tools build `preflight` metadata before the handler runs, then attach it with `postcheck` metadata to structured results so Chat can show what was expected to change and whether the tool returned success. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools now use tool-specific preflight/postcheck verifiers that inspect editor state, files, manifests, build logs, project memory entries, skill drafts/promotions, tests, and scaffold outputs.
@@ -305,6 +319,42 @@ Build/test handoff note:
 - `unreal.skill_recording_start`, `unreal.skill_recording_stop`, and `unreal.skill_activity_status` manage opt-in local activity recording. Recording is off by default; after explicit start, mutating MCP tool calls/results are logged as high-level metadata, read-only/status tools are skipped, and the editor writes a heartbeat roughly once per minute while recording is active.
 - Activity logs are local-only JSONL files under `Saved/UnrealMcp/ActivityLog/*.jsonl`; generated drafts go to `Saved/UnrealMcp/SkillDrafts/<skill-name>/SKILL.md`.
 - `unreal.skill_distill_from_activity` summarizes a session into a reusable skill draft; `unreal.skill_save_draft` can write a manual draft; `unreal.skill_promote_draft` defaults to dry-run, uses the extension lock, detects conflicts, and can back up/manifest existing promoted skills before writing `Tools/UnrealMcpSkills/<skill-name>/SKILL.md`.
+
+## Local Knowledge And RAG Bootstrap
+
+UEvolve keeps RAG source manifests versioned, but keeps downloaded third-party
+documentation payloads local. The first official Unreal Engine documentation
+seed list lives at:
+
+```text
+Tools/UnrealMcpKnowledge/Sources/unreal_engine_official_docs_5_7.json
+```
+
+Fetch curated Epic official docs into the ignored local cache:
+
+```bash
+python3 Tools/unreal_mcp_fetch_docs.py --max-pages 12
+```
+
+The default output is:
+
+```text
+Saved/UnrealMcp/KnowledgeSources/UnrealEngineOfficialDocs/5.7
+```
+
+The fetcher uses Epic's structured documentation JSON endpoint for normal docs
+pages and static HTML for pages like the Unreal Python API. Low-content pages are
+flagged in `manifest.json` so the future knowledge indexer can skip or
+deprioritize weak sources. See [Knowledge And RAG Plan](Docs/KnowledgeRag.md).
+
+Chat can connect the RAG layer on demand. Search first; if the index is missing,
+refresh it and retry:
+
+```text
+/tool unreal.knowledge_search {"query":"Blueprint graph editing tools"}
+/tool unreal.knowledge_index_refresh {"includeOfficialDocs":true,"includeVersionedDocs":true,"includeToolRegistry":true}
+/tool unreal.tool_recommend {"task":"Build a Widget HUD using existing MCP tools","riskMax":"medium"}
+```
 
 External supervisor:
 
@@ -383,7 +433,15 @@ git lfs install
 git lfs pull
 ```
 
-To use UEvolve in an existing Unreal project, copy or link the plugin:
+To use UEvolve in an existing Unreal project, use the installer helper:
+
+```bash
+python3 Tools/install_unrealmcp_to_project.py --project "/path/to/YourProject/YourProject.uproject"
+```
+
+The helper copies `Plugins/UnrealMcp`, `Tools`, `Schemas`, and `Docs`, skips generated local artifacts, and enables both `UnrealMcp` and `PythonScriptPlugin` in the target `.uproject` after writing a backup. Use `--dry-run` first if you want a preview.
+
+Or copy/link the pieces manually:
 
 ```bash
 mkdir -p "/path/to/YourProject/Plugins"
@@ -392,7 +450,7 @@ cp -R Plugins/UnrealMcp "/path/to/YourProject/Plugins/UnrealMcp"
 
 Then open your own `.uproject`, enable `UnrealMcp` if prompted, and rebuild the editor target for your project.
 
-For the full self-extension workbench experience, also copy the repository `Tools/` and `Schemas/` folders into your project root. The plugin can run without them for basic MCP/chat usage, but versioned tests, skill templates, supervisor launchers, and generated scaffolds use those project-root folders.
+For the full self-extension workbench experience, also copy the repository `Tools/`, `Schemas/`, and `Docs/` folders into your project root. The plugin can run without them for basic MCP/chat usage, but versioned tests, skill templates, supervisor launchers, manifests, documentation health checks, and generated scaffolds use those project-root folders.
 
 The repository also includes an optional example host project:
 
@@ -427,7 +485,7 @@ There are four common entry points:
 
 - Root local development host: open `UEvolve.uproject` from the repository root, or run `./open_uevolve.command` on macOS.
 - Windows root local development host: run `.\open_uevolve.ps1` from PowerShell, or double-click `UEvolve.uproject`.
-- Existing project install: copy or symlink `Plugins/UnrealMcp` into `<YourProject>/Plugins/UnrealMcp`, optionally copy `Tools/` and `Schemas/` for self-extension workflows, then compile that project.
+- Existing project install: copy or symlink `Plugins/UnrealMcp` into `<YourProject>/Plugins/UnrealMcp`, copy `Tools/`, `Schemas/`, and `Docs/` for the full self-extension workflow, enable `UnrealMcp` plus `PythonScriptPlugin`, then compile that project.
 - Example project install: open `Examples/UEvolveExample/UEvolveExample.uproject` only when you want to test the plugin with bundled sample content.
 
 The root `Config/` folder is committed as a safe template. It disables Android File Server by default and keeps `SecurityToken=` empty so repository checkouts do not carry machine-local credentials. If Unreal generates local tokens or user-specific editor settings after launch, keep them local and do not commit them.
@@ -467,15 +525,26 @@ Use this path when you want UEvolve inside your own Unreal project rather than t
 ```mermaid
 flowchart LR
     A["Clone UEvolve"] --> B["Copy or symlink Plugins/UnrealMcp"]
-    B --> C["Optional: copy Tools/ and Schemas/"]
-    C --> D["Open your own .uproject"]
-    D --> E["Allow C++ rebuild"]
-    E --> F["Enable Unreal MCP plugin"]
+    B --> C["Copy Tools, Schemas, and Docs"]
+    C --> D["Enable UnrealMcp and PythonScriptPlugin"]
+    D --> E["Build your Editor target"]
+    E --> F["Open your own .uproject"]
     F --> G["Open Window > Unreal MCP Chat"]
     G --> H["Verify /tool unreal.editor_status {}"]
 ```
 
-Copy the plugin:
+Recommended helper:
+
+```bash
+python3 Tools/install_unrealmcp_to_project.py \
+  --project "/path/to/YourProject/YourProject.uproject" \
+  --dry-run
+
+python3 Tools/install_unrealmcp_to_project.py \
+  --project "/path/to/YourProject/YourProject.uproject"
+```
+
+Manual plugin copy:
 
 ```bash
 mkdir -p "/path/to/YourProject/Plugins"
@@ -500,9 +569,31 @@ For the complete self-extension toolchain, copy these repository folders into th
 ```bash
 cp -R Tools "/path/to/YourProject/Tools"
 cp -R Schemas "/path/to/YourProject/Schemas"
+cp -R Docs "/path/to/YourProject/Docs"
 ```
 
-These folders provide versioned MCP test fixtures, project-local skills, supervisor templates, and manifest schemas. Runtime output still goes under the target project's ignored `Saved/UnrealMcp`.
+These folders provide versioned MCP test fixtures, project-local skills, supervisor templates, manifest schemas, and documentation paths used by Workbench/Audit. Runtime output still goes under the target project's ignored `Saved/UnrealMcp`.
+
+Confirm the target `.uproject` contains both editor plugins:
+
+```json
+{
+  "Plugins": [
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true,
+      "TargetAllowList": ["Editor"]
+    },
+    {
+      "Name": "UnrealMcp",
+      "Enabled": true,
+      "TargetAllowList": ["Editor"]
+    }
+  ]
+}
+```
+
+Project-level install is the recommended path. Do not keep a second copy under the Unreal Engine installation, such as `Engine/Plugins/Marketplace/UnrealMcp`, while also using a project-level plugin. Duplicate copies can load the wrong binary or make cleanup fail because `UnrealEditor-UnrealMcp.dll` is still in use.
 
 ### 4. Open Or Build The Local Development Host
 
@@ -561,6 +652,26 @@ git lfs install
 git lfs pull
 ```
 
+Install into an existing Windows project:
+
+```powershell
+py -3 Tools\install_unrealmcp_to_project.py `
+  --project "E:\UE5_P\EasyMapper5_7\EasyMapper5_7.uproject" `
+  --dry-run
+
+py -3 Tools\install_unrealmcp_to_project.py `
+  --project "E:\UE5_P\EasyMapper5_7\EasyMapper5_7.uproject"
+```
+
+The target project should then contain:
+
+```text
+E:\UE5_P\EasyMapper5_7\Plugins\UnrealMcp\UnrealMcp.uplugin
+E:\UE5_P\EasyMapper5_7\Tools
+E:\UE5_P\EasyMapper5_7\Schemas
+E:\UE5_P\EasyMapper5_7\Docs
+```
+
 Build from PowerShell:
 
 ```powershell
@@ -581,8 +692,25 @@ Build from Command Prompt:
 
 If your engine is installed somewhere else, change the `UE_5.7` path accordingly.
 
+For an existing project such as `EasyMapper5_7`, build that project's editor target instead of the root UEvolve host:
+
+```powershell
+& "E:\3D_SOFTWARE\UE_5.7\Engine\Build\BatchFiles\Build.bat" `
+  UnrealEditor Win64 Development `
+  "-Project=E:\UE5_P\EasyMapper5_7\EasyMapper5_7.uproject" `
+  -WaitMutex
+```
+
+After a successful project-level plugin build, Windows should generate:
+
+```text
+E:\UE5_P\EasyMapper5_7\Plugins\UnrealMcp\Binaries\Win64\UnrealEditor-UnrealMcp.dll
+E:\UE5_P\EasyMapper5_7\Plugins\UnrealMcp\Binaries\Win64\UnrealEditor.modules
+```
+
 Windows-specific issues to expect:
 
+- Engine-level duplicate plugin: remove `Engine\Plugins\Marketplace\UnrealMcp` when using project-level install, and close Unreal Editor first if Windows says the DLL is locked.
 - Engine version mismatch: install Unreal Engine 5.7 or update `EngineAssociation` intentionally.
 - Live Coding lock: close Unreal Editor and disable Live Coding before command-line builds.
 - Missing C++ compiler: install Visual Studio 2022 and the C++ desktop workload.

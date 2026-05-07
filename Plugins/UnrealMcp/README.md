@@ -63,6 +63,8 @@ Editor action tools:
 - `unreal.scaffold_economy_system`
 - `unreal.scaffold_autobattler_ai`
 - `unreal.scaffold_result_ui`
+- `unreal.scaffold_recipe`
+- `unreal.workflow_run`
 - `unreal.scaffold_mcp_tool`
 - `unreal.mcp_list_scaffolds`
 - `unreal.mcp_inspect_scaffold`
@@ -86,6 +88,9 @@ Editor action tools:
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
+- `unreal.knowledge_index_refresh`
+- `unreal.knowledge_search`
+- `unreal.tool_recommend`
 - `unreal.project_memory_write`
 - `unreal.project_memory_read`
 - `unreal.project_memory_view`
@@ -119,6 +124,64 @@ By default the plugin listens on:
 You can change the port, path, allowed origins, and optional auth token in:
 
 `Project Settings > Plugins > Unreal MCP`
+
+## Install Into An Existing Project
+
+UEvolve is usually installed as a project-level plugin, not an engine-level plugin. From a UEvolve checkout, install into a target project with:
+
+```bash
+python3 Tools/install_unrealmcp_to_project.py --project "/path/to/YourProject/YourProject.uproject"
+```
+
+On Windows:
+
+```powershell
+py -3 Tools\install_unrealmcp_to_project.py `
+  --project "E:\UE5_P\EasyMapper5_7\EasyMapper5_7.uproject"
+```
+
+The helper copies the reusable plugin plus the project-root workflow folders:
+
+```text
+<YourProject>/Plugins/UnrealMcp
+<YourProject>/Tools
+<YourProject>/Schemas
+<YourProject>/Docs
+```
+
+It also enables both `UnrealMcp` and `PythonScriptPlugin` in the target `.uproject` after creating a backup. Use `--dry-run` first to preview the copy/edit plan.
+
+If you install manually, copy those same folders and confirm the target `.uproject` enables:
+
+```json
+{
+  "Plugins": [
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true,
+      "TargetAllowList": ["Editor"]
+    },
+    {
+      "Name": "UnrealMcp",
+      "Enabled": true,
+      "TargetAllowList": ["Editor"]
+    }
+  ]
+}
+```
+
+Do not keep another copy under `Engine/Plugins/Marketplace/UnrealMcp` while using a project-level install. Duplicate plugin copies can load stale binaries or make Windows cleanup fail because `UnrealEditor-UnrealMcp.dll` is still locked by a running editor.
+
+After copying, close Unreal Editor and build the target project. For example:
+
+```powershell
+& "E:\3D_SOFTWARE\UE_5.7\Engine\Build\BatchFiles\Build.bat" `
+  UnrealEditor Win64 Development `
+  "-Project=E:\UE5_P\EasyMapper5_7\EasyMapper5_7.uproject" `
+  -WaitMutex
+```
+
+The MCP endpoint only responds after Unreal Editor opens that target project and successfully loads this plugin. It is not a standalone background service.
 
 ## AI Assistant
 
@@ -156,6 +219,7 @@ Behavior notes:
 - Long AI turns now use configurable request and activity timeouts so tool-heavy or planning-heavy requests are less likely to fail at the transport layer.
 - Unreal MCP also synchronizes Unreal's global HTTP connection/activity timeouts for AI turns so macOS does not fall back to the engine's default 30-second connection timeout.
 - The default AI tool-round budget is 16 so scaffold-style requests have more room to inspect, create assets, and then summarize.
+- If an AI turn reaches the tool-round budget, the chat now pauses instead of hard-failing: it writes `chat.active_task`, gives a concrete next step, and avoids carrying forward a half-finished response chain.
 - The conversation history is persisted at `Saved/UnrealMcp/ChatHistory.json`.
 - High-level activity recording is opt-in and starts only after `unreal.skill_recording_start`; while active, it writes local JSONL events under `Saved/UnrealMcp/ActivityLog/*.jsonl`. It records mutating MCP tool call/result metadata and a periodic editor heartbeat roughly once per minute, skips read-only/status tools, and does not store tool result text previews.
 - On the first AI turn after the panel reloads, Unreal MCP now also replays a small, compact slice of the persisted local transcript back to the model for continuity, so saved history is not just UI-only.
@@ -281,6 +345,28 @@ Then call `unreal.bp_compile_save` for the Widget Blueprint when the hierarchy e
 ```
 
 Playable system scaffold examples:
+
+High-level bounded recipe examples:
+
+```text
+/tool unreal.scaffold_recipe {"recipeName":"first_person_ground_character","rootPath":"/Game/MCPDemo","writeMemory":true}
+```
+
+```text
+/tool unreal.scaffold_recipe {"recipeName":"widget_hud","rootPath":"/Game/MCPDemo","writeMemory":true}
+```
+
+```text
+/tool unreal.scaffold_recipe {"recipeName":"mcp_self_extension_pipeline","writeMemory":true}
+```
+
+Generic workflow composition example:
+
+```text
+/tool unreal.workflow_run {"workflowName":"readonly-check","dryRun":true,"writeMemory":true,"steps":[{"name":"status","tool":"unreal.editor_status","argumentsJson":"{}"},{"name":"workbench","tool":"unreal.mcp_workbench_status","argumentsJson":"{\"includeBuildLogTail\":false}"}]}
+```
+
+Legacy direct gameplay scaffold examples:
 
 ```text
 /tool unreal.scaffold_round_system {"rootPath":"/Game/MCPDemo","compile":true,"savePackage":true}
@@ -431,6 +517,10 @@ Inspect pipeline state and last source apply:
 ```
 
 `unreal.mcp_pipeline_status` collects project memory, the latest apply manifest, the newest build log tail, test scaffolds, test requests, and extension backups into one status report. `unreal.mcp_workbench_status` adds tool audit health, ToolRegistry legacy-hidden tools, handler aliases, supervisor logs, and aggregate test counts for a higher-level self-extension dashboard. `unreal.mcp_diff_last_apply` reads the backup snapshots written by `mcp_apply_scaffold`, so it can explain exactly what the last automatic source integration changed.
+
+`unreal.workflow_run` is the generic composition executor for bounded high-level tool combinations. It accepts inline `steps`, a `workflowJson` string, or a project-local `workflowPath`, defaults to `dryRun:true`, blocks nested workflows plus high/critical step tools unless explicitly allowed, executes every step through the normal MCP handler path, and can write `chat.active_task` for continuation after planned, paused, or completed workflows.
+
+`unreal.knowledge_search` and `unreal.tool_recommend` are the first local RAG-facing planning tools. Chat should search first; if the local KnowledgeCard index is missing, run `unreal.knowledge_index_refresh` and retry. The index is written under `Saved/UnrealMcp/KnowledgeIndex`, while fetched official documentation caches stay under `Saved/UnrealMcp/KnowledgeSources`.
 
 The Workbench UI is intentionally thin: it calls the same MCP tools used by Chat and displays the latest structured result. It currently exposes safe operational buttons for status refresh, audit, core test suite, pipeline status, lock status, Skill Activity status, draft distillation, promote dry-run, and copying the latest result. High-risk actions such as apply, build, restart, real promote, and rollback should stay behind the existing dry-run, lock, supervisor, and manifest workflow until the UI adds explicit confirmation surfaces.
 

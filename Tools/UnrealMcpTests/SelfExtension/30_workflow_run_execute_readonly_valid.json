@@ -1,0 +1,42 @@
+{
+  "name": "workflow_run_execute_readonly_valid",
+  "description": "Execute a bounded read-only workflow through the generic workflow executor.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "workflow_run",
+    "workflowName": "core_readonly_execute",
+    "status": "completed",
+    "dryRun": false,
+    "succeeded": true,
+    "totalSteps": 2,
+    "executedSteps": 2
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 330,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.workflow_run",
+      "arguments": {
+        "workflowName": "core_readonly_execute",
+        "dryRun": false,
+        "writeMemory": false,
+        "steps": [
+          {
+            "name": "status",
+            "tool": "unreal.editor_status",
+            "argumentsJson": "{}"
+          },
+          {
+            "name": "workbench",
+            "tool": "unreal.mcp_workbench_status",
+            "argumentsJson": "{\"includeBuildLogTail\":false}"
+          }
+        ]
+      }
+    }
+  }
+}

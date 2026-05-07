@@ -7,5 +7,6 @@ struct FUnrealMcpExecutionResult;
 
 namespace UnrealMcp
 {
+	FUnrealMcpExecutionResult ProjectMemoryWrite(const FJsonObject& Arguments);
 	bool TryExecuteMemoryTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
 }

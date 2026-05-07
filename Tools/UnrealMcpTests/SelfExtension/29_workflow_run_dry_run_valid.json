@@ -1,0 +1,42 @@
+{
+  "name": "workflow_run_dry_run_valid",
+  "description": "Plan a bounded two-step read-only workflow without executing step tools.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "workflow_run",
+    "workflowName": "core_readonly_plan",
+    "status": "planned",
+    "dryRun": true,
+    "totalSteps": 2,
+    "plannedSteps": 2,
+    "executedSteps": 0
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 329,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.workflow_run",
+      "arguments": {
+        "workflowName": "core_readonly_plan",
+        "dryRun": true,
+        "writeMemory": false,
+        "steps": [
+          {
+            "name": "status",
+            "tool": "unreal.editor_status",
+            "argumentsJson": "{}"
+          },
+          {
+            "name": "audit",
+            "tool": "unreal.mcp_tool_audit",
+            "argumentsJson": "{}"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "scaffold_recipe_first_person_valid",
+  "description": "Generate the high-level first-person ground character recipe without writing project memory.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "scaffold_recipe",
+    "recipeName": "first_person_ground_character",
+    "memoryWritten": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 410,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.scaffold_recipe",
+      "arguments": {
+        "recipeName": "first_person_ground_character",
+        "rootPath": "/Game/__UEvolveMcpTest/Recipes",
+        "writeMemory": false,
+        "includeToolCalls": true
+      }
+    }
+  }
+}

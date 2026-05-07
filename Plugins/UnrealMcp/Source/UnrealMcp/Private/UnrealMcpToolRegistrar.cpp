@@ -142,6 +142,34 @@ namespace UnrealMcp
 				Schema);
 		}
 
+		void RegisterScaffoldMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("recipeName"), MakeStringProperty(TEXT("Recipe name: first_person_ground_character, widget_hud, or mcp_self_extension_pipeline."), TEXT("first_person_ground_character")));
+			Properties->SetObjectField(TEXT("rootPath"), MakeStringProperty(TEXT("Content Browser root used in generated example tool calls."), TEXT("/Game/UEvolveRecipes")));
+			Properties->SetObjectField(TEXT("taskName"), MakeStringProperty(TEXT("Optional human-readable task label to store with the recipe."), FString()));
+			Properties->SetObjectField(TEXT("writeMemory"), MakeBoolProperty(TEXT("Whether to write this recipe into project memory for Chat continuation."), true));
+			Properties->SetObjectField(TEXT("memoryKey"), MakeStringProperty(TEXT("Project memory key to write when writeMemory=true."), TEXT("chat.active_task")));
+			Properties->SetObjectField(TEXT("includeToolCalls"), MakeBoolProperty(TEXT("Whether to include example tool-call JSON for the recipe."), true));
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetObjectField(TEXT("properties"), Properties);
+
+			FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+				TEXT("unreal.scaffold_recipe"),
+				TEXT("Scaffold High-Level Recipe"),
+				TEXT("Prepares a bounded high-level editor recipe with ordered tools, verification gates, and optional chat.active_task memory handoff."),
+				TEXT("scaffold"),
+				TEXT("UnrealMcpScaffoldTools.cpp"),
+				EUnrealMcpToolRisk::Low);
+			Descriptor.bRequiresWrite = true;
+			Descriptor.bRequiresProjectMemory = true;
+			Descriptor.bPreflightSupport = true;
+			Descriptor.bPostcheckSupport = true;
+			Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+			Descriptor.Reason = TEXT("Descriptor: high-level recipe scaffold that writes optional continuation memory and reduces long-loop tool exploration.");
+			Registrar.Add(Descriptor, Schema);
+		}
+
 		void RegisterSelfExtensionMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -169,6 +197,77 @@ namespace UnrealMcp
 					TEXT("self-extension"),
 					TEXT("UnrealMcpSelfExtensionTools.cpp")),
 				WorkbenchSchema);
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("sourceRoot"), MakeStringProperty(TEXT("Optional root containing fetched knowledge sources. Defaults to Saved/UnrealMcp/KnowledgeSources."), FString()));
+				Properties->SetObjectField(TEXT("indexRoot"), MakeStringProperty(TEXT("Optional output directory for the generated KnowledgeCard index. Defaults to Saved/UnrealMcp/KnowledgeIndex."), FString()));
+				Properties->SetObjectField(TEXT("includeOfficialDocs"), MakeBoolProperty(TEXT("Include fetched official documentation documents.jsonl files."), true));
+				Properties->SetObjectField(TEXT("includeVersionedDocs"), MakeBoolProperty(TEXT("Include versioned README/Docs markdown files."), true));
+				Properties->SetObjectField(TEXT("includeToolRegistry"), MakeBoolProperty(TEXT("Include visible ToolRegistry entries as searchable tool cards."), true));
+				Properties->SetObjectField(TEXT("skipLowContent"), MakeBoolProperty(TEXT("Skip source rows flagged as low-content by the docs fetcher."), true));
+				Properties->SetObjectField(TEXT("maxCards"), MakeNumberProperty(TEXT("Maximum KnowledgeCards to write."), 2000.0));
+				Properties->SetObjectField(TEXT("maxChunkChars"), MakeNumberProperty(TEXT("Maximum text characters per card chunk."), 1800.0));
+				Properties->SetObjectField(TEXT("chunkOverlapChars"), MakeNumberProperty(TEXT("Overlapping characters between adjacent chunks."), 160.0));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview source/card counts without writing index files."), false));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.knowledge_index_refresh"),
+					TEXT("Refresh Knowledge Index"),
+					TEXT("Builds a local KnowledgeCard JSONL index from fetched official docs, versioned docs, and visible ToolRegistry entries."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpKnowledgeTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: writes local Saved/UnrealMcp KnowledgeCard indexes so Chat can retrieve docs and tool guidance without expanding prompt context.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("query"), MakeStringProperty(TEXT("Search query for local KnowledgeCards."), FString()));
+				Properties->SetObjectField(TEXT("categories"), MakeStringArrayProperty(TEXT("Optional KnowledgeCard categories to include.")));
+				Properties->SetObjectField(TEXT("indexRoot"), MakeStringProperty(TEXT("Optional index directory. Defaults to Saved/UnrealMcp/KnowledgeIndex."), FString()));
+				Properties->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum search results."), 8.0));
+				Properties->SetObjectField(TEXT("maxExcerptChars"), MakeNumberProperty(TEXT("Maximum excerpt characters per result."), 420.0));
+				Properties->SetObjectField(TEXT("includeText"), MakeBoolProperty(TEXT("Include full card text in results. Off by default to keep Chat context compact."), false));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(
+					MakeDescriptor(
+						TEXT("unreal.knowledge_search"),
+						TEXT("Search Knowledge Index"),
+						TEXT("Searches the local KnowledgeCard index and returns compact source-linked cards for planning, tool choice, and verification."),
+						TEXT("self-extension"),
+						TEXT("UnrealMcpKnowledgeTools.cpp"),
+						EUnrealMcpToolRisk::ReadOnly),
+					Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("task"), MakeStringProperty(TEXT("Natural-language task to map to existing tools and workflows."), FString()));
+				Properties->SetObjectField(TEXT("riskMax"), MakeStringProperty(TEXT("Maximum risk to recommend: read_only, low, medium, high, or critical."), TEXT("critical")));
+				Properties->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum tool recommendations."), 8.0));
+				Properties->SetObjectField(TEXT("includeKnowledge"), MakeBoolProperty(TEXT("Include top matching KnowledgeCards when the index exists."), true));
+				Properties->SetObjectField(TEXT("includeWorkflowDraft"), MakeBoolProperty(TEXT("Include a lightweight workflow draft using preview/search/tool/verify gates."), true));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(
+					MakeDescriptor(
+						TEXT("unreal.tool_recommend"),
+						TEXT("Recommend MCP Tools"),
+						TEXT("Recommends existing MCP tools and a safe workflow draft for a task using ToolRegistry policy plus optional local KnowledgeCards."),
+						TEXT("self-extension"),
+						TEXT("UnrealMcpKnowledgeTools.cpp"),
+						EUnrealMcpToolRisk::ReadOnly),
+					Schema);
+			}
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
@@ -292,6 +391,58 @@ namespace UnrealMcp
 				Descriptor.bPostcheckSupport = true;
 				Registrar.Add(Descriptor, Schema);
 			}
+
+			{
+				TSharedPtr<FJsonObject> StepProperties = MakeShared<FJsonObject>();
+				StepProperties->SetObjectField(TEXT("name"), MakeStringProperty(TEXT("Human-readable step label."), FString()));
+				StepProperties->SetObjectField(TEXT("tool"), MakeStringProperty(TEXT("MCP tool name to call, for example unreal.editor_status."), FString()));
+				StepProperties->SetObjectField(TEXT("argumentsJson"), MakeStringProperty(TEXT("JSON object string used as the step tool arguments. Use {} for no arguments."), TEXT("{}")));
+				StepProperties->SetObjectField(TEXT("skip"), MakeBoolProperty(TEXT("Whether to skip this step."), false));
+				StepProperties->SetObjectField(TEXT("expectError"), MakeBoolProperty(TEXT("Whether the step is expected to return a tool error."), false));
+				StepProperties->SetObjectField(TEXT("continueOnError"), MakeBoolProperty(TEXT("Whether to continue the workflow if this step fails."), false));
+
+				TSharedPtr<FJsonObject> StepSchema = MakeObjectSchema();
+				StepSchema->SetObjectField(TEXT("properties"), StepProperties);
+
+				TSharedPtr<FJsonObject> StepsProperty = MakeShared<FJsonObject>();
+				StepsProperty->SetStringField(TEXT("type"), TEXT("array"));
+				StepsProperty->SetStringField(TEXT("description"), TEXT("Bounded list of workflow steps. Each step can call one registered MCP tool."));
+				StepsProperty->SetObjectField(TEXT("items"), StepSchema);
+
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("workflowName"), MakeStringProperty(TEXT("Human-readable workflow name."), TEXT("mcp_workflow")));
+				Properties->SetObjectField(TEXT("workflowJson"), MakeStringProperty(TEXT("Optional full workflow JSON object string. Useful when step arguments are complex."), FString()));
+				Properties->SetObjectField(TEXT("workflowPath"), MakeStringProperty(TEXT("Optional project-local workflow JSON file path. Ignored when workflowJson is provided."), FString()));
+				Properties->SetObjectField(TEXT("steps"), StepsProperty);
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview the workflow without executing step tools. Defaults to true for safety."), true));
+				Properties->SetObjectField(TEXT("stopOnFailure"), MakeBoolProperty(TEXT("Stop at the first failed step unless the step has continueOnError=true."), true));
+				Properties->SetObjectField(TEXT("maxSteps"), MakeNumberProperty(TEXT("Maximum number of steps allowed in this run, clamped to 1-100."), 20.0));
+				Properties->SetObjectField(TEXT("writeMemory"), MakeBoolProperty(TEXT("Write workflow status to project memory for long-task continuation."), true));
+				Properties->SetObjectField(TEXT("memoryKey"), MakeStringProperty(TEXT("Project memory key used when writeMemory=true."), TEXT("chat.active_task")));
+				Properties->SetObjectField(TEXT("allowHighRisk"), MakeBoolProperty(TEXT("Allow high-risk step tools to execute when dryRun=false."), false));
+				Properties->SetObjectField(TEXT("allowCritical"), MakeBoolProperty(TEXT("Allow critical-risk step tools to execute when dryRun=false."), false));
+				Properties->SetObjectField(TEXT("includeStepStructuredContent"), MakeBoolProperty(TEXT("Include each step structuredContent in the workflow result. Off by default to keep context compact."), false));
+				Properties->SetObjectField(TEXT("maxResultChars"), MakeNumberProperty(TEXT("Maximum text preview characters retained per executed step."), 1200.0));
+
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.workflow_run"),
+					TEXT("Run MCP Workflow"),
+					TEXT("Runs a bounded, policy-checked sequence of MCP tool calls with dry-run planning, risk gates, failure pause, and project-memory handoff."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpWorkflowTools.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresProjectMemory = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: generic high-level composition executor for safe MCP tool orchestration.");
+				Registrar.Add(Descriptor, Schema);
+			}
 		}
 
 		void RegisterAllMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
@@ -300,6 +451,7 @@ namespace UnrealMcp
 			RegisterActorMcpToolDescriptors(Registrar);
 			RegisterBlueprintInspectorMcpToolDescriptors(Registrar);
 			RegisterWidgetInspectorMcpToolDescriptors(Registrar);
+			RegisterScaffoldMcpToolDescriptors(Registrar);
 			RegisterSelfExtensionMcpToolDescriptors(Registrar);
 		}
 	}

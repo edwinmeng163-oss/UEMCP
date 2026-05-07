@@ -1,0 +1,28 @@
+{
+  "name": "knowledge_index_refresh_valid",
+  "description": "Build a small local KnowledgeCard index from versioned docs and ToolRegistry metadata without requiring downloaded official docs.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "knowledge_index_refresh",
+    "dryRun": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 333,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.knowledge_index_refresh",
+      "arguments": {
+        "includeOfficialDocs": false,
+        "includeVersionedDocs": true,
+        "includeToolRegistry": true,
+        "maxCards": 60,
+        "maxChunkChars": 1200,
+        "chunkOverlapChars": 80
+      }
+    }
+  }
+}

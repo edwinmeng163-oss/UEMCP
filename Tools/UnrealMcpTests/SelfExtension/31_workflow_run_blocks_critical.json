@@ -1,0 +1,37 @@
+{
+  "name": "workflow_run_blocks_critical",
+  "description": "Confirm workflow execution blocks critical step tools unless allowCritical=true is explicitly provided.",
+  "category": "error_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "expectToolCallStructuredFields": {
+    "action": "workflow_run",
+    "workflowName": "critical_block",
+    "status": "paused",
+    "dryRun": false,
+    "succeeded": false,
+    "failedStepIndex": 0,
+    "executedSteps": 0
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 331,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.workflow_run",
+      "arguments": {
+        "workflowName": "critical_block",
+        "dryRun": false,
+        "writeMemory": false,
+        "steps": [
+          {
+            "name": "blocked_python",
+            "tool": "unreal.execute_python",
+            "argumentsJson": "{\"command\":\"print('blocked')\",\"mode\":\"ExecuteStatement\"}"
+          }
+        ]
+      }
+    }
+  }
+}

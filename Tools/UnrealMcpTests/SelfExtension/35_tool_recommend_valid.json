@@ -1,0 +1,27 @@
+{
+  "name": "tool_recommend_valid",
+  "description": "Recommend existing tools for a Blueprint/Widget task before creating new MCP functionality.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "tool_recommend",
+    "riskMax": "medium"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 335,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.tool_recommend",
+      "arguments": {
+        "task": "Create a Widget HUD and verify it with existing tools",
+        "riskMax": "medium",
+        "limit": 6,
+        "includeKnowledge": true,
+        "includeWorkflowDraft": true
+      }
+    }
+  }
+}

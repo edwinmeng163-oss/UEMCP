@@ -1,0 +1,20 @@
+{
+  "name": "scaffold_recipe_unknown_recipe",
+  "description": "Unknown high-level recipe names should return a tool-call error with supported recipe names.",
+  "category": "error_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 420,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.scaffold_recipe",
+      "arguments": {
+        "recipeName": "not_a_real_recipe",
+        "writeMemory": false
+      }
+    }
+  }
+}

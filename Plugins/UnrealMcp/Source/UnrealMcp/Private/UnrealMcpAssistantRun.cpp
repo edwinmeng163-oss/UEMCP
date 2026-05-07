@@ -6,6 +6,7 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpSettings.h"
 
 namespace UnrealMcp
@@ -166,6 +167,104 @@ private:
 		EmitEvent(Event);
 	}
 
+	static FString CollapseForActiveTaskMemory(const FString& Text, int32 MaxChars)
+	{
+		FString Collapsed = Text;
+		Collapsed.ReplaceInline(TEXT("\r"), TEXT(" "));
+		Collapsed.ReplaceInline(TEXT("\n"), TEXT(" "));
+		Collapsed = Collapsed.TrimStartAndEnd();
+		return Collapsed.Len() > MaxChars ? Collapsed.Left(MaxChars) + TEXT(" ...[truncated]") : Collapsed;
+	}
+
+	void AddRecentToolSummary(const FAssistantToolCall& ToolCall, const FUnrealMcpExecutionResult& ToolResult)
+	{
+		RecentToolSummaries.Add(FString::Printf(
+			TEXT("%s [%s]: %s"),
+			*ToolCall.UnrealToolName,
+			ToolResult.bIsError ? TEXT("error") : TEXT("ok"),
+			*CollapseForActiveTaskMemory(ToolResult.Text, 360)));
+
+		while (RecentToolSummaries.Num() > MaxActiveTaskToolSummaries)
+		{
+			RecentToolSummaries.RemoveAt(0);
+		}
+	}
+
+	void RememberActiveTask(const FString& Status, const FString& NextStep, const FString& Trigger)
+	{
+		TSharedPtr<FJsonObject> ContentObject = MakeShared<FJsonObject>();
+		ContentObject->SetStringField(TEXT("trigger"), Trigger);
+		ContentObject->SetStringField(TEXT("userPrompt"), UserPrompt);
+		ContentObject->SetStringField(TEXT("previousResponseId"), PreviousResponseId);
+		ContentObject->SetStringField(TEXT("activeResponseId"), ActiveResponseId);
+		ContentObject->SetNumberField(TEXT("toolRoundCount"), ToolRoundCount);
+		ContentObject->SetNumberField(TEXT("maxToolRounds"), GetDefault<UUnrealMcpSettings>()->AiMaxToolRounds);
+		ContentObject->SetBoolField(TEXT("hadToolError"), bHadToolError);
+		ContentObject->SetBoolField(TEXT("nearToolRoundLimit"), bRememberedNearToolRoundLimit);
+		ContentObject->SetStringField(TEXT("assistantDraft"), CollapseForActiveTaskMemory(AccumulatedAssistantText, 1200));
+
+		TArray<TSharedPtr<FJsonValue>> ToolSummaryValues;
+		for (const FString& Summary : RecentToolSummaries)
+		{
+			ToolSummaryValues.Add(MakeShared<FJsonValueString>(Summary));
+		}
+		ContentObject->SetArrayField(TEXT("recentToolSummaries"), ToolSummaryValues);
+
+		TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+		Arguments->SetStringField(TEXT("key"), TEXT("chat.active_task"));
+		Arguments->SetStringField(TEXT("summary"), CollapseForActiveTaskMemory(UserPrompt, 240));
+		Arguments->SetStringField(TEXT("status"), Status);
+		Arguments->SetStringField(TEXT("nextStep"), NextStep);
+		Arguments->SetStringField(TEXT("contentJson"), UnrealMcp::JsonObjectToString(ContentObject));
+
+		TArray<TSharedPtr<FJsonValue>> Tags;
+		Tags.Add(MakeShared<FJsonValueString>(TEXT("chat")));
+		Tags.Add(MakeShared<FJsonValueString>(TEXT("active_task")));
+		Tags.Add(MakeShared<FJsonValueString>(TEXT("resume")));
+		Arguments->SetArrayField(TEXT("tags"), Tags);
+
+		(void)UnrealMcp::ProjectMemoryWrite(*Arguments);
+	}
+
+	void MaybeRememberTerminalActiveTask(bool bIsError, bool bWasCancelled)
+	{
+		if (bPausedAtToolRoundLimit)
+		{
+			return;
+		}
+
+		if (bWasCancelled)
+		{
+			RememberActiveTask(
+				TEXT("cancelled"),
+				TEXT("Read project memory key chat.active_task, review recentToolSummaries, then continue from the last verified step."),
+				TEXT("chat_cancelled"));
+			return;
+		}
+
+		if (ToolRoundCount <= 0)
+		{
+			return;
+		}
+
+		if (bIsError)
+		{
+			RememberActiveTask(
+				TEXT("stopped_with_error"),
+				TEXT("Read project memory key chat.active_task, classify the error if needed, then resume with a smaller verified step."),
+				TEXT("chat_error"));
+			return;
+		}
+
+		if (bHadToolError || ToolRoundCount >= LongTaskMemoryRoundThreshold)
+		{
+			RememberActiveTask(
+				TEXT("completed"),
+				TEXT("Use this as the latest completed checkpoint if the user asks to continue the same editor task."),
+				TEXT("chat_completed_checkpoint"));
+		}
+	}
+
 	void Finish(const FString& Message, const FString& ResponseId, bool bIsError, bool bWasCancelled = false)
 	{
 		{
@@ -178,6 +277,8 @@ private:
 			bCompleted = true;
 			ActiveRequest.Reset();
 		}
+
+		MaybeRememberTerminalActiveTask(bIsError, bWasCancelled);
 
 		if (OnComplete)
 		{
@@ -315,7 +416,14 @@ private:
 			TEXT("For read-only questions, inspect first before concluding. ")
 			TEXT("For modifications, act directly when the user clearly asked for a change. ")
 			TEXT("Avoid destructive actions such as deleting actors unless the user explicitly asked for that result. ")
-			TEXT("Prefer AI-safe wrapper tools such as spawn_actor_basic, spawn_actor_batch_basic, spawn_static_mesh_actor, batch_set_actor_scale, batch_set_actor_tags, batch_set_point_light_properties, batch_configure_static_mesh_actors, bp_* Blueprint graph editing tools, widget_* UMG editing tools, and scaffold_mcp_tool plus mcp_* self-extension tools before falling back to execute_python. ")
+			TEXT("Prefer AI-safe wrapper tools such as spawn_actor_basic, spawn_actor_batch_basic, spawn_static_mesh_actor, batch_set_actor_scale, batch_set_actor_tags, batch_set_point_light_properties, batch_configure_static_mesh_actors, bp_* Blueprint graph editing tools, widget_* UMG editing tools, scaffold_recipe, workflow_run, scaffold_mcp_tool, and mcp_* self-extension tools before falling back to execute_python. ")
+			TEXT("Self-extension capability briefing: from the first turn, assume this plugin can inspect its registered tools, scaffold new MCP tools, validate schemas, apply descriptor-first patches, build the editor target, run tool tests, roll back failed extensions, and store continuation memory. ")
+			TEXT("Use mcp_workbench_status or mcp_tool_audit to discover current coverage, policies, handlers, tests, and health. ")
+			TEXT("For uncertain tasks, use tool_recommend and knowledge_search before inventing new tools; if knowledge_search reports a missing index, run knowledge_index_refresh and retry the search. ")
+			TEXT("When the user asks for a high-level or repeatable workflow, prefer scaffold_recipe to generate a bounded recipe and workflow_run to dry-run or execute a sequence of existing tools. ")
+			TEXT("workflow_run defaults to dryRun=true; run it as a plan first, then execute with dryRun=false only when the requested changes, risks, and verification steps are clear. ")
+			TEXT("For new MCP capabilities, follow the safe self-extension gate: preview_change_plan, scaffold_mcp_tool, mcp_validate_tool_schema, mcp_apply_scaffold dryRun, mcp_apply_scaffold real apply, mcp_build_editor, editor restart if needed, mcp_run_tool_test or mcp_run_test_suite, then verify_task_outcome. ")
+			TEXT("If a long task pauses, fails, or approaches the tool-round limit, read or write project memory key chat.active_task and continue from the smallest verified next step. ")
 			TEXT("Keep answers compact by default and avoid repeating the user's prompt. ")
 			TEXT("When a task is blocked because no suitable tool exists, say so plainly and suggest the closest supported path. ")
 			TEXT("After tool use, give a concise final answer focused on what you changed or found.");
@@ -934,12 +1042,28 @@ private:
 		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
 		if (ToolRoundCount > Settings->AiMaxToolRounds)
 		{
+			bPausedAtToolRoundLimit = true;
+			RememberActiveTask(
+				TEXT("paused_at_tool_round_limit"),
+				TEXT("Read project memory key chat.active_task, review recentToolSummaries, then continue with exactly one bounded next step and verify it before more exploration."),
+				TEXT("tool_round_limit"));
 			Finish(
-				FString::Printf(TEXT("Stopped after %d tool rounds to avoid an infinite loop."), Settings->AiMaxToolRounds),
-				ResponseId,
-				true,
+				FString::Printf(
+					TEXT("Paused after %d tool rounds to avoid an infinite loop. Saved resume state to project memory key chat.active_task.\n\nNext step: read chat.active_task, pick the smallest unfinished step from recentToolSummaries, execute only that step, then verify before continuing."),
+					Settings->AiMaxToolRounds),
+				FString(),
+				false,
 				false);
 			return;
+		}
+		const int32 NearLimitRound = FMath::Max(1, Settings->AiMaxToolRounds - 2);
+		if (!bRememberedNearToolRoundLimit && ToolRoundCount >= NearLimitRound)
+		{
+			bRememberedNearToolRoundLimit = true;
+			RememberActiveTask(
+				TEXT("in_progress_near_tool_round_limit"),
+				TEXT("Finish the smallest remaining step, avoid broad exploration, and verify with read-only inspection tools before calling more write tools."),
+				TEXT("near_tool_round_limit"));
 		}
 
 		TArray<TSharedPtr<FJsonValue>> ToolOutputs;
@@ -963,6 +1087,16 @@ private:
 			else
 			{
 				ToolResult = Module->ExecuteTool(ToolCall.UnrealToolName, *ArgumentsObject);
+			}
+
+			AddRecentToolSummary(ToolCall, ToolResult);
+			if (ToolResult.bIsError)
+			{
+				bHadToolError = true;
+				RememberActiveTask(
+					TEXT("in_progress_tool_error"),
+					TEXT("Inspect the failed tool summary, classify the error if needed, then retry with a smaller or safer tool call."),
+					TEXT("tool_error"));
 			}
 
 			EmitToolFinished(ToolCall, ToolResult);
@@ -1099,12 +1233,18 @@ private:
 	TMap<FString, FAssistantToolCall> StreamToolCalls;
 	FString ActiveResponseId;
 	FString AccumulatedAssistantText;
+	TArray<FString> RecentToolSummaries;
 	int32 ToolRoundCount = 0;
 	int32 AutoContinuationCount = 0;
 	static constexpr int32 MaxAutoContinuationCount = 2;
+	static constexpr int32 MaxActiveTaskToolSummaries = 12;
+	static constexpr int32 LongTaskMemoryRoundThreshold = 4;
 	bool bResponseIncompleteDueToMaxOutputTokens = false;
 	bool bCompleted = false;
 	bool bCancellationRequested = false;
+	bool bHadToolError = false;
+	bool bRememberedNearToolRoundLimit = false;
+	bool bPausedAtToolRoundLimit = false;
 };
 
 namespace UnrealMcp

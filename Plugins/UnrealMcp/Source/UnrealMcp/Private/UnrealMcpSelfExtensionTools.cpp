@@ -207,14 +207,15 @@ namespace UnrealMcp
 		}
 	}
 
-	bool TryExecuteSelfExtensionTool(
-		const FString& ToolName,
-		const FJsonObject& Arguments,
-		const TArray<TSharedPtr<FJsonValue>>& ToolsArray,
-		const FSelfExtensionModuleToolRunner& RunToolTest,
-		const FSelfExtensionModuleToolRunner& RunTestSuite,
-		const FSelfExtensionModuleToolRunner& RunExtensionPipeline,
-		FUnrealMcpExecutionResult& OutResult)
+		bool TryExecuteSelfExtensionTool(
+			const FString& ToolName,
+			const FJsonObject& Arguments,
+			const TArray<TSharedPtr<FJsonValue>>& ToolsArray,
+			const FSelfExtensionModuleToolRunner& RunToolTest,
+			const FSelfExtensionModuleToolRunner& RunTestSuite,
+			const FSelfExtensionModuleToolRunner& RunExtensionPipeline,
+			const FSelfExtensionModuleToolRunner& RunWorkflow,
+			FUnrealMcpExecutionResult& OutResult)
 	{
 		if (ToolName == TEXT("unreal.mcp_list_scaffolds"))
 		{
@@ -257,6 +258,24 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.mcp_workbench_status"))
 		{
 			OutResult = WorkbenchStatus(Arguments, ToolsArray);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.knowledge_index_refresh"))
+		{
+			OutResult = KnowledgeIndexRefresh(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.knowledge_search"))
+		{
+			OutResult = KnowledgeSearch(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.tool_recommend"))
+		{
+			OutResult = ToolRecommend(Arguments, ToolsArray);
 			return true;
 		}
 
@@ -317,6 +336,12 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.mcp_prepare_test_sandbox"))
 		{
 			OutResult = PrepareTestSandbox(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.workflow_run"))
+		{
+			OutResult = RunWorkflow(Arguments);
 			return true;
 		}
 

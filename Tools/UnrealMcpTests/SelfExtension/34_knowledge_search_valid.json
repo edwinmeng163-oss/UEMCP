@@ -1,0 +1,25 @@
+{
+  "name": "knowledge_search_valid",
+  "description": "Search the generated KnowledgeCard index for self-extension guidance.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "knowledge_search",
+    "query": "self extension tool registry"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 334,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.knowledge_search",
+      "arguments": {
+        "query": "self extension tool registry",
+        "limit": 5,
+        "maxExcerptChars": 240
+      }
+    }
+  }
+}

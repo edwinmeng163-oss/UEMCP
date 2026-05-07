@@ -24,6 +24,7 @@ Additional category fixtures live outside `Core` so they can be run deliberately
 ```text
 Tools/UnrealMcpTests/Actors
 Tools/UnrealMcpTests/Blueprint
+Tools/UnrealMcpTests/Scaffold
 Tools/UnrealMcpTests/SelfExtension
 Tools/UnrealMcpTests/Widget
 ```
@@ -39,6 +40,11 @@ Happy-path write fixtures should use disposable sandboxes instead of
 Blueprint, and Widget happy-path suites create/reset `/Game/__UEvolveMcpTest*`
 content and `UEvolveMcpTest_*` level actors before writing. If a future fixture
 cannot be made safe, mark it manual and explain why in the test description.
+
+The SelfExtension suite also covers `unreal.workflow_run`, the generic composition
+executor used to dry-run and execute bounded sequences of existing MCP tools. Keep
+workflow tests read-only or policy-blocked unless they first prepare a disposable
+sandbox and disable project-memory writes.
 
 Wrapped test cases can include `expectToolCallStructuredFields` to assert scalar
 fields inside the executed tool's `structuredContent` using dot-separated paths,

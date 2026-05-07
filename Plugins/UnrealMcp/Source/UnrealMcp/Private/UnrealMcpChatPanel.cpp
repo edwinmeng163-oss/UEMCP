@@ -35,9 +35,12 @@
 
 namespace UnrealMcpChat
 {
-	static constexpr int32 AssistantHistoryMaxEntries = 12;
-	static constexpr int32 AssistantHistoryMaxChars = 4000;
-	static constexpr int32 AssistantHistoryMaxCharsPerEntry = 500;
+	static constexpr int32 AssistantHistoryMaxEntries = 16;
+	static constexpr int32 AssistantHistoryMaxChars = 7000;
+	static constexpr int32 AssistantHistoryMaxCharsPerEntry = 650;
+	static constexpr int32 AssistantToolResultMaxChars = 420;
+	static constexpr int32 AssistantToolArgumentsMaxChars = 180;
+	static constexpr int32 AssistantActiveTaskMaxChars = 2200;
 	static constexpr int32 AiTestResponsePreviewMaxChars = 3000;
 
 	const FString& SkillApplyModeReadOnly()
@@ -199,11 +202,6 @@ namespace UnrealMcpChat
 			return true;
 		}
 
-		if (Entry.Type == EUnrealMcpChatEntryType::Tool)
-		{
-			return true;
-		}
-
 		const FString Body = Entry.Body.TrimStartAndEnd();
 		if (Body.IsEmpty() && Entry.Details.TrimStartAndEnd().IsEmpty())
 		{
@@ -251,9 +249,146 @@ namespace UnrealMcpChat
 		}
 
 		FString Block = Prefix + TEXT(":\n");
-		Block += Entry.Body.TrimStartAndEnd();
+		if (Entry.Type == EUnrealMcpChatEntryType::Tool)
+		{
+			const FString Body = Entry.Body.TrimStartAndEnd();
+			const FString Details = Entry.Details.TrimStartAndEnd();
+			if (!Body.IsEmpty())
+			{
+				Block += TEXT("Result: ");
+				Block += ClampForAssistantContext(Body, AssistantToolResultMaxChars);
+			}
+			if (!Details.IsEmpty())
+			{
+				if (!Body.IsEmpty())
+				{
+					Block += TEXT("\n");
+				}
+				Block += TEXT("Arguments: ");
+				Block += ClampForAssistantContext(Details, AssistantToolArgumentsMaxChars);
+			}
+		}
+		else
+		{
+			Block += Entry.Body.TrimStartAndEnd();
+		}
 
 		return ClampForAssistantContext(Block, AssistantHistoryMaxCharsPerEntry);
+	}
+
+	bool LoadProjectMemoryEntry(const FString& Key, TSharedPtr<FJsonObject>& OutEntry)
+	{
+		const FString MemoryPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("ProjectMemory.json"));
+		FString MemoryText;
+		if (!FFileHelper::LoadFileToString(MemoryText, *MemoryPath))
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> MemoryObject;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(MemoryText);
+		if (!FJsonSerializer::Deserialize(Reader, MemoryObject) || !MemoryObject.IsValid())
+		{
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* EntriesArray = nullptr;
+		if (!MemoryObject->TryGetArrayField(TEXT("entries"), EntriesArray) || !EntriesArray)
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& EntryValue : *EntriesArray)
+		{
+			if (!EntryValue.IsValid() || EntryValue->Type != EJson::Object || !EntryValue->AsObject().IsValid())
+			{
+				continue;
+			}
+
+			TSharedPtr<FJsonObject> EntryObject = EntryValue->AsObject();
+			FString EntryKey;
+			if (EntryObject->TryGetStringField(TEXT("key"), EntryKey) && EntryKey.Equals(Key, ESearchCase::CaseSensitive))
+			{
+				OutEntry = EntryObject;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	void AddOptionalMemoryLine(TArray<FString>& Lines, const TSharedPtr<FJsonObject>& Object, const FString& FieldName, const FString& Label, int32 MaxChars)
+	{
+		if (!Object.IsValid())
+		{
+			return;
+		}
+
+		FString Value;
+		if (Object->TryGetStringField(FieldName, Value) && !Value.TrimStartAndEnd().IsEmpty())
+		{
+			Lines.Add(FString::Printf(TEXT("- %s: %s"), *Label, *ClampForAssistantContext(Value.TrimStartAndEnd(), MaxChars)));
+		}
+	}
+
+	FString BuildActiveTaskMemoryContextBlock()
+	{
+		TSharedPtr<FJsonObject> EntryObject;
+		if (!LoadProjectMemoryEntry(TEXT("chat.active_task"), EntryObject) || !EntryObject.IsValid())
+		{
+			return FString();
+		}
+
+		TArray<FString> Lines;
+		Lines.Add(TEXT("Active task memory (chat.active_task):"));
+		AddOptionalMemoryLine(Lines, EntryObject, TEXT("summary"), TEXT("summary"), 320);
+		AddOptionalMemoryLine(Lines, EntryObject, TEXT("status"), TEXT("status"), 120);
+		AddOptionalMemoryLine(Lines, EntryObject, TEXT("nextStep"), TEXT("next step"), 420);
+		AddOptionalMemoryLine(Lines, EntryObject, TEXT("updatedAtUtc"), TEXT("updated at UTC"), 120);
+
+		const TSharedPtr<FJsonObject>* ContentObject = nullptr;
+		if (EntryObject->TryGetObjectField(TEXT("content"), ContentObject) && ContentObject && (*ContentObject).IsValid())
+		{
+			AddOptionalMemoryLine(Lines, *ContentObject, TEXT("trigger"), TEXT("trigger"), 160);
+			AddOptionalMemoryLine(Lines, *ContentObject, TEXT("userPrompt"), TEXT("original user prompt"), 420);
+			AddOptionalMemoryLine(Lines, *ContentObject, TEXT("assistantDraft"), TEXT("assistant draft"), 520);
+
+			bool bHadToolError = false;
+			if ((*ContentObject)->TryGetBoolField(TEXT("hadToolError"), bHadToolError))
+			{
+				Lines.Add(FString::Printf(TEXT("- had tool error: %s"), bHadToolError ? TEXT("true") : TEXT("false")));
+			}
+
+			double ToolRoundCount = 0.0;
+			if ((*ContentObject)->TryGetNumberField(TEXT("toolRoundCount"), ToolRoundCount))
+			{
+				Lines.Add(FString::Printf(TEXT("- tool rounds used: %d"), static_cast<int32>(ToolRoundCount)));
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* RecentToolSummaries = nullptr;
+			if ((*ContentObject)->TryGetArrayField(TEXT("recentToolSummaries"), RecentToolSummaries) && RecentToolSummaries)
+			{
+				TArray<FString> SummaryLines;
+				const int32 StartIndex = FMath::Max(0, RecentToolSummaries->Num() - 6);
+				for (int32 Index = StartIndex; Index < RecentToolSummaries->Num(); ++Index)
+				{
+					const TSharedPtr<FJsonValue>& SummaryValue = (*RecentToolSummaries)[Index];
+					if (SummaryValue.IsValid() && SummaryValue->Type == EJson::String)
+					{
+						SummaryLines.Add(FString::Printf(TEXT("  - %s"), *ClampForAssistantContext(SummaryValue->AsString(), 360)));
+					}
+				}
+
+				if (SummaryLines.Num() > 0)
+				{
+					Lines.Add(TEXT("- recent tool summaries:"));
+					Lines.Append(SummaryLines);
+				}
+			}
+		}
+
+		Lines.Add(TEXT("- resume rule: continue from the smallest verified next step; inspect before mutating; verify after tool use."));
+		return ClampForAssistantContext(FString::Join(Lines, TEXT("\n")), AssistantActiveTaskMaxChars);
 	}
 }
 
@@ -1543,6 +1678,15 @@ FString SUnrealMcpChatPanel::BuildAssistantConversationContext(const FString& Cu
 	Blocks.Reserve(UnrealMcpChat::AssistantHistoryMaxEntries);
 
 	int32 RemainingChars = UnrealMcpChat::AssistantHistoryMaxChars;
+	TArray<FString> CapsuleSections;
+
+	const FString ActiveTaskBlock = UnrealMcpChat::BuildActiveTaskMemoryContextBlock();
+	if (!ActiveTaskBlock.IsEmpty())
+	{
+		CapsuleSections.Add(ActiveTaskBlock);
+		RemainingChars -= FMath::Min(RemainingChars, ActiveTaskBlock.Len() + 2);
+	}
+
 	bool bSkippedTrailingCurrentUserPrompt = false;
 
 	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
@@ -1581,17 +1725,24 @@ FString SUnrealMcpChatPanel::BuildAssistantConversationContext(const FString& Cu
 		}
 	}
 
-	if (Blocks.Num() == 0)
+	if (Blocks.Num() > 0)
+	{
+		Algo::Reverse(Blocks);
+		CapsuleSections.Add(
+			TEXT("Recent local transcript and compressed tool evidence:\n")
+			+ FString::Join(Blocks, TEXT("\n\n")));
+	}
+
+	if (CapsuleSections.Num() == 0)
 	{
 		return FString();
 	}
 
-	Algo::Reverse(Blocks);
-
 	return
-		TEXT("The editor persisted the following recent local chat transcript for continuity. ")
-		TEXT("Treat it as prior project context. Do not repeat it back unless it is directly relevant.\n\n")
-		+ FString::Join(Blocks, TEXT("\n\n"));
+		TEXT("Codex-style compressed context capsule from this local Unreal Editor session. ")
+		TEXT("Use it for continuity only: preserve verified facts, respect constraints, continue from the next step, and do not repeat this capsule back unless directly relevant.\n\n")
+		TEXT("Compression schema: active objective/status, known verified tool evidence, constraints/risks, and next action.\n\n")
+		+ UnrealMcpChat::ClampForAssistantContext(FString::Join(CapsuleSections, TEXT("\n\n")), UnrealMcpChat::AssistantHistoryMaxChars);
 }
 
 void SUnrealMcpChatPanel::InvalidateEntryWidgets()
@@ -1602,13 +1753,42 @@ void SUnrealMcpChatPanel::InvalidateEntryWidgets()
 	}
 }
 
-void SUnrealMcpChatPanel::ScrollTranscriptToEnd() const
-{
-	if (TranscriptScrollBox.IsValid())
+	void SUnrealMcpChatPanel::ScrollTranscriptToEnd()
 	{
-		TranscriptScrollBox->ScrollToEnd();
+		if (TranscriptScrollBox.IsValid())
+		{
+			TranscriptScrollBox->ScrollToEnd();
+		}
+
+		DeferredTranscriptScrollFrames = 2;
+		if (!bDeferredTranscriptScrollActive)
+		{
+			bDeferredTranscriptScrollActive = true;
+			RegisterActiveTimer(
+				0.0f,
+				FWidgetActiveTimerDelegate::CreateSP(this, &SUnrealMcpChatPanel::HandleDeferredTranscriptScroll));
+		}
 	}
-}
+
+	EActiveTimerReturnType SUnrealMcpChatPanel::HandleDeferredTranscriptScroll(double InCurrentTime, float InDeltaTime)
+	{
+		(void)InCurrentTime;
+		(void)InDeltaTime;
+
+		if (TranscriptScrollBox.IsValid())
+		{
+			TranscriptScrollBox->ScrollToEnd();
+		}
+
+		--DeferredTranscriptScrollFrames;
+		if (DeferredTranscriptScrollFrames > 0)
+		{
+			return EActiveTimerReturnType::Continue;
+		}
+
+		bDeferredTranscriptScrollActive = false;
+		return EActiveTimerReturnType::Stop;
+	}
 
 void SUnrealMcpChatPanel::LoadHistory()
 {

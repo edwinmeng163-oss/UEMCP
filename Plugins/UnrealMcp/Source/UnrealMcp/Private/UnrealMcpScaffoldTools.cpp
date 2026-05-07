@@ -1,8 +1,10 @@
 #include "UnrealMcpScaffoldTools.h"
 
+#include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpModule.h"
 
 #include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -35,6 +37,7 @@ namespace UnrealMcp
 	void MarkWidgetBlueprintModified(UWidgetBlueprint* WidgetBlueprint, bool bStructurallyModified);
 	void AddNextStep(TArray<TSharedPtr<FJsonValue>>& NextSteps, const FString& Text);
 	FUnrealMcpExecutionResult ScaffoldMcpTool(const FJsonObject& Arguments);
+	FString JsonObjectToString(const TSharedPtr<FJsonObject>& JsonObject);
 
 	FString NormalizeScaffoldRootPath(const FString& RequestedRootPath)
 	{
@@ -77,6 +80,66 @@ namespace UnrealMcp
 		Object->SetStringField(TEXT("name"), Name);
 		Object->SetBoolField(TEXT("created"), bCreated);
 		Array.Add(MakeShared<FJsonValueObject>(Object));
+	}
+
+	FString NormalizeRecipeName(FString RecipeName)
+	{
+		RecipeName = RecipeName.TrimStartAndEnd().ToLower();
+		RecipeName.ReplaceInline(TEXT("-"), TEXT("_"));
+		RecipeName.ReplaceInline(TEXT(" "), TEXT("_"));
+		if (RecipeName.IsEmpty() || RecipeName == TEXT("first_person") || RecipeName == TEXT("first_person_ground") || RecipeName == TEXT("fps"))
+		{
+			return TEXT("first_person_ground_character");
+		}
+		if (RecipeName == TEXT("hud") || RecipeName == TEXT("widget") || RecipeName == TEXT("widget_hud") || RecipeName == TEXT("ui_hud"))
+		{
+			return TEXT("widget_hud");
+		}
+		if (RecipeName == TEXT("mcp_pipeline") || RecipeName == TEXT("mcp_self_extension") || RecipeName == TEXT("self_extension_pipeline"))
+		{
+			return TEXT("mcp_self_extension_pipeline");
+		}
+		return RecipeName;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> MakeRecipeStringArray(const TArray<FString>& Values)
+	{
+		TArray<TSharedPtr<FJsonValue>> Result;
+		for (const FString& Value : Values)
+		{
+			Result.Add(MakeShared<FJsonValueString>(Value));
+		}
+		return Result;
+	}
+
+	void AddRecipeStep(
+		TArray<TSharedPtr<FJsonValue>>& Steps,
+		const FString& Name,
+		const FString& Goal,
+		const TArray<FString>& Tools,
+		const TArray<FString>& Verification,
+		const FString& Notes)
+	{
+		TSharedPtr<FJsonObject> Step = MakeShared<FJsonObject>();
+		Step->SetStringField(TEXT("name"), Name);
+		Step->SetStringField(TEXT("goal"), Goal);
+		Step->SetArrayField(TEXT("tools"), MakeRecipeStringArray(Tools));
+		Step->SetArrayField(TEXT("verification"), MakeRecipeStringArray(Verification));
+		Step->SetStringField(TEXT("notes"), Notes);
+		Steps.Add(MakeShared<FJsonValueObject>(Step));
+	}
+
+	void AddRecipeToolCall(
+		TArray<TSharedPtr<FJsonValue>>& ToolCalls,
+		const FString& ToolName,
+		const FString& Purpose,
+		const FString& ExampleArgumentsJson)
+	{
+		TSharedPtr<FJsonObject> ToolCall = MakeShared<FJsonObject>();
+		ToolCall->SetStringField(TEXT("toolName"), ToolName);
+		ToolCall->SetStringField(TEXT("purpose"), Purpose);
+		ToolCall->SetStringField(TEXT("exampleArgumentsJson"), ExampleArgumentsJson);
+		ToolCalls.Add(MakeShared<FJsonValueObject>(ToolCall));
 	}
 
 	bool EnsureScaffoldDirectory(UEditorAssetSubsystem* EditorAssetSubsystem, const FString& DirectoryPath, TArray<TSharedPtr<FJsonValue>>& Directories, FString& OutFailureReason)
@@ -1592,14 +1655,192 @@ namespace UnrealMcp
 		StructuredContent->SetArrayField(TEXT("files"), Files);
 		StructuredContent->SetArrayField(TEXT("nextSteps"), NextSteps);
 
-		return MakeExecutionResult(
-			FString::Printf(TEXT("Scaffolded MCP tool extension files for %s under %s."), *ToolName, *ToolDirectory),
-			StructuredContent,
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Scaffolded MCP tool extension files for %s under %s."), *ToolName, *ToolDirectory),
+				StructuredContent,
+					false);
+			}
+
+		FUnrealMcpExecutionResult ScaffoldRecipe(const FJsonObject& Arguments)
+		{
+			FString RecipeName;
+			FString RootPath;
+			FString TaskName;
+			FString MemoryKey = TEXT("chat.active_task");
+			bool bWriteMemory = true;
+			bool bIncludeToolCalls = true;
+			Arguments.TryGetStringField(TEXT("recipeName"), RecipeName);
+			Arguments.TryGetStringField(TEXT("rootPath"), RootPath);
+			Arguments.TryGetStringField(TEXT("taskName"), TaskName);
+			Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
+			Arguments.TryGetBoolField(TEXT("writeMemory"), bWriteMemory);
+			Arguments.TryGetBoolField(TEXT("includeToolCalls"), bIncludeToolCalls);
+
+			RecipeName = NormalizeRecipeName(RecipeName);
+			RootPath = NormalizeScaffoldRootPath(RootPath.IsEmpty() ? TEXT("/Game/UEvolveRecipes") : RootPath);
+			MemoryKey = MemoryKey.TrimStartAndEnd().IsEmpty() ? TEXT("chat.active_task") : MemoryKey.TrimStartAndEnd();
+
+			FString Title;
+			FString Objective;
+			FString SuggestedNextStep;
+			TArray<TSharedPtr<FJsonValue>> Steps;
+			TArray<TSharedPtr<FJsonValue>> ToolCalls;
+			TArray<TSharedPtr<FJsonValue>> Warnings;
+
+			if (RecipeName == TEXT("first_person_ground_character"))
+			{
+				Title = TEXT("First-person ground character recipe");
+				Objective = TEXT("Create a playable, ground-walking first-person setup with Character, PlayerController, GameMode, map assignment, input, compile, and verification.");
+				SuggestedNextStep = TEXT("Create/verify the Character, Controller, and GameMode assets first; do not start PIE until possession and map GameMode are verified.");
+				AddRecipeStep(
+					Steps,
+					TEXT("Inspect project and choose target paths"),
+					TEXT("Find maps, existing input assets, and whether Enhanced Input is already used before creating new assets."),
+					{ TEXT("unreal.editor_status"), TEXT("unreal.list_maps"), TEXT("unreal.list_assets"), TEXT("unreal.capture_project_snapshot") },
+					{ TEXT("Selected map is known."), TEXT("Existing FirstPerson/EnhancedInput assets are identified or confirmed absent.") },
+					TEXT("Avoid blindly creating a SpectatorPawn; this recipe requires a ground-walking Character."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Create gameplay Blueprint assets"),
+					TEXT("Create BP_FirstPersonGroundCharacter, BP_FirstPersonGroundController, and BP_FirstPersonGroundGameMode under the chosen root."),
+					{ TEXT("unreal.create_blueprint_class"), TEXT("unreal.bp_add_variable"), TEXT("unreal.bp_compile_save") },
+					{ TEXT("All three Blueprints exist."), TEXT("Character parent class is /Script/Engine.Character."), TEXT("GameMode uses the new Character and Controller defaults.") },
+					TEXT("If defaults cannot be set with Blueprint tools, use one small execute_python call and immediately verify with read-only tools."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Configure input and possession"),
+					TEXT("Bind movement/look/jump controls and assign the GameMode to the target map or place a matching PlayerStart."),
+					{ TEXT("unreal.execute_python"), TEXT("unreal.open_map"), TEXT("unreal.list_level_actors"), TEXT("unreal.map_check") },
+					{ TEXT("Target map WorldSettings uses the recipe GameMode."), TEXT("PlayerStart exists."), TEXT("Map check has no blocking errors.") },
+					TEXT("Keep Python scoped to project/editor APIs; do not use broad exploratory Python loops."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Verify playable result"),
+					TEXT("Compile, save, optionally start PIE, then verify the controlled pawn is the ground Character and not SpectatorPawn."),
+					{ TEXT("unreal.bp_compile_save"), TEXT("unreal.save_dirty_packages"), TEXT("unreal.start_pie"), TEXT("unreal.editor_status"), TEXT("unreal.stop_pie") },
+					{ TEXT("PIE starts without compile errors."), TEXT("Possessed pawn class matches BP_FirstPersonGroundCharacter."), TEXT("Movement is ground constrained.") },
+					TEXT("If tool rounds get high, pause after compile/save and continue from chat.active_task."));
+				if (bIncludeToolCalls)
+				{
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.create_blueprint_class"), TEXT("Create the ground Character Blueprint."), FString::Printf(TEXT("{\"assetPath\":\"%s/Blueprints/BP_FirstPersonGroundCharacter\",\"parentClass\":\"/Script/Engine.Character\",\"openAfterCreate\":false,\"compile\":true}"), *RootPath));
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.create_blueprint_class"), TEXT("Create the PlayerController Blueprint."), FString::Printf(TEXT("{\"assetPath\":\"%s/Blueprints/BP_FirstPersonGroundController\",\"parentClass\":\"/Script/Engine.PlayerController\",\"openAfterCreate\":false,\"compile\":true}"), *RootPath));
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.create_blueprint_class"), TEXT("Create the GameMode Blueprint."), FString::Printf(TEXT("{\"assetPath\":\"%s/Blueprints/BP_FirstPersonGroundGameMode\",\"parentClass\":\"/Script/Engine.GameModeBase\",\"openAfterCreate\":false,\"compile\":true}"), *RootPath));
+				}
+			}
+			else if (RecipeName == TEXT("widget_hud"))
+			{
+				Title = TEXT("Widget/HUD recipe");
+				Objective = TEXT("Create a Widget Blueprint HUD, add visible sections, layout them, bind/compile, then verify the designer tree.");
+				SuggestedNextStep = TEXT("Build the HUD widget template first, dump the widget tree, then add or tune one widget at a time.");
+				AddRecipeStep(
+					Steps,
+					TEXT("Create HUD widget shell"),
+					TEXT("Create or rebuild a Widget Blueprint root with a practical HUD template."),
+					{ TEXT("unreal.widget_build_template"), TEXT("unreal.widget_dump_tree") },
+					{ TEXT("Widget tree has a root canvas."), TEXT("Primary title/status widgets are present.") },
+					TEXT("Prefer compile=false while composing the tree, then compile once near the end."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Add HUD elements incrementally"),
+					TEXT("Add TextBlock, ProgressBar, Button, or panel widgets with deterministic names and slot layout."),
+					{ TEXT("unreal.widget_add"), TEXT("unreal.widget_set_property"), TEXT("unreal.widget_set_slot_layout") },
+					{ TEXT("widget_dump_tree shows each expected widget name."), TEXT("Slot positions and sizes match the requested layout.") },
+					TEXT("After each small batch, inspect with widget_dump_tree instead of guessing."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Bind events and compile"),
+					TEXT("Bind minimal button events when needed, compile and save the Widget Blueprint."),
+					{ TEXT("unreal.widget_bind_event"), TEXT("unreal.bp_compile_save"), TEXT("unreal.save_dirty_packages") },
+					{ TEXT("Compile succeeds."), TEXT("EventGraph contains expected generated event nodes."), TEXT("Saved packages include the widget package.") },
+					TEXT("Use bp_list_graph_nodes only after binding events, not before."));
+				if (bIncludeToolCalls)
+				{
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.widget_build_template"), TEXT("Create a practical HUD shell."), FString::Printf(TEXT("{\"widgetBlueprintPath\":\"%s/Blueprints/UI/WBP_HUD\",\"templateName\":\"mcp_demo_hud\",\"title\":\"HUD\",\"replaceRoot\":true,\"compile\":false,\"savePackage\":false}"), *RootPath));
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.widget_dump_tree"), TEXT("Verify the generated widget hierarchy."), FString::Printf(TEXT("{\"widgetBlueprintPath\":\"%s/Blueprints/UI/WBP_HUD\",\"includeDesignerTree\":true,\"includeGraphNodes\":false}"), *RootPath));
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.bp_compile_save"), TEXT("Compile and save after layout edits."), FString::Printf(TEXT("{\"path\":\"%s/Blueprints/UI/WBP_HUD\"}"), *RootPath));
+				}
+			}
+			else if (RecipeName == TEXT("mcp_self_extension_pipeline"))
+			{
+				Title = TEXT("MCP self-extension pipeline recipe");
+				Objective = TEXT("Add a new MCP tool through the safe self-extension loop: plan, scaffold, schema validate, dry-run, apply, build, test, verify, and rollback/fix if needed.");
+				SuggestedNextStep = TEXT("Start with preview_change_plan and scaffold_mcp_tool; do not patch source directly until dryRun is clean.");
+				AddRecipeStep(
+					Steps,
+					TEXT("Plan and scaffold"),
+					TEXT("Turn the tool request into a structured plan and generate descriptor-first scaffold files."),
+					{ TEXT("unreal.preview_change_plan"), TEXT("unreal.scaffold_mcp_tool"), TEXT("unreal.mcp_inspect_scaffold") },
+					{ TEXT("Scaffold has ToolRegistryPatch.json."), TEXT("Descriptor/handler/category patch files exist."), TEXT("TestRequest.json is valid JSON.") },
+					TEXT("Keep the tool schema fixed and OpenAI-compatible."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Validate, dry-run, and apply"),
+					TEXT("Validate schema/patch safety, generate tests, dry-run source integration, then apply with backups."),
+					{ TEXT("unreal.mcp_validate_tool_schema"), TEXT("unreal.mcp_validate_cpp_patch"), TEXT("unreal.mcp_generate_tests"), TEXT("unreal.mcp_apply_scaffold"), TEXT("unreal.mcp_backup_project_state") },
+					{ TEXT("Dry-run reports descriptor registration, handler branch, registry merge, and tests."), TEXT("Apply manifest is created."), TEXT("Rollback path exists.") },
+					TEXT("If dryRun reports conflicts, patch scaffold fragments before applying."));
+				AddRecipeStep(
+					Steps,
+					TEXT("Build, test, and verify"),
+					TEXT("Build the editor target, restart if required, run tool tests, classify failures, and verify outcome."),
+					{ TEXT("unreal.mcp_build_editor"), TEXT("unreal.mcp_run_test_suite"), TEXT("unreal.mcp_classify_error"), TEXT("unreal.verify_task_outcome"), TEXT("unreal.mcp_workbench_status") },
+					{ TEXT("tools/list shows the new tool."), TEXT("Handler registry has an entry."), TEXT("Test suite passes or failure has a fix/rollback plan.") },
+					TEXT("When Editor restart is required, rely on project memory handoff before continuing."));
+				if (bIncludeToolCalls)
+				{
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.preview_change_plan"), TEXT("Preview risks and verification gates."), TEXT("{\"task\":\"Add a new MCP tool safely through descriptor-first self-extension.\"}"));
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.scaffold_mcp_tool"), TEXT("Generate descriptor-first extension files."), TEXT("{\"toolName\":\"unreal.my_tool\",\"title\":\"My Tool\",\"description\":\"Describe the tool.\",\"argumentSchemaJson\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{},\\\"additionalProperties\\\":false}\",\"exampleArgumentsJson\":\"{}\",\"category\":\"self-extension\",\"riskLevel\":\"low\",\"overwrite\":false}"));
+					AddRecipeToolCall(ToolCalls, TEXT("unreal.mcp_extension_pipeline"), TEXT("Run the gated validate/dryRun/apply/build/test pipeline once scaffold is reviewed."), TEXT("{\"toolName\":\"unreal.my_tool\",\"mode\":\"auto\",\"enforceGate\":true,\"generateTests\":true,\"apply\":true,\"build\":true,\"runTest\":true,\"runTestSuite\":true}"));
+				}
+			}
+			else
+			{
+				return MakeExecutionResult(
+					TEXT("Unknown recipeName. Supported recipes: first_person_ground_character, widget_hud, mcp_self_extension_pipeline."),
+					nullptr,
+					true);
+			}
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("action"), TEXT("scaffold_recipe"));
+			StructuredContent->SetStringField(TEXT("recipeName"), RecipeName);
+			StructuredContent->SetStringField(TEXT("title"), Title);
+			StructuredContent->SetStringField(TEXT("objective"), Objective);
+			StructuredContent->SetStringField(TEXT("rootPath"), RootPath);
+			StructuredContent->SetStringField(TEXT("taskName"), TaskName);
+			StructuredContent->SetArrayField(TEXT("steps"), Steps);
+			StructuredContent->SetArrayField(TEXT("toolCallPlan"), ToolCalls);
+			StructuredContent->SetArrayField(TEXT("warnings"), Warnings);
+			StructuredContent->SetStringField(TEXT("suggestedNextStep"), SuggestedNextStep);
+
+			if (bWriteMemory)
+			{
+				TSharedPtr<FJsonObject> MemoryArguments = MakeShared<FJsonObject>();
+				MemoryArguments->SetStringField(TEXT("key"), MemoryKey);
+				MemoryArguments->SetStringField(TEXT("summary"), Title);
+				MemoryArguments->SetStringField(TEXT("status"), TEXT("recipe_ready"));
+				MemoryArguments->SetStringField(TEXT("nextStep"), SuggestedNextStep);
+				MemoryArguments->SetStringField(TEXT("contentJson"), JsonObjectToString(StructuredContent));
+				MemoryArguments->SetArrayField(TEXT("tags"), MakeRecipeStringArray({ TEXT("chat"), TEXT("recipe"), RecipeName }));
+				const FUnrealMcpExecutionResult MemoryResult = ProjectMemoryWrite(*MemoryArguments);
+				StructuredContent->SetBoolField(TEXT("memoryWritten"), !MemoryResult.bIsError);
+				StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
+				StructuredContent->SetStringField(TEXT("memoryWriteText"), MemoryResult.Text);
+			}
+			else
+			{
+				StructuredContent->SetBoolField(TEXT("memoryWritten"), false);
+				StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
+			}
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Prepared recipe '%s'. Next step: %s"), *RecipeName, *SuggestedNextStep),
+				StructuredContent,
 				false);
 		}
 
-	namespace
-	{
+		namespace
+		{
 		UEditorAssetSubsystem* GetScaffoldEditorAssetSubsystem()
 		{
 			return GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
@@ -1659,18 +1900,24 @@ namespace UnrealMcp
 			return true;
 		}
 
-		if (ToolName == TEXT("unreal.scaffold_mcp_tool"))
-		{
-			if (IsEditorPlaying())
+			if (ToolName == TEXT("unreal.scaffold_mcp_tool"))
 			{
-				OutResult = MakePieBlockedResult(ToolName);
+				if (IsEditorPlaying())
+				{
+					OutResult = MakePieBlockedResult(ToolName);
 				return true;
 			}
 
-			OutResult = ScaffoldMcpTool(Arguments);
-			return true;
-		}
+				OutResult = ScaffoldMcpTool(Arguments);
+				return true;
+			}
 
-		return false;
+			if (ToolName == TEXT("unreal.scaffold_recipe"))
+			{
+				OutResult = ScaffoldRecipe(Arguments);
+				return true;
+			}
+
+			return false;
+		}
 	}
-}

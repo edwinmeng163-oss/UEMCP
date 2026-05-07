@@ -132,7 +132,49 @@ namespace UnrealMcp
 		bool RegistryDocsPathExists(const FString& DocsPath)
 		{
 			const FString FilePart = StripDocsAnchor(DocsPath).TrimStartAndEnd();
-			return !FilePart.IsEmpty() && FPaths::FileExists(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), FilePart)));
+			if (FilePart.IsEmpty())
+			{
+				return false;
+			}
+
+			TArray<FString> CandidatePaths;
+			if (FPaths::IsRelative(FilePart))
+			{
+				CandidatePaths.Add(FPaths::Combine(FPaths::ProjectDir(), FilePart));
+				CandidatePaths.Add(FPaths::Combine(FPaths::ProjectDir(), TEXT("Plugins/UnrealMcp"), FilePart));
+
+				const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMcp"));
+				if (Plugin.IsValid())
+				{
+					const FString PluginBaseDir = Plugin->GetBaseDir();
+					CandidatePaths.Add(FPaths::Combine(PluginBaseDir, FilePart));
+
+					// Older registries use README.md#tool-coverage. In installed-project
+					// mode that README lives with the plugin, not at the host project root.
+					if (FilePart.Equals(TEXT("README.md"), ESearchCase::IgnoreCase)
+						|| FilePart.EndsWith(TEXT("/README.md"), ESearchCase::IgnoreCase)
+						|| FilePart.EndsWith(TEXT("\\README.md"), ESearchCase::IgnoreCase))
+					{
+						CandidatePaths.Add(FPaths::Combine(PluginBaseDir, TEXT("README.md")));
+					}
+				}
+			}
+			else
+			{
+				CandidatePaths.Add(FilePart);
+			}
+
+			for (FString CandidatePath : CandidatePaths)
+			{
+				CandidatePath = FPaths::ConvertRelativePathToFull(CandidatePath);
+				FPaths::NormalizeFilename(CandidatePath);
+				if (FPaths::FileExists(CandidatePath))
+				{
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		FToolPolicy MakeBuiltInPolicy(EToolRiskLevel RiskLevel, const FString& Reason)

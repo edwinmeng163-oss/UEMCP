@@ -213,27 +213,44 @@ namespace UnrealMcp
 		}
 		AddToolRegistryStatus(StructuredContent);
 
-		const bool bHealthy = SchemaIncompatibleCount <= 0.0
+		const bool bFunctionalHealthy = SchemaIncompatibleCount <= 0.0
 			&& MissingHandlerCount <= 0.0
-			&& MissingDocumentationCount <= 0.0
 			&& !PipelineResult.bIsError;
+		const bool bDocumentationHealthy = MissingDocumentationCount <= 0.0;
+		const bool bHealthy = bFunctionalHealthy;
 		StructuredContent->SetBoolField(TEXT("healthy"), bHealthy);
-		StructuredContent->SetStringField(
-			TEXT("recommendedNextStep"),
-			bHealthy
-				? TEXT("Continue with ToolRegistry modularization and add versioned test fixtures for core self-extension tools.")
-				: TEXT("Run unreal.mcp_tool_audit and address schema, handler, documentation, or pipeline warnings before adding more tools."));
+		StructuredContent->SetBoolField(TEXT("functionalHealthy"), bFunctionalHealthy);
+		StructuredContent->SetBoolField(TEXT("documentationHealthy"), bDocumentationHealthy);
+		StructuredContent->SetNumberField(TEXT("documentationWarningCount"), MissingDocumentationCount);
+
+		FString RecommendedNextStep;
+		if (!bFunctionalHealthy)
+		{
+			RecommendedNextStep = TEXT("Run unreal.mcp_tool_audit and address schema, handler, or pipeline errors before adding more tools.");
+		}
+		else if (!bDocumentationHealthy)
+		{
+			RecommendedNextStep = TEXT("MCP is functionally healthy. Documentation warnings are non-blocking; fix docsPath packaging when preparing a release.");
+		}
+		else
+		{
+			RecommendedNextStep = TEXT("Continue with ToolRegistry modularization and add versioned test fixtures for core self-extension tools.");
+		}
+		StructuredContent->SetStringField(TEXT("recommendedNextStep"), RecommendedNextStep);
 
 		const FString Text = FString::Printf(
-			TEXT("MCP workbench status: visibleTools=%d schemaIncompatible=%d missingHandlers=%d memoryEntries=%d testScaffolds=%d testCases=%d healthy=%s"),
+			TEXT("MCP workbench status: visibleTools=%d schemaIncompatible=%d missingHandlers=%d documentationWarnings=%d memoryEntries=%d testScaffolds=%d testCases=%d healthy=%s functionalHealthy=%s documentationHealthy=%s"),
 			ToolsArray.Num(),
 			static_cast<int32>(SchemaIncompatibleCount),
 			static_cast<int32>(MissingHandlerCount),
+			static_cast<int32>(MissingDocumentationCount),
 			static_cast<int32>(MemoryEntryCount),
 			static_cast<int32>(TestScaffoldCount),
 			TestCaseCount,
-			bHealthy ? TEXT("true") : TEXT("false"));
+			bHealthy ? TEXT("true") : TEXT("false"),
+			bFunctionalHealthy ? TEXT("true") : TEXT("false"),
+			bDocumentationHealthy ? TEXT("true") : TEXT("false"));
 		return MakeExecutionResult(Text, StructuredContent, false);
-	}
+		}
 
 }

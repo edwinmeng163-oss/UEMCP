@@ -12,6 +12,9 @@ namespace UnrealMcp
 
 	FUnrealMcpExecutionResult PipelineStatus(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult WorkbenchStatus(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
+	FUnrealMcpExecutionResult KnowledgeIndexRefresh(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult KnowledgeSearch(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult ToolRecommend(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	bool TryExecuteSelfExtensionTool(
 		const FString& ToolName,
 		const FJsonObject& Arguments,
@@ -19,5 +22,6 @@ namespace UnrealMcp
 		const FSelfExtensionModuleToolRunner& RunToolTest,
 		const FSelfExtensionModuleToolRunner& RunTestSuite,
 		const FSelfExtensionModuleToolRunner& RunExtensionPipeline,
+		const FSelfExtensionModuleToolRunner& RunWorkflow,
 		FUnrealMcpExecutionResult& OutResult);
 }
