@@ -1,0 +1,21 @@
+{
+  "name": "unreal.bad_patch_fixture",
+  "handlerName": "unreal.bad_patch_fixture",
+  "title": "Bad Patch Fixture",
+  "description": "Fixture used to verify that unsafe generated scaffold patches are rejected.",
+  "category": "self-extension",
+  "riskLevel": "low",
+  "requiresWrite": false,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": true,
+  "preflightSupport": false,
+  "postcheckSupport": false,
+  "testCoverage": "category",
+  "owner": "UEvolve Tests",
+  "docsPath": "Docs/SelfExtensionPipeline.md",
+  "notes": "Bad generated patch fixture; not intended for real integration."
+}

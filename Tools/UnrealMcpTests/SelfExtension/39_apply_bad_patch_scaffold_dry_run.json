@@ -1,0 +1,27 @@
+{
+  "name": "apply_bad_patch_scaffold_dry_run",
+  "description": "Apply dry-run must reject a scaffold with unsafe generated C++ and provide registration guidance.",
+  "category": "error_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "expectToolCallStructuredFields": {
+    "canApply": false,
+    "patchesSafe": false,
+    "registrationStatus.registeredUsableNow": false,
+    "registrationStatus.patchesSafe": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 339,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_apply_scaffold",
+      "arguments": {
+        "toolName": "unreal.bad_patch_fixture",
+        "scaffoldDir": "Tools/UnrealMcpTests/Fixtures/BadPatchScaffold",
+        "dryRun": true
+      }
+    }
+  }
+}

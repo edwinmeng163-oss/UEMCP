@@ -1026,7 +1026,7 @@
       "dryRunSupport": false,
       "preflightSupport": false,
       "postcheckSupport": false,
-      "testCoverage": "missing",
+      "testCoverage": "category",
       "owner": "UEvolve Core",
       "docsPath": "README.md#tool-coverage",
       "reason": "Explicit registry: read-only inspection, audit, status, schema validation, memory read, or skill read tool.",

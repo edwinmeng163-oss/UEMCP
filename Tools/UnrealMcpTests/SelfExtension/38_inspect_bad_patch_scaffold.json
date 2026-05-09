@@ -1,0 +1,25 @@
+{
+  "name": "inspect_bad_patch_scaffold",
+  "description": "Inspect must mark a complete-looking scaffold with truncated handler code as not ready for apply.",
+  "category": "error_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "readyForApply": false,
+    "patchesSafe": false,
+    "registryPatchValid": true
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 338,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_inspect_scaffold",
+      "arguments": {
+        "toolName": "unreal.bad_patch_fixture",
+        "scaffoldDir": "Tools/UnrealMcpTests/Fixtures/BadPatchScaffold"
+      }
+    }
+  }
+}

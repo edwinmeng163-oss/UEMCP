@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 338,
+  "method": "tools/call",
+  "params": {
+    "name": "unreal.bad_patch_fixture",
+    "arguments": {
+      "message": "hello"
+    }
+  }
+}

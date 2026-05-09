@@ -22,6 +22,10 @@ namespace UnrealMcp
 	bool ResolveProjectOutputDirectory(const FString& RequestedOutputRoot, FString& OutDirectory, FString& OutFailureReason);
 	bool ResolveMcpScaffoldDirectory(const FJsonObject& Arguments, FString& OutDirectory, FString& OutToolName, FString& OutFailureReason);
 	FString SanitizeMcpToolIdForPath(const FString& ToolName);
+	TSharedPtr<FJsonObject> ValidateCppSnippetText(
+		const FString& SnippetText,
+		const FString& SnippetName,
+		const FString& ToolName);
 	void FindImmediateChildren(const FString& Directory, const FString& Pattern, bool bFiles, bool bDirectories, TArray<FString>& OutChildren);
 	TSharedPtr<FJsonObject> FindToolDefinitionByName(const TArray<TSharedPtr<FJsonValue>>& ToolsArray, const FString& ToolName);
 	bool AnalyzeOpenAiSchemaCompatibility(
@@ -246,6 +250,67 @@ namespace UnrealMcp
 				ResultObject->SetObjectField(TEXT("testRequest"), TestRequestObject);
 			}
 
+			static const TCHAR* RequiredPatchFiles[] = {
+				TEXT("ToolRegistrar.patch.cpp"),
+				TEXT("ToolRegistrarCall.patch.cpp"),
+				TEXT("CategoryHandlerFunction.patch.cpp"),
+				TEXT("CategoryDispatcherBranch.patch.cpp")
+			};
+
+			TArray<TSharedPtr<FJsonValue>> PatchValidations;
+			TArray<TSharedPtr<FJsonValue>> ReadinessIssues;
+			bool bPatchesSafe = true;
+			auto AddReadinessIssue = [&ReadinessIssues](const FString& Code, const FString& Message)
+			{
+				TSharedPtr<FJsonObject> IssueObject = MakeShared<FJsonObject>();
+				IssueObject->SetStringField(TEXT("severity"), TEXT("error"));
+				IssueObject->SetStringField(TEXT("code"), Code);
+				IssueObject->SetStringField(TEXT("message"), Message);
+				ReadinessIssues.Add(MakeShared<FJsonValueObject>(IssueObject));
+			};
+
+			for (const TCHAR* PatchFileName : RequiredPatchFiles)
+			{
+				const FString PatchPath = FPaths::Combine(ResolvedScaffoldDirectory, PatchFileName);
+				FString PatchText;
+				if (!FFileHelper::LoadFileToString(PatchText, *PatchPath))
+				{
+					bPatchesSafe = false;
+					AddReadinessIssue(TEXT("missing_patch_file"), FString::Printf(TEXT("Required patch file is missing or unreadable: %s"), PatchFileName));
+					continue;
+				}
+
+				TSharedPtr<FJsonObject> ValidationObject = ValidateCppSnippetText(PatchText, PatchFileName, ToolName);
+				PatchValidations.Add(MakeShared<FJsonValueObject>(ValidationObject));
+				if (!ValidationObject->GetBoolField(TEXT("safe")))
+				{
+					bPatchesSafe = false;
+					AddReadinessIssue(TEXT("unsafe_patch_file"), FString::Printf(TEXT("Patch file failed static validation: %s"), PatchFileName));
+				}
+			}
+
+			const FString RegistryPatchPath = FPaths::Combine(ResolvedScaffoldDirectory, TEXT("ToolRegistryPatch.json"));
+			TSharedPtr<FJsonObject> RegistryPatchObject;
+			FString RegistryPatchFailure;
+			bool bRegistryPatchValid = LoadJsonObjectFromFile(RegistryPatchPath, RegistryPatchObject, RegistryPatchFailure) && RegistryPatchObject.IsValid();
+			if (!bRegistryPatchValid)
+			{
+				AddReadinessIssue(TEXT("invalid_registry_patch"), RegistryPatchFailure.IsEmpty() ? TEXT("ToolRegistryPatch.json is missing or invalid JSON.") : RegistryPatchFailure);
+			}
+			else
+			{
+				FString RegistryPatchToolName;
+				RegistryPatchObject->TryGetStringField(TEXT("name"), RegistryPatchToolName);
+				if (!ToolName.IsEmpty() && RegistryPatchToolName != ToolName)
+				{
+					bRegistryPatchValid = false;
+					AddReadinessIssue(
+						TEXT("registry_tool_name_mismatch"),
+						FString::Printf(TEXT("ToolRegistryPatch.json name '%s' does not match scaffold toolName '%s'."), *RegistryPatchToolName, *ToolName));
+				}
+				ResultObject->SetObjectField(TEXT("toolRegistryPatch"), RegistryPatchObject);
+			}
+
 			FString RequestedSchemaJson;
 			const bool bHasRequestedSchema = ExtractRequestedSchemaFromScaffoldReadme(ResolvedScaffoldDirectory, RequestedSchemaJson);
 			ResultObject->SetBoolField(TEXT("hasRequestedSchema"), bHasRequestedSchema);
@@ -276,8 +341,12 @@ namespace UnrealMcp
 
 			const bool bToolListed = !ToolName.IsEmpty() && FindToolDefinitionByName(ToolsArray, ToolName).IsValid();
 			ResultObject->SetBoolField(TEXT("toolListed"), bToolListed);
-			ResultObject->SetBoolField(TEXT("readyForApply"), MissingRequiredFiles.Num() == 0 && bValidTestRequest);
+			ResultObject->SetBoolField(TEXT("patchesSafe"), bPatchesSafe);
+			ResultObject->SetBoolField(TEXT("registryPatchValid"), bRegistryPatchValid);
+			ResultObject->SetBoolField(TEXT("readyForApply"), MissingRequiredFiles.Num() == 0 && bValidTestRequest && bPatchesSafe && bRegistryPatchValid);
 			ResultObject->SetArrayField(TEXT("missingRequiredFiles"), MissingRequiredFiles);
+			ResultObject->SetArrayField(TEXT("patchValidations"), PatchValidations);
+			ResultObject->SetArrayField(TEXT("readinessIssues"), ReadinessIssues);
 			ResultObject->SetArrayField(TEXT("files"), Files);
 			return ResultObject;
 		}

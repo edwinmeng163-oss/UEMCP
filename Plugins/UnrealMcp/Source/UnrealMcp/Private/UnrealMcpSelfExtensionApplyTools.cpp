@@ -470,6 +470,33 @@ namespace UnrealMcp
 			const int32 TargetDiffPreviewLines = FMath::Min(GetPositiveIntArgument(Arguments, TEXT("targetDiffPreviewLines"), 120), 1000);
 
 			TArray<TSharedPtr<FJsonValue>> Issues;
+			auto MakeEarlyFailureContent = [&ToolName, &ScaffoldDirectory, &Issues](const FString& Reason, const FString& FirstStep, const FString& FirstTool)
+			{
+				TSharedPtr<FJsonObject> RegistrationStatusObject = MakeShared<FJsonObject>();
+				RegistrationStatusObject->SetBoolField(TEXT("scaffoldExists"), FPaths::DirectoryExists(ScaffoldDirectory));
+				RegistrationStatusObject->SetBoolField(TEXT("registeredUsableNow"), false);
+				RegistrationStatusObject->SetBoolField(TEXT("requiresApply"), true);
+				RegistrationStatusObject->SetBoolField(TEXT("requiresBuildRestartForRuntimeVisibility"), true);
+				RegistrationStatusObject->SetStringField(TEXT("notRegisteredReason"), Reason);
+
+				TArray<TSharedPtr<FJsonValue>> NextSteps;
+				AddScaffoldNextStep(NextSteps, FirstStep, FirstTool, Reason);
+				AddScaffoldNextStep(NextSteps, TEXT("Inspect the scaffold for missing files, patch safety, and registry metadata."), TEXT("unreal.mcp_inspect_scaffold"), TEXT("Inspection now checks readiness before apply."));
+				AddScaffoldNextStep(NextSteps, TEXT("Rerun mcp_apply_scaffold with dryRun=true after repairing the scaffold."), TEXT("unreal.mcp_apply_scaffold"), TEXT("Dry run must pass before source integration."));
+
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_apply_scaffold"));
+				StructuredContent->SetStringField(TEXT("applyMode"), TEXT("descriptor_first"));
+				StructuredContent->SetStringField(TEXT("toolName"), ToolName);
+				StructuredContent->SetStringField(TEXT("scaffoldDir"), ScaffoldDirectory);
+				StructuredContent->SetBoolField(TEXT("canApply"), false);
+				StructuredContent->SetBoolField(TEXT("patchesSafe"), false);
+				StructuredContent->SetArrayField(TEXT("issues"), Issues);
+				StructuredContent->SetObjectField(TEXT("registrationStatus"), RegistrationStatusObject);
+				StructuredContent->SetArrayField(TEXT("nextSteps"), NextSteps);
+				return StructuredContent;
+			};
+
 			FString RegistrarPatch;
 			FString RegistrarCallPatch;
 			FString CategoryHandlerPatch;
@@ -481,12 +508,10 @@ namespace UnrealMcp
 				|| !ReadScaffoldPatchFile(ScaffoldDirectory, TEXT("CategoryDispatcherBranch.patch.cpp"), true, CategoryDispatcherPatch, Issues, FailureReason)
 				|| !ReadScaffoldPatchFile(ScaffoldDirectory, TEXT("ChatCommand.patch.cpp"), bApplyChatCommand, ChatCommandPatch, Issues, FailureReason))
 			{
-				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-				StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_apply_scaffold"));
-				StructuredContent->SetStringField(TEXT("applyMode"), TEXT("descriptor_first"));
-				StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-				StructuredContent->SetStringField(TEXT("scaffoldDir"), ScaffoldDirectory);
-				StructuredContent->SetArrayField(TEXT("issues"), Issues);
+				TSharedPtr<FJsonObject> StructuredContent = MakeEarlyFailureContent(
+					FailureReason,
+					TEXT("Regenerate the scaffold or restore the missing descriptor-first patch file."),
+					TEXT("unreal.scaffold_mcp_tool"));
 				return MakeExecutionResult(FailureReason, StructuredContent, true);
 			}
 
@@ -494,22 +519,29 @@ namespace UnrealMcp
 			FString RegistryPatchText;
 			if (!FFileHelper::LoadFileToString(RegistryPatchText, *RegistryPatchPath))
 			{
+				TSharedPtr<FJsonObject> Issue = MakeShared<FJsonObject>();
+				Issue->SetStringField(TEXT("severity"), TEXT("error"));
+				Issue->SetStringField(TEXT("file"), TEXT("ToolRegistryPatch.json"));
+				Issue->SetStringField(TEXT("message"), FString::Printf(TEXT("Failed to read ToolRegistry patch file '%s'."), *RegistryPatchPath));
+				Issues.Add(MakeShared<FJsonValueObject>(Issue));
+				TSharedPtr<FJsonObject> StructuredContent = MakeEarlyFailureContent(
+					FString::Printf(TEXT("Failed to read ToolRegistry patch file '%s'."), *RegistryPatchPath),
+					TEXT("Regenerate the scaffold or restore ToolRegistryPatch.json."),
+					TEXT("unreal.scaffold_mcp_tool"));
 				return MakeExecutionResult(
 					FString::Printf(TEXT("Failed to read ToolRegistry patch file '%s'."), *RegistryPatchPath),
-					nullptr,
+					StructuredContent,
 					true);
 			}
 
 			TSharedPtr<FJsonObject> RegistryPatchObject;
 			if (!LoadJsonObjectFromFile(RegistryPatchPath, RegistryPatchObject, FailureReason) || !RegistryPatchObject.IsValid())
 			{
-				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-				StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_apply_scaffold"));
-				StructuredContent->SetStringField(TEXT("applyMode"), TEXT("descriptor_first"));
-				StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-				StructuredContent->SetStringField(TEXT("scaffoldDir"), ScaffoldDirectory);
+				TSharedPtr<FJsonObject> StructuredContent = MakeEarlyFailureContent(
+					FailureReason,
+					TEXT("Fix ToolRegistryPatch.json so it is valid JSON and matches the generated tool name."),
+					TEXT("unreal.scaffold_mcp_tool"));
 				StructuredContent->SetStringField(TEXT("registryPatchPath"), RegistryPatchPath);
-				StructuredContent->SetArrayField(TEXT("issues"), Issues);
 				return MakeExecutionResult(FailureReason, StructuredContent, true);
 			}
 
@@ -519,9 +551,18 @@ namespace UnrealMcp
 			RegistryPatchObject->TryGetStringField(TEXT("category"), Category);
 			if (!RegistryToolName.IsEmpty() && !RegistryToolName.Equals(ToolName, ESearchCase::CaseSensitive))
 			{
+				const FString Reason = FString::Printf(TEXT("ToolRegistryPatch.json name '%s' does not match requested tool '%s'."), *RegistryToolName, *ToolName);
+				TSharedPtr<FJsonObject> Issue = MakeShared<FJsonObject>();
+				Issue->SetStringField(TEXT("severity"), TEXT("error"));
+				Issue->SetStringField(TEXT("file"), TEXT("ToolRegistryPatch.json"));
+				Issue->SetStringField(TEXT("message"), Reason);
+				Issues.Add(MakeShared<FJsonValueObject>(Issue));
 				return MakeExecutionResult(
-					FString::Printf(TEXT("ToolRegistryPatch.json name '%s' does not match requested tool '%s'."), *RegistryToolName, *ToolName),
-					nullptr,
+					Reason,
+					MakeEarlyFailureContent(
+						Reason,
+						TEXT("Fix ToolRegistryPatch.json name or rerun scaffold generation with the intended toolName."),
+						TEXT("unreal.scaffold_mcp_tool")),
 					true);
 			}
 			if (Category.TrimStartAndEnd().IsEmpty())

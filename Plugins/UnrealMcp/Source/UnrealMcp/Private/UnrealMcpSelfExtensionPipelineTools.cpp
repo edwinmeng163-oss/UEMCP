@@ -102,10 +102,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	bool bSucceeded = true;
 	bool bRequiresRestart = false;
 	bool bAppliedSourceChanges = false;
+	bool bApplyRequiresBuildRestartForRuntimeVisibility = false;
+	bool bApplyRegisteredUsableNow = false;
 	bool bBuildSucceeded = false;
 	FString BeforeSnapshotPath;
 	FString AfterSnapshotPath;
 	FString PipelineEvidenceText;
+	TSharedPtr<FJsonObject> LastApplyRegistrationStatus;
 
 	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 	StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_extension_pipeline"));
@@ -358,6 +361,16 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 			bSucceeded = false;
 			AddFailureAnalysis(TEXT("apply_dry_run"), DryRunResult);
 		}
+		else if (DryRunResult.StructuredContent.IsValid())
+		{
+			const TSharedPtr<FJsonObject>* RegistrationStatusObject = nullptr;
+			if (DryRunResult.StructuredContent->TryGetObjectField(TEXT("registrationStatus"), RegistrationStatusObject)
+				&& RegistrationStatusObject
+				&& (*RegistrationStatusObject).IsValid())
+			{
+				StructuredContent->SetObjectField(TEXT("dryRunRegistrationStatus"), *RegistrationStatusObject);
+			}
+		}
 	}
 
 	if (bSucceeded && bDryRunOnly)
@@ -458,6 +471,16 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		else if (ApplyResult.StructuredContent.IsValid())
 		{
 			ApplyResult.StructuredContent->TryGetBoolField(TEXT("changed"), bAppliedSourceChanges);
+			const TSharedPtr<FJsonObject>* RegistrationStatusObject = nullptr;
+			if (ApplyResult.StructuredContent->TryGetObjectField(TEXT("registrationStatus"), RegistrationStatusObject)
+				&& RegistrationStatusObject
+				&& (*RegistrationStatusObject).IsValid())
+			{
+				LastApplyRegistrationStatus = *RegistrationStatusObject;
+				(*RegistrationStatusObject)->TryGetBoolField(TEXT("requiresBuildRestartForRuntimeVisibility"), bApplyRequiresBuildRestartForRuntimeVisibility);
+				(*RegistrationStatusObject)->TryGetBoolField(TEXT("registeredUsableNow"), bApplyRegisteredUsableNow);
+				StructuredContent->SetObjectField(TEXT("registrationStatus"), LastApplyRegistrationStatus);
+			}
 		}
 	}
 	else if (!bApply)
@@ -520,7 +543,12 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("build"), TEXT("skipped"), TEXT("build=false."))));
 	}
 
-	const bool bShouldDeferTestForRestart = bBuild && bBuildSucceeded && bAppliedSourceChanges && !bToolAlreadyListed;
+	const bool bShouldDeferTestForRestart =
+		bBuild
+		&& bBuildSucceeded
+		&& !bToolAlreadyListed
+		&& !bApplyRegisteredUsableNow
+		&& (bAppliedSourceChanges || bApplyRequiresBuildRestartForRuntimeVisibility);
 	if (bShouldDeferTestForRestart)
 	{
 		bRequiresRestart = true;
@@ -532,6 +560,18 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 			bRunTestSuite ? TEXT("test_suite") : TEXT("test"),
 			TEXT("deferred"),
 			bRunTestSuite ? TEXT("Run unreal.mcp_extension_pipeline with mode=resume_test after restart to execute the generated test suite.") : TEXT("Run unreal.mcp_extension_pipeline with mode=resume_test after restart, or use Tools/unreal_mcp_supervisor.py resume-test."))));
+	}
+	else if (bSucceeded && bApplyRequiresBuildRestartForRuntimeVisibility && !bBuild && !bApplyRegisteredUsableNow && bRunTest)
+	{
+		bRequiresRestart = true;
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			TEXT("runtime_visibility"),
+			TEXT("blocked"),
+			TEXT("Applied scaffold changes require an editor build/restart before the new tool can appear in tools/list; skipped test because build=false."))));
+		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
+			bRunTestSuite ? TEXT("test_suite") : TEXT("test"),
+			TEXT("deferred"),
+			TEXT("Enable build=true, rebuild/restart the editor, then resume testing."))));
 	}
 	else if (bSucceeded && bRunTest)
 	{
@@ -675,6 +715,8 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);
 	StructuredContent->SetBoolField(TEXT("requiresRestart"), bRequiresRestart);
 	StructuredContent->SetBoolField(TEXT("appliedSourceChanges"), bAppliedSourceChanges);
+	StructuredContent->SetBoolField(TEXT("applyRequiresBuildRestartForRuntimeVisibility"), bApplyRequiresBuildRestartForRuntimeVisibility);
+	StructuredContent->SetBoolField(TEXT("applyRegisteredUsableNow"), bApplyRegisteredUsableNow);
 	StructuredContent->SetBoolField(TEXT("buildSucceeded"), bBuildSucceeded);
 	StructuredContent->SetBoolField(TEXT("generateTests"), bGenerateTests);
 	StructuredContent->SetBoolField(TEXT("runTestSuite"), bRunTestSuite);
