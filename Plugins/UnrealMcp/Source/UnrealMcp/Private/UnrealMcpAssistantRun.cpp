@@ -9,6 +9,8 @@
 #include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpSettings.h"
 
+#include <atomic>
+
 namespace UnrealMcp
 {
 	void ApplyAiHttpTimeoutOverrides(const UUnrealMcpSettings& Settings);
@@ -46,29 +48,42 @@ public:
 	void Start()
 	{
 		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
-		if (!Settings->bEnableAiAssistant)
+		CachedSettings.bEnableAiAssistant = Settings->bEnableAiAssistant;
+		CachedSettings.OpenAIResponsesUrl = Settings->OpenAIResponsesUrl;
+		CachedSettings.OpenAIApiKey = Settings->OpenAIApiKey;
+		CachedSettings.OpenAIModel = Settings->OpenAIModel;
+		CachedSettings.OpenAIReasoningEffort = Settings->OpenAIReasoningEffort;
+		CachedSettings.AiMaxToolRounds = Settings->AiMaxToolRounds;
+		CachedSettings.AiMaxOutputTokens = Settings->AiMaxOutputTokens;
+		CachedSettings.AiRequestTimeoutSeconds = Settings->AiRequestTimeoutSeconds;
+		CachedSettings.AiRequestActivityTimeoutSeconds = Settings->AiRequestActivityTimeoutSeconds;
+		CachedSettings.AssistantSystemPrompt = Settings->AssistantSystemPrompt;
+
+		if (!CachedSettings.bEnableAiAssistant)
 		{
 			Finish(TEXT("AI assistant is disabled. Enable it in Project Settings > Plugins > Unreal MCP > AI."), FString(), true);
 			return;
 		}
 
-		if (Settings->OpenAIApiKey.TrimStartAndEnd().IsEmpty())
+		if (CachedSettings.OpenAIApiKey.TrimStartAndEnd().IsEmpty())
 		{
 			Finish(TEXT("OpenAI API key is empty. Set it in Project Settings > Plugins > Unreal MCP > AI."), FString(), true);
 			return;
 		}
 
-		if (Settings->OpenAIModel.TrimStartAndEnd().IsEmpty())
+		if (CachedSettings.OpenAIModel.TrimStartAndEnd().IsEmpty())
 		{
 			Finish(TEXT("OpenAI model is empty. Set it in Project Settings > Plugins > Unreal MCP > AI."), FString(), true);
 			return;
 		}
 
-		if (Settings->OpenAIResponsesUrl.TrimStartAndEnd().IsEmpty())
+		if (CachedSettings.OpenAIResponsesUrl.TrimStartAndEnd().IsEmpty())
 		{
 			Finish(TEXT("OpenAI Responses URL is empty. Set it in Project Settings > Plugins > Unreal MCP > AI."), FString(), true);
 			return;
 		}
+
+		UnrealMcp::ApplyAiHttpTimeoutOverrides(*Settings);
 
 		BuildOpenAiTools();
 		SendModelRequest(BuildInitialInput(), PreviousResponseId);
@@ -85,7 +100,7 @@ public:
 				return;
 			}
 
-			bCancellationRequested = true;
+			bCancellationRequested.store(true, std::memory_order_relaxed);
 			RequestToCancel = ActiveRequest;
 			ResponseId = ActiveResponseId;
 		}
@@ -108,7 +123,7 @@ public:
 
 		{
 			const FScopeLock Lock(&StateMutex);
-			if (bCompleted || bCancellationRequested)
+			if (bCompleted || bCancellationRequested.load(std::memory_order_relaxed))
 			{
 				return false;
 			}
@@ -250,7 +265,7 @@ private:
 			+ TEXT("\n\nUnreal Editor log lines were omitted from this AI transport error. Use Tool Log or unreal.tail_log if you need the full editor log.");
 	}
 
-	static FString BuildAiTransportFailureMessage(const TSharedPtr<IHttpRequest, ESPMode::ThreadSafe>& HttpRequest)
+	FString BuildAiTransportFailureMessage(const TSharedPtr<IHttpRequest, ESPMode::ThreadSafe>& HttpRequest) const
 	{
 		if (!HttpRequest.IsValid())
 		{
@@ -266,7 +281,7 @@ private:
 		{
 			return FString::Printf(
 				TEXT("AI request timed out after %.0f seconds. Increase AI Request Timeout Seconds in Project Settings > Plugins > Unreal MCP > AI if you expect long planning turns, or retry with a smaller task."),
-				GetDefault<UUnrealMcpSettings>()->AiRequestTimeoutSeconds);
+				CachedSettings.AiRequestTimeoutSeconds);
 		}
 
 		if (FailureReason == EHttpFailureReason::Cancelled)
@@ -320,7 +335,7 @@ private:
 		ContentObject->SetStringField(TEXT("previousResponseId"), PreviousResponseId);
 		ContentObject->SetStringField(TEXT("activeResponseId"), ActiveResponseId);
 		ContentObject->SetNumberField(TEXT("toolRoundCount"), ToolRoundCount);
-		ContentObject->SetNumberField(TEXT("maxToolRounds"), GetDefault<UUnrealMcpSettings>()->AiMaxToolRounds);
+		ContentObject->SetNumberField(TEXT("maxToolRounds"), CachedSettings.AiMaxToolRounds);
 		ContentObject->SetBoolField(TEXT("hadToolError"), bHadToolError);
 		ContentObject->SetBoolField(TEXT("nearToolRoundLimit"), bRememberedNearToolRoundLimit);
 		ContentObject->SetStringField(TEXT("assistantDraft"), CollapseForActiveTaskMemory(AccumulatedAssistantText, 1200));
@@ -529,8 +544,6 @@ private:
 
 	FString BuildAssistantInstructions() const
 	{
-		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
-
 		FString Instructions =
 			TEXT("You are Unreal MCP AI running inside Unreal Editor. ")
 			TEXT("Help the user build, inspect, and modify the current Unreal project by using the provided function tools when they are helpful. ")
@@ -550,10 +563,10 @@ private:
 			TEXT("When a task is blocked because no suitable tool exists, say so plainly and suggest the closest supported path. ")
 			TEXT("After tool use, give a concise final answer focused on what you changed or found.");
 
-		if (!Settings->AssistantSystemPrompt.TrimStartAndEnd().IsEmpty())
+		if (!CachedSettings.AssistantSystemPrompt.TrimStartAndEnd().IsEmpty())
 		{
 			Instructions += TEXT("\n\nAdditional instructions:\n");
-			Instructions += Settings->AssistantSystemPrompt.TrimStartAndEnd();
+			Instructions += CachedSettings.AssistantSystemPrompt.TrimStartAndEnd();
 		}
 
 		return Instructions;
@@ -654,7 +667,7 @@ private:
 	{
 		{
 			const FScopeLock Lock(&StateMutex);
-			if (bCompleted || bCancellationRequested)
+			if (bCompleted || bCancellationRequested.load(std::memory_order_relaxed))
 			{
 				return;
 			}
@@ -664,11 +677,8 @@ private:
 			LastRequestPriorResponseId = PriorResponseId;
 		}
 
-		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
-		UnrealMcp::ApplyAiHttpTimeoutOverrides(*Settings);
-
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-		Payload->SetStringField(TEXT("model"), Settings->OpenAIModel);
+		Payload->SetStringField(TEXT("model"), CachedSettings.OpenAIModel);
 		Payload->SetStringField(TEXT("instructions"), BuildAssistantInstructions());
 		Payload->SetArrayField(TEXT("input"), InputItems);
 		Payload->SetArrayField(TEXT("tools"), OpenAiTools);
@@ -676,9 +686,9 @@ private:
 		Payload->SetBoolField(TEXT("parallel_tool_calls"), true);
 		Payload->SetBoolField(TEXT("stream"), true);
 		Payload->SetStringField(TEXT("truncation"), TEXT("auto"));
-		Payload->SetNumberField(TEXT("max_output_tokens"), Settings->AiMaxOutputTokens);
+		Payload->SetNumberField(TEXT("max_output_tokens"), CachedSettings.AiMaxOutputTokens);
 
-		const FString ReasoningEffort = Settings->OpenAIReasoningEffort.TrimStartAndEnd();
+		const FString ReasoningEffort = CachedSettings.OpenAIReasoningEffort.TrimStartAndEnd();
 		if (!ReasoningEffort.IsEmpty())
 		{
 			TSharedPtr<FJsonObject> ReasoningObject = MakeShared<FJsonObject>();
@@ -696,13 +706,13 @@ private:
 		FJsonSerializer::Serialize(Payload.ToSharedRef(), Writer);
 
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-		Request->SetURL(Settings->OpenAIResponsesUrl);
+		Request->SetURL(CachedSettings.OpenAIResponsesUrl);
 		Request->SetVerb(TEXT("POST"));
 		Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 		Request->SetHeader(TEXT("Accept"), TEXT("text/event-stream"));
-		Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Settings->OpenAIApiKey));
-		Request->SetTimeout(Settings->AiRequestTimeoutSeconds);
-		Request->SetActivityTimeout(Settings->AiRequestActivityTimeoutSeconds);
+		Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *CachedSettings.OpenAIApiKey));
+		Request->SetTimeout(CachedSettings.AiRequestTimeoutSeconds);
+		Request->SetActivityTimeout(CachedSettings.AiRequestActivityTimeoutSeconds);
 		Request->SetContentAsString(PayloadString);
 
 		FHttpRequestStreamDelegateV2 StreamDelegate;
@@ -1015,7 +1025,7 @@ private:
 			return;
 		}
 
-		if (bCancellationRequested)
+		if (bCancellationRequested.load(std::memory_order_relaxed))
 		{
 			Finish(TEXT("Generation stopped."), ResponseIdCopy, false, true);
 			return;
@@ -1225,8 +1235,7 @@ private:
 		}
 
 		++ToolRoundCount;
-		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
-		if (ToolRoundCount > Settings->AiMaxToolRounds)
+		if (ToolRoundCount > CachedSettings.AiMaxToolRounds)
 		{
 			bPausedAtToolRoundLimit = true;
 			RememberActiveTask(
@@ -1236,13 +1245,13 @@ private:
 			Finish(
 				FString::Printf(
 					TEXT("Paused after %d tool rounds to avoid an infinite loop. Saved resume state to project memory key chat.active_task.\n\nNext step: read chat.active_task, pick the smallest unfinished step from recentToolSummaries, execute only that step, then verify before continuing."),
-					Settings->AiMaxToolRounds),
+					CachedSettings.AiMaxToolRounds),
 				FString(),
 				false,
 				false);
 			return;
 		}
-		const int32 NearLimitRound = FMath::Max(1, Settings->AiMaxToolRounds - 2);
+		const int32 NearLimitRound = FMath::Max(1, CachedSettings.AiMaxToolRounds - 2);
 		if (!bRememberedNearToolRoundLimit && ToolRoundCount >= NearLimitRound)
 		{
 			bRememberedNearToolRoundLimit = true;
@@ -1255,7 +1264,7 @@ private:
 		TArray<TSharedPtr<FJsonValue>> ToolOutputs;
 		for (const FAssistantToolCall& ToolCall : ToolCalls)
 		{
-			if (bCancellationRequested)
+			if (bCancellationRequested.load(std::memory_order_relaxed))
 			{
 				Finish(TEXT("Generation stopped."), ResponseId, false, true);
 				return;
@@ -1408,6 +1417,7 @@ private:
 	FString PreviousResponseId;
 	TFunction<void(const FUnrealMcpAssistantEvent&)> OnEvent;
 	TFunction<void(const FUnrealMcpAssistantTurnResult&)> OnComplete;
+	UnrealMcp::FUnrealMcpAssistantSettingsCache CachedSettings;
 	TArray<TSharedPtr<FJsonValue>> OpenAiTools;
 	TMap<FString, FString> FunctionNameToToolName;
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveRequest;
@@ -1435,7 +1445,7 @@ private:
 	static constexpr int32 LongTaskMemoryRoundThreshold = 4;
 	bool bResponseIncompleteDueToMaxOutputTokens = false;
 	bool bCompleted = false;
-	bool bCancellationRequested = false;
+	std::atomic<bool> bCancellationRequested{false};
 	bool bHadToolError = false;
 	bool bRememberedNearToolRoundLimit = false;
 	bool bPausedAtToolRoundLimit = false;

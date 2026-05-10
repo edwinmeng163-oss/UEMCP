@@ -1,0 +1,1 @@
+RegisterGeneratedPathTraversalFixtureDescriptor(Registrar);

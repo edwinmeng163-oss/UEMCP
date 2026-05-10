@@ -223,12 +223,36 @@ namespace UnrealMcp
 			return SessionId;
 		}
 
-		FString MakeApplySourcePath(const FString& RelativePrivateSourceFile)
+		bool MakeApplySourcePath(const FString& RelativePrivateSourceFile, FString& OutSourcePath, FString& OutFailureReason)
 		{
-			return FPaths::ConvertRelativePathToFull(FPaths::Combine(
+			const FString RelativeSourceFile = RelativePrivateSourceFile.TrimStartAndEnd();
+			FString PluginSourceDirectory = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+				FPaths::ProjectDir(),
+				TEXT("Plugins/UnrealMcp/Source")));
+			FPaths::NormalizeDirectoryName(PluginSourceDirectory);
+			FPaths::CollapseRelativeDirectories(PluginSourceDirectory);
+
+			FString ResolvedSourcePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
 				FPaths::ProjectDir(),
 				TEXT("Plugins/UnrealMcp/Source/UnrealMcp/Private"),
-				RelativePrivateSourceFile));
+				RelativeSourceFile));
+			FPaths::NormalizeFilename(ResolvedSourcePath);
+			FPaths::CollapseRelativeDirectories(ResolvedSourcePath);
+
+			const FString PluginSourceDirectoryPrefix = PluginSourceDirectory.EndsWith(TEXT("/"))
+				? PluginSourceDirectory
+				: PluginSourceDirectory + TEXT("/");
+			if (!ResolvedSourcePath.Equals(PluginSourceDirectory, ESearchCase::IgnoreCase)
+				&& !ResolvedSourcePath.StartsWith(PluginSourceDirectoryPrefix, ESearchCase::IgnoreCase))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("Source file path '%s' resolves outside allowed plugin source directory 'Plugins/UnrealMcp/Source'."),
+					*RelativeSourceFile);
+				return false;
+			}
+
+			OutSourcePath = ResolvedSourcePath;
+			return true;
 		}
 
 		FString GetToolRegistryMirrorPath()
@@ -611,8 +635,28 @@ namespace UnrealMcp
 				}
 			}
 
-			const FString RegistrarPath = MakeApplySourcePath(TEXT("UnrealMcpToolRegistrar.cpp"));
-			const FString CategorySourcePath = MakeApplySourcePath(CategorySourceFile);
+			FString RegistrarPath;
+			if (!MakeApplySourcePath(TEXT("UnrealMcpToolRegistrar.cpp"), RegistrarPath, FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			FString CategorySourcePath;
+			if (!MakeApplySourcePath(CategorySourceFile, CategorySourcePath, FailureReason))
+			{
+				TSharedPtr<FJsonObject> Issue = MakeShared<FJsonObject>();
+				Issue->SetStringField(TEXT("severity"), TEXT("error"));
+				Issue->SetStringField(TEXT("code"), TEXT("source_path_outside_plugin_source"));
+				Issue->SetStringField(TEXT("file"), TEXT("ScaffoldMetadata.json"));
+				Issue->SetStringField(TEXT("message"), FailureReason);
+				Issues.Add(MakeShared<FJsonValueObject>(Issue));
+
+				TSharedPtr<FJsonObject> StructuredContent = MakeEarlyFailureContent(
+					FailureReason,
+					TEXT("Fix ScaffoldMetadata.json categorySourceFile so it stays within Plugins/UnrealMcp/Source."),
+					TEXT("unreal.scaffold_mcp_tool"));
+				return MakeExecutionResult(FailureReason, StructuredContent, true);
+			}
 			const FString ModuleSourcePath = GetMcpModuleSourcePath();
 			const FString RegistrySourcePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpToolRegistry/tools.json")));
 			const FString RegistryMirrorPath = GetToolRegistryMirrorPath();

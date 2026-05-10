@@ -1,0 +1,27 @@
+{
+  "name": "apply_scaffold_path_traversal_rejected_dry_run",
+  "description": "Apply dry-run must reject ScaffoldMetadata.json categorySourceFile traversal outside plugin source.",
+  "category": "error_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "expectToolCallStructuredFields": {
+    "canApply": false,
+    "patchesSafe": false,
+    "registrationStatus.notRegisteredReason": "Source file path '../../Config/DefaultEngine.ini' resolves outside allowed plugin source directory 'Plugins/UnrealMcp/Source'.",
+    "registrationStatus.registeredUsableNow": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 344,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_apply_scaffold",
+      "arguments": {
+        "toolName": "unreal.path_traversal_fixture",
+        "scaffoldDir": "Tools/UnrealMcpTests/Fixtures/PathTraversalScaffold",
+        "dryRun": true
+      }
+    }
+  }
+}

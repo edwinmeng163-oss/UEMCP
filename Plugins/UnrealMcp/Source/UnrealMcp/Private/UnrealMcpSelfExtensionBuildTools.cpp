@@ -57,6 +57,42 @@ namespace UnrealMcp
 			return FString::Printf(TEXT("\"%s\""), *Escaped);
 		}
 
+		bool SanitizeBuildExtraArgs(const FString& InExtraArgs, FString& OutExtraArgs, FString& OutFailureReason)
+		{
+			OutExtraArgs = InExtraArgs.TrimStartAndEnd();
+
+			TArray<FString> DisallowedCharacters;
+			for (const TCHAR Character : OutExtraArgs)
+			{
+				if (Character == TEXT('\n'))
+				{
+					DisallowedCharacters.AddUnique(TEXT("\\n"));
+					continue;
+				}
+
+				if (Character == TEXT('\r'))
+				{
+					DisallowedCharacters.AddUnique(TEXT("\\r"));
+					continue;
+				}
+
+				if (FCString::Strchr(TEXT(";|&`$()><"), Character) != nullptr)
+				{
+					DisallowedCharacters.AddUnique(FString::Printf(TEXT("'%c'"), Character));
+				}
+			}
+
+			if (DisallowedCharacters.Num() > 0)
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("extraArgs contains disallowed shell metacharacters: %s"),
+					*FString::Join(DisallowedCharacters, TEXT(", ")));
+				return false;
+			}
+
+			return true;
+		}
+
 		bool LooksLikeBuildErrorLine(const FString& Line)
 		{
 			const FString Lower = Line.ToLower();
@@ -474,6 +510,7 @@ namespace UnrealMcp
 			Target = Target.TrimStartAndEnd();
 			Platform = Platform.TrimStartAndEnd();
 			Configuration = Configuration.TrimStartAndEnd();
+			ExtraArgs = ExtraArgs.TrimStartAndEnd();
 			MemoryKey = MemoryKey.TrimStartAndEnd();
 			if (Target.IsEmpty() || Platform.IsEmpty() || Configuration.IsEmpty())
 			{
@@ -482,6 +519,12 @@ namespace UnrealMcp
 			if (MemoryKey.IsEmpty())
 			{
 				MemoryKey = TEXT("mcp.extension.build_test");
+			}
+
+			FString ExtraArgsValidationFailure;
+			if (!SanitizeBuildExtraArgs(ExtraArgs, ExtraArgs, ExtraArgsValidationFailure))
+			{
+				return MakeExecutionResult(ExtraArgsValidationFailure, nullptr, true);
 			}
 
 			const FString BuildScriptPath = GetUnrealBuildScriptPath();
@@ -545,8 +588,8 @@ namespace UnrealMcp
 				*Platform,
 				*Configuration,
 				*QuoteCommandLineArgument(ProjectFilePath),
-				ExtraArgs.TrimStartAndEnd().IsEmpty() ? TEXT("") : TEXT(" "),
-				*ExtraArgs.TrimStartAndEnd());
+				ExtraArgs.IsEmpty() ? TEXT("") : TEXT(" "),
+				*ExtraArgs);
 
 			int32 ReturnCode = -1;
 			FString StdOut;

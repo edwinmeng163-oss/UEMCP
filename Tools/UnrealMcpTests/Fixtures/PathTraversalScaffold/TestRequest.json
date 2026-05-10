@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 344,
+  "method": "tools/call",
+  "params": {
+    "name": "unreal.path_traversal_fixture",
+    "arguments": {
+      "message": "hello"
+    }
+  }
+}

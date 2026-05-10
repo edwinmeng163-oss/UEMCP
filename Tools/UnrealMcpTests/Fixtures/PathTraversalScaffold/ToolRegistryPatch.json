@@ -1,0 +1,21 @@
+{
+  "name": "unreal.path_traversal_fixture",
+  "handlerName": "unreal.path_traversal_fixture",
+  "title": "Path Traversal Fixture",
+  "description": "Fixture used to verify that scaffold apply rejects path traversal in metadata.",
+  "category": "self-extension",
+  "riskLevel": "low",
+  "requiresWrite": false,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": true,
+  "preflightSupport": false,
+  "postcheckSupport": false,
+  "testCoverage": "category",
+  "owner": "UEvolve Tests",
+  "docsPath": "Docs/SelfExtensionPipeline.md",
+  "notes": "Path traversal regression fixture; not intended for real integration."
+}
