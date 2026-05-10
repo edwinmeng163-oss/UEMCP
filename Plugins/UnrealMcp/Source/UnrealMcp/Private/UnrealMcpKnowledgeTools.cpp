@@ -11,6 +11,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UnrealMcpKnowledgeBridge.h"
 #include "UnrealMcpToolRegistrar.h"
 #include "UnrealMcpToolRegistry.h"
 
@@ -2000,6 +2001,162 @@ namespace UnrealMcp
 			FString::Printf(TEXT("Knowledge search returned %d result(s) for '%s'."), ResultCount, *Query),
 			StructuredContent,
 			false);
+	}
+
+	TArray<TSharedPtr<FJsonObject>> BuildEvidenceForTask(
+		const FString& TaskQuery,
+		int32 TopN,
+		int32 MaxExcerptChars)
+	{
+		TArray<TSharedPtr<FJsonObject>> Evidence;
+		const FString Query = TaskQuery.TrimStartAndEnd();
+		if (Query.IsEmpty() || TopN <= 0)
+		{
+			return Evidence;
+		}
+
+		TArray<FKnowledgeCard> Cards;
+		FString FailureReason;
+		if (!LoadKnowledgeCards(GetKnowledgeIndexRoot(), Cards, FailureReason))
+		{
+			return Evidence;
+		}
+
+		const TArray<FString> QueryTokens = ExpandSearchTokens(Query);
+		struct FScoredEvidenceCard
+		{
+			FKnowledgeCard Card;
+			double Score = 0.0;
+		};
+		TArray<FScoredEvidenceCard> ScoredCards;
+		for (const FKnowledgeCard& Card : Cards)
+		{
+			const double Score = ScoreKnowledgeCard(Card, Query, QueryTokens);
+			if (Score > 0.0)
+			{
+				FScoredEvidenceCard Scored;
+				Scored.Card = Card;
+				Scored.Score = Score;
+				ScoredCards.Add(MoveTemp(Scored));
+			}
+		}
+
+		ScoredCards.Sort([](const FScoredEvidenceCard& Left, const FScoredEvidenceCard& Right)
+		{
+			if (!FMath::IsNearlyEqual(Left.Score, Right.Score))
+			{
+				return Left.Score > Right.Score;
+			}
+			return Left.Card.Title < Right.Card.Title;
+		});
+
+		TSet<FString> AddedSourceGroups;
+		const int32 SafeTopN = FMath::Clamp(TopN, 1, 20);
+		const int32 SafeMaxExcerptChars = FMath::Clamp(MaxExcerptChars, 80, 600);
+		for (int32 Index = 0; Index < ScoredCards.Num() && Evidence.Num() < SafeTopN; ++Index)
+		{
+			const FScoredEvidenceCard& Scored = ScoredCards[Index];
+			const FString SourceGroup = FString::Printf(TEXT("%s|%s"), *Scored.Card.SourceId, *Scored.Card.SectionPath);
+			if (AddedSourceGroups.Contains(SourceGroup))
+			{
+				continue;
+			}
+			AddedSourceGroups.Add(SourceGroup);
+
+			TSharedPtr<FJsonObject> EvidenceObject = MakeShared<FJsonObject>();
+			EvidenceObject->SetStringField(TEXT("cardId"), Scored.Card.CardId);
+			EvidenceObject->SetStringField(TEXT("sourcePath"), Scored.Card.SourcePath);
+			EvidenceObject->SetStringField(TEXT("sourceKind"), Scored.Card.SourceKind);
+			EvidenceObject->SetStringField(TEXT("excerpt"), MakeExcerpt(Scored.Card.Text, Query, QueryTokens, SafeMaxExcerptChars));
+			EvidenceObject->SetNumberField(TEXT("score"), Scored.Score);
+			EvidenceObject->SetStringField(TEXT("queryUsed"), Query);
+			Evidence.Add(MoveTemp(EvidenceObject));
+		}
+		return Evidence;
+	}
+
+	bool WriteOutcomeKnowledgeCard(
+		const FString& ManifestSessionId,
+		const FString& Title,
+		const FString& Text,
+		const FString& SourcePath,
+		const TArray<FString>& Tags,
+		FString& OutFailureReason)
+	{
+		const FString CleanSessionId = ManifestSessionId.TrimStartAndEnd();
+		if (CleanSessionId.IsEmpty())
+		{
+			OutFailureReason = TEXT("Cannot write outcome card without a manifest sessionId.");
+			return false;
+		}
+
+		const FString SourceId = SanitizeKnowledgeId(FString::Printf(TEXT("outcome_%s"), *CleanSessionId));
+		const FString CardsPath = FPaths::Combine(GetKnowledgeIndexRoot(), TEXT("cards.jsonl"));
+		TArray<FKnowledgeCard> Cards;
+		if (IFileManager::Get().FileSize(*CardsPath) >= 0)
+		{
+			TArray<FString> Lines;
+			if (!FFileHelper::LoadFileToStringArray(Lines, *CardsPath))
+			{
+				OutFailureReason = FString::Printf(TEXT("Failed to read knowledge cards '%s'."), *CardsPath);
+				return false;
+			}
+			for (const FString& Line : Lines)
+			{
+				if (Line.TrimStartAndEnd().IsEmpty())
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> Object;
+				FKnowledgeCard ExistingCard;
+				if (LoadJsonObjectFromString(Line, Object) && JsonObjectToCard(Object, ExistingCard))
+				{
+					if (ExistingCard.SourceId.Equals(SourceId, ESearchCase::CaseSensitive))
+					{
+						return true;
+					}
+					Cards.Add(MoveTemp(ExistingCard));
+				}
+			}
+		}
+
+		FKnowledgeCard Card;
+		Card.CardId = SourceId;
+		Card.SourceId = SourceId;
+		Card.Title = Title.TrimStartAndEnd().IsEmpty()
+			? FString::Printf(TEXT("Outcome: %s"), *CleanSessionId)
+			: Title.TrimStartAndEnd();
+		Card.SectionTitle = Card.Title;
+		Card.SectionPath = Card.Title;
+		Card.Category = TEXT("outcome");
+		for (const FString& Tag : Tags)
+		{
+			const FString CleanTag = Tag.TrimStartAndEnd();
+			if (!CleanTag.IsEmpty())
+			{
+				Card.Tags.AddUnique(CleanTag);
+			}
+		}
+		Card.SourceKind = TEXT("activity-log");
+		Card.SourcePath = SourcePath.TrimStartAndEnd().IsEmpty() ? TEXT("Saved/UnrealMcp/LastExtensionApply.json") : SourcePath.TrimStartAndEnd();
+		Card.Text = Text.Left(1800).TrimStartAndEnd();
+		if (Card.Text.IsEmpty())
+		{
+			Card.Text = TEXT("Outcome verified.");
+		}
+		Card.ChunkIndex = 0;
+		Card.TextLength = Card.Text.Len();
+		Card.SourceWeight = 0.6;
+		Card.Confidence = 0.7;
+		Card.UpdatedAt = FDateTime::UtcNow().ToIso8601();
+		Cards.Add(MoveTemp(Card));
+
+		if (!WriteKnowledgeCardsJsonl(CardsPath, Cards, OutFailureReason))
+		{
+			return false;
+		}
+		InvalidateKnowledgeCardCache();
+		return true;
 	}
 
 	FUnrealMcpExecutionResult ToolRecommend(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray)

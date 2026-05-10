@@ -86,6 +86,43 @@
     "postcheck": {
       "$ref": "#/$defs/postcheck"
     },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cardId",
+          "sourcePath",
+          "sourceKind",
+          "excerpt",
+          "score",
+          "queryUsed"
+        ],
+        "properties": {
+          "cardId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourcePath": {
+            "type": "string"
+          },
+          "sourceKind": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "score": {
+            "type": "number"
+          },
+          "queryUsed": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "sourcePath": {
       "type": "string",
       "description": "Legacy v1 single-source manifest field."
