@@ -465,6 +465,7 @@ Versioned inputs:
 ```text
 README.md
 Docs/**
+Docs/KnowledgeRagSources.md
 Plugins/UnrealMcp/README.md
 Tools/UnrealMcpToolRegistry/tools.json
 Tools/UnrealMcpTests/**
