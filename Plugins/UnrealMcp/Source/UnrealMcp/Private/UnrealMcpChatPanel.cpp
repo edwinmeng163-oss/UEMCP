@@ -74,6 +74,37 @@ namespace UnrealMcpChat
 		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("ChatHistory.json"));
 	}
 
+	FString GetChatPanelStateFilePath()
+	{
+		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("chat_panel.json"));
+	}
+
+	const FAiProviderConfig* FindProviderById(const UUnrealMcpSettings& Settings, const FString& ProviderId)
+	{
+		for (const FAiProviderConfig& Provider : Settings.Providers)
+		{ if (Provider.Id.Equals(ProviderId, ESearchCase::CaseSensitive)) { return &Provider; } }
+		return nullptr;
+	}
+
+	FAiProviderConfig* FindMutableProviderById(UUnrealMcpSettings& Settings, const FString& ProviderId)
+	{
+		for (FAiProviderConfig& Provider : Settings.Providers)
+		{ if (Provider.Id.Equals(ProviderId, ESearchCase::CaseSensitive)) { return &Provider; } }
+		return nullptr;
+	}
+
+	FString ProviderKindShortName(EAiProviderKind Kind)
+	{
+		switch (Kind)
+		{ case EAiProviderKind::OpenAiResponses: return TEXT("OpenAI"); case EAiProviderKind::OpenAiChatCompat: return TEXT("OpenAI-compat"); case EAiProviderKind::AnthropicMessages: return TEXT("Anthropic"); case EAiProviderKind::Codex: return TEXT("Codex"); default: return TEXT("Unknown"); }
+	}
+
+	FString FormatProviderLabel(const FAiProviderConfig& Provider)
+	{
+		const FString DisplayName = Provider.DisplayName.TrimStartAndEnd().IsEmpty() ? Provider.Id : Provider.DisplayName.TrimStartAndEnd();
+		return FString::Printf(TEXT("%s (%s)"), *DisplayName, *ProviderKindShortName(Provider.Kind));
+	}
+
 	FLinearColor GetBorderColor(const FUnrealMcpChatEntry& Entry)
 	{
 		switch (Entry.Type)
@@ -625,6 +656,9 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 		MakeShared<FString>(UnrealMcpChat::SkillApplyModeAskNow())
 	};
 	SelectedSkillApplyMode = SkillApplyModes.IsValidIndex(1) ? SkillApplyModes[1] : nullptr;
+	LoadRecentModelsFromDisk();
+	RefreshProviderOptions();
+	RefreshModelOptionsForActiveProvider();
 
 	ChildSlot
 	[
@@ -784,6 +818,135 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 					.AutoHeight()
 					[
 						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SHorizontalBox)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() == 0 ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+							[
+								SNew(STextBlock)
+								.Font(FAppStyle::GetFontStyle("SmallFont"))
+								.Text(LOCTEXT("NoAiProvidersConfigured", "No AI providers configured. Open AI Settings to add one."))
+							]
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							[
+								SNew(SButton)
+								.Text(LOCTEXT("NoAiProvidersSettingsButton", "AI Settings"))
+								.OnClicked(this, &SUnrealMcpChatPanel::HandleOpenAiSettingsClicked)
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox)
+							.MinDesiredWidth(200.0f)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							[
+								SAssignNew(ProviderComboBox, SComboBox<TSharedPtr<FString>>)
+								.OptionsSource(&ProviderOptionIds)
+								.InitiallySelectedItem(SelectedProviderId)
+								.OnGenerateWidget_Lambda([this](TSharedPtr<FString> ProviderId)
+								{
+									FString Label = ProviderId.IsValid() ? *ProviderId : TEXT("<provider>");
+									if (const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>())
+									{
+										if (ProviderId.IsValid())
+										{
+											if (const FAiProviderConfig* Provider = UnrealMcpChat::FindProviderById(*Settings, *ProviderId))
+											{
+												Label = UnrealMcpChat::FormatProviderLabel(*Provider);
+											}
+										}
+									}
+									return SNew(STextBlock).Text(FText::FromString(Label));
+								})
+								.OnSelectionChanged(this, &SUnrealMcpChatPanel::HandleProviderSelectionChanged)
+								.ToolTipText_Lambda([this]()
+								{
+									return bAssistantRequestInFlight
+										? LOCTEXT("ProviderInFlightTooltip", "Changes apply to the next request - current run continues.")
+										: LOCTEXT("ProviderSelectorTooltip", "Select the AI provider used for the next request.");
+								})
+								[
+									SNew(STextBlock)
+									.Text_Lambda([this]()
+									{
+										return FText::FromString(TEXT("Provider: ") + GetCurrentProviderDisplayText().ToString());
+									})
+								]
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox)
+							.MinDesiredWidth(200.0f)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() > 0 && !IsActiveProviderCodexKind() ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							[
+								SAssignNew(ModelComboBox, SComboBox<TSharedPtr<FString>>)
+								.OptionsSource(&ModelOptions)
+								.InitiallySelectedItem(SelectedModel)
+								.OnGenerateWidget_Lambda([](TSharedPtr<FString> Model)
+								{
+									return SNew(STextBlock).Text(FText::FromString(Model.IsValid() ? *Model : TEXT("<model>")));
+								})
+								.OnSelectionChanged(this, &SUnrealMcpChatPanel::HandleModelSelectionChanged)
+								.ToolTipText_Lambda([this]()
+								{
+									return bAssistantRequestInFlight
+										? LOCTEXT("ModelInFlightTooltip", "Changes apply to the next request - current run continues.")
+										: LOCTEXT("ModelSelectorTooltip", "Edit the active provider model, or pick a recent model.");
+								})
+								[
+									SAssignNew(ModelEditableTextBox, SEditableTextBox)
+									.Text(GetCurrentModelDisplayText())
+									.HintText(LOCTEXT("ModelSelectorLabel", "Model"))
+									.SelectAllTextWhenFocused(true)
+									.OnTextCommitted(this, &SUnrealMcpChatPanel::HandleModelTextCommitted)
+									.ToolTipText_Lambda([this]()
+									{
+										return bAssistantRequestInFlight
+											? LOCTEXT("ModelTextInFlightTooltip", "Changes apply to the next request - current run continues.")
+											: LOCTEXT("ModelTextTooltip", "Type a model id and press Enter, or leave the field to save it.");
+									})
+								]
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox)
+							.MinDesiredWidth(200.0f)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() > 0 && IsActiveProviderCodexKind() ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							.ToolTipText(LOCTEXT("CodexLockedModelTooltip", "Codex provider is hard-locked to gpt-5.5 with xhigh reasoning per project policy."))
+							[
+								SNew(STextBlock)
+								.Text(this, &SUnrealMcpChatPanel::GetCurrentModelDisplayText)
+							]
+						]
 						+ SHorizontalBox::Slot()
 						.AutoWidth()
 						.Padding(0.0f, 0.0f, 6.0f, 0.0f)
@@ -1277,6 +1440,229 @@ void SUnrealMcpChatPanel::HandleInputCommitted(const FText& InText, ETextCommit:
 void SUnrealMcpChatPanel::HandlePresetClicked(FString CommandText)
 {
 	SendCommand(CommandText);
+}
+
+void SUnrealMcpChatPanel::HandleProviderSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo)
+{
+	if (!NewSelection.IsValid()) { return; }
+	SelectedProviderId = NewSelection;
+	if (SelectInfo != ESelectInfo::Direct) { SetActiveProviderById(*NewSelection); }
+}
+
+void SUnrealMcpChatPanel::HandleModelSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo)
+{
+	if (!NewSelection.IsValid() || IsActiveProviderCodexKind()) { return; }
+	SelectedModel = NewSelection;
+	if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(FText::FromString(*NewSelection)); }
+	if (SelectInfo != ESelectInfo::Direct) { HandleModelTextCommitted(FText::FromString(*NewSelection), ETextCommit::OnEnter); }
+}
+
+void SUnrealMcpChatPanel::HandleModelTextCommitted(const FText& InText, ETextCommit::Type CommitType)
+{
+	if (IsActiveProviderCodexKind() || (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)) { return; }
+	const FString Model = InText.ToString().TrimStartAndEnd();
+	if (Model.IsEmpty()) { return; }
+	UUnrealMcpSettings* Settings = GetMutableDefault<UUnrealMcpSettings>();
+	if (!Settings) { return; }
+	FAiProviderConfig* Provider = Settings->FindActiveProvider() ? UnrealMcpChat::FindMutableProviderById(*Settings, Settings->ActiveProviderId) : nullptr;
+	if (!Provider) { return; }
+	const FString ProviderId = Provider->Id;
+	if (!Provider->Model.Equals(Model, ESearchCase::CaseSensitive)) { Provider->Model = Model; Settings->SaveConfig(); }
+	RememberRecentModel(ProviderId, Model);
+	RefreshModelOptionsForActiveProvider();
+}
+
+void SUnrealMcpChatPanel::RefreshProviderOptions()
+{
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	ProviderOptionIds.Reset();
+	SelectedProviderId.Reset();
+	if (!Settings) { return; }
+
+	TArray<const FAiProviderConfig*> SortedProviders;
+	for (const FAiProviderConfig& Provider : Settings->Providers) { SortedProviders.Add(&Provider); }
+
+	SortedProviders.Sort([](const FAiProviderConfig* A, const FAiProviderConfig* B)
+	{
+		const FString ADisplay = A ? (A->DisplayName.TrimStartAndEnd().IsEmpty() ? A->Id : A->DisplayName.TrimStartAndEnd()) : FString();
+		const FString BDisplay = B ? (B->DisplayName.TrimStartAndEnd().IsEmpty() ? B->Id : B->DisplayName.TrimStartAndEnd()) : FString();
+		const int32 DisplayCompare = ADisplay.Compare(BDisplay, ESearchCase::IgnoreCase);
+		if (DisplayCompare != 0) { return DisplayCompare < 0; }
+		const FString AId = A ? A->Id : FString();
+		const FString BId = B ? B->Id : FString();
+		return AId.Compare(BId, ESearchCase::IgnoreCase) < 0;
+	});
+
+	for (const FAiProviderConfig* Provider : SortedProviders)
+	{
+		if (!Provider || Provider->Id.TrimStartAndEnd().IsEmpty()) { continue; }
+		TSharedPtr<FString> OptionId = MakeShared<FString>(Provider->Id);
+		ProviderOptionIds.Add(OptionId);
+		if (Provider->Id.Equals(Settings->ActiveProviderId, ESearchCase::CaseSensitive)) { SelectedProviderId = OptionId; }
+	}
+
+	if (!SelectedProviderId.IsValid() && ProviderOptionIds.Num() > 0) { SelectedProviderId = ProviderOptionIds[0]; }
+	if (ProviderComboBox.IsValid())
+	{ ProviderComboBox->RefreshOptions(); ProviderComboBox->SetSelectedItem(SelectedProviderId); }
+}
+
+void SUnrealMcpChatPanel::RefreshModelOptionsForActiveProvider()
+{
+	ModelOptions.Reset();
+	SelectedModel.Reset();
+
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	const FAiProviderConfig* Provider = Settings ? Settings->FindActiveProvider() : nullptr;
+	if (!Provider)
+	{
+		if (ModelComboBox.IsValid()) { ModelComboBox->RefreshOptions(); ModelComboBox->ClearSelection(); }
+		if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(FText::GetEmpty()); }
+		return;
+	}
+
+	const FString CurrentModel = IsActiveProviderCodexKind() ? TEXT("gpt-5.5") : Provider->Model.TrimStartAndEnd();
+	TSet<FString> SeenModels;
+	if (!CurrentModel.IsEmpty()) { SelectedModel = MakeShared<FString>(CurrentModel); ModelOptions.Add(SelectedModel); SeenModels.Add(CurrentModel); }
+
+	const TArray<FString>* RecentModels = RecentModelsByProvider.Find(Provider->Id);
+	int32 RecentAdded = 0;
+	if (RecentModels)
+	{
+		for (const FString& RecentModel : *RecentModels)
+		{
+			const FString TrimmedRecentModel = RecentModel.TrimStartAndEnd();
+			if (TrimmedRecentModel.IsEmpty() || SeenModels.Contains(TrimmedRecentModel)) { continue; }
+			ModelOptions.Add(MakeShared<FString>(TrimmedRecentModel));
+			SeenModels.Add(TrimmedRecentModel);
+			if (++RecentAdded >= 3) { break; }
+		}
+	}
+
+	if (!SelectedModel.IsValid()) { SelectedModel = MakeShared<FString>(FString()); }
+	if (ModelComboBox.IsValid())
+	{ ModelComboBox->RefreshOptions(); ModelComboBox->SetSelectedItem(ModelOptions.Num() > 0 ? SelectedModel : TSharedPtr<FString>()); }
+	if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(GetCurrentModelDisplayText()); }
+}
+
+void SUnrealMcpChatPanel::LoadRecentModelsFromDisk()
+{
+	RecentModelsByProvider.Reset();
+
+	FString JsonText;
+	if (!FFileHelper::LoadFileToString(JsonText, *UnrealMcpChat::GetChatPanelStateFilePath())) { return; }
+
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+	{ UE_LOG(LogTemp, Verbose, TEXT("[UnrealMcp] Ignoring corrupt chat panel state file.")); return; }
+
+	const TSharedPtr<FJsonObject>* RecentModelsObject = nullptr;
+	if (!RootObject->TryGetObjectField(TEXT("recentModels"), RecentModelsObject) || !RecentModelsObject || !(*RecentModelsObject).IsValid()) { return; }
+
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*RecentModelsObject)->Values)
+	{
+		if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Array) { continue; }
+
+		TArray<FString> Models;
+		for (const TSharedPtr<FJsonValue>& ModelValue : Pair.Value->AsArray())
+		{
+			if (!ModelValue.IsValid() || ModelValue->Type != EJson::String) { continue; }
+			const FString Model = ModelValue->AsString().TrimStartAndEnd();
+			if (!Model.IsEmpty() && !Models.Contains(Model)) { Models.Add(Model); }
+			if (Models.Num() >= 3) { break; }
+		}
+		if (Models.Num() > 0) { RecentModelsByProvider.Add(Pair.Key, Models); }
+	}
+}
+
+void SUnrealMcpChatPanel::SaveRecentModelsToDisk() const
+{
+	const FString StatePath = UnrealMcpChat::GetChatPanelStateFilePath();
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(StatePath), true);
+
+	TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> RecentModelsObject = MakeShared<FJsonObject>();
+	for (const TPair<FString, TArray<FString>>& Pair : RecentModelsByProvider)
+	{
+		TArray<TSharedPtr<FJsonValue>> ModelValues;
+		for (const FString& Model : Pair.Value)
+		{
+			const FString TrimmedModel = Model.TrimStartAndEnd();
+			if (!TrimmedModel.IsEmpty()) { ModelValues.Add(MakeShared<FJsonValueString>(TrimmedModel)); }
+		}
+		RecentModelsObject->SetArrayField(Pair.Key, ModelValues);
+	}
+	RootObject->SetObjectField(TEXT("recentModels"), RecentModelsObject);
+
+	FString JsonText;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonText);
+	FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer);
+	if (!FFileHelper::SaveStringToFile(JsonText, *StatePath))
+	{ UE_LOG(LogTemp, Warning, TEXT("[UnrealMcp] Failed to save chat panel state file: %s"), *StatePath); }
+}
+
+void SUnrealMcpChatPanel::SetActiveProviderById(const FString& NewId)
+{
+	UUnrealMcpSettings* Settings = GetMutableDefault<UUnrealMcpSettings>();
+	if (!Settings || NewId.TrimStartAndEnd().IsEmpty()) { return; }
+
+	FAiProviderConfig* Provider = UnrealMcpChat::FindMutableProviderById(*Settings, NewId);
+	if (!Provider) { return; }
+
+	Settings->ActiveProviderId = NewId;
+	Settings->SaveConfig();
+	SelectedProviderId = MakeShared<FString>(NewId);
+	RefreshProviderOptions();
+	RefreshModelOptionsForActiveProvider();
+
+	const FString DisplayName = Provider->DisplayName.TrimStartAndEnd().IsEmpty() ? Provider->Id : Provider->DisplayName.TrimStartAndEnd();
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), FString::Printf(TEXT("Provider switched to %s. The change applies to the next request."), *DisplayName));
+}
+
+void SUnrealMcpChatPanel::RememberRecentModel(const FString& ProviderId, const FString& Model)
+{
+	const FString TrimmedProviderId = ProviderId.TrimStartAndEnd();
+	const FString TrimmedModel = Model.TrimStartAndEnd();
+	if (TrimmedProviderId.IsEmpty() || TrimmedModel.IsEmpty()) { return; }
+
+	TArray<FString>& Models = RecentModelsByProvider.FindOrAdd(TrimmedProviderId);
+	const TArray<FString> PreviousModels = Models;
+	Models.RemoveAll([&TrimmedModel](const FString& Existing)
+	{
+		return Existing.Equals(TrimmedModel, ESearchCase::CaseSensitive);
+	});
+	Models.Insert(TrimmedModel, 0);
+	while (Models.Num() > 3) { Models.RemoveAt(Models.Num() - 1); }
+	if (Models != PreviousModels) { SaveRecentModelsToDisk(); }
+}
+
+FText SUnrealMcpChatPanel::GetCurrentProviderDisplayText() const
+{
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	if (!Settings || !SelectedProviderId.IsValid()) { return FText::FromString(TEXT("No provider")); }
+
+	const FAiProviderConfig* Provider = UnrealMcpChat::FindProviderById(*Settings, *SelectedProviderId);
+	return FText::FromString(Provider ? UnrealMcpChat::FormatProviderLabel(*Provider) : *SelectedProviderId);
+}
+
+FText SUnrealMcpChatPanel::GetCurrentModelDisplayText() const
+{
+	if (IsActiveProviderCodexKind()) { return FText::FromString(TEXT("gpt-5.5 (locked)")); }
+	return FText::FromString(SelectedModel.IsValid() ? *SelectedModel : FString());
+}
+
+bool SUnrealMcpChatPanel::IsActiveProviderCodexKind() const
+{
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	if (!Settings) { return false; }
+	const FString ProviderId = SelectedProviderId.IsValid() ? *SelectedProviderId : Settings->ActiveProviderId;
+	const FAiProviderConfig* Provider = UnrealMcpChat::FindProviderById(*Settings, ProviderId);
+	return Provider && Provider->Kind == EAiProviderKind::Codex;
+}
+
+FString SUnrealMcpChatPanel::KindShortName(EAiProviderKind Kind)
+{
+	return UnrealMcpChat::ProviderKindShortName(Kind);
 }
 
 void SUnrealMcpChatPanel::HandleSkillSelectionChanged(TSharedPtr<FUnrealMcpSkillOption> NewSelection, ESelectInfo::Type SelectInfo)

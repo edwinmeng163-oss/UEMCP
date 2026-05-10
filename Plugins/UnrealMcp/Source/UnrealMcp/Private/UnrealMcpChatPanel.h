@@ -12,6 +12,7 @@ class SEditableTextBox;
 class SScrollBox;
 class STextBlock;
 class SVerticalBox;
+enum class EAiProviderKind : uint8;
 struct FUnrealMcpExecutionResult;
 
 enum class EUnrealMcpChatEntryType : uint8
@@ -66,8 +67,12 @@ private:
 	FReply HandleWriteCurrentTaskMemoryClicked();
 	void HandleInputCommitted(const FText& InText, ETextCommit::Type CommitType);
 	void HandlePresetClicked(FString CommandText);
+	void HandleProviderSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo); void HandleModelSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo); void HandleModelTextCommitted(const FText& InText, ETextCommit::Type CommitType);
 	void HandleSkillSelectionChanged(TSharedPtr<FUnrealMcpSkillOption> NewSelection, ESelectInfo::Type SelectInfo);
 	void HandleSkillApplyModeChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo);
+	void RefreshProviderOptions(); void RefreshModelOptionsForActiveProvider(); void LoadRecentModelsFromDisk(); void SaveRecentModelsToDisk() const;
+	void SetActiveProviderById(const FString& NewId); void RememberRecentModel(const FString& ProviderId, const FString& Model);
+	FText GetCurrentProviderDisplayText() const; FText GetCurrentModelDisplayText() const; bool IsActiveProviderCodexKind() const; static FString KindShortName(EAiProviderKind Kind);
 	void SendCurrentInput();
 	void SendCommand(const FString& CommandText);
 	void StopAssistantRequest();
@@ -124,11 +129,15 @@ private:
 	TSharedPtr<FUnrealMcpSkillOption> SelectedSkill;
 	TArray<TSharedPtr<FString>> SkillApplyModes;
 	TSharedPtr<FString> SelectedSkillApplyMode;
+	TArray<TSharedPtr<FString>> ProviderOptionIds; TSharedPtr<FString> SelectedProviderId;
+	TArray<TSharedPtr<FString>> ModelOptions; TSharedPtr<FString> SelectedModel;
+	TMap<FString, TArray<FString>> RecentModelsByProvider;
 	TSharedPtr<FUnrealMcpChatEntry> ActiveAssistantEntry;
 	TSharedPtr<IUnrealMcpAssistantHandle, ESPMode::ThreadSafe> ActiveAssistantHandle;
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveAiTestRequest;
 	TSharedPtr<SEditableTextBox> InputTextBox;
 	TSharedPtr<SEditableTextBox> SkillTaskTextBox;
+	TSharedPtr<SEditableTextBox> ModelEditableTextBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ProviderComboBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ModelComboBox;
 	TSharedPtr<SComboBox<TSharedPtr<FUnrealMcpSkillOption>>> SkillComboBox;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> SkillApplyModeComboBox;
 	TSharedPtr<STextBlock> SkillDescriptionText;
