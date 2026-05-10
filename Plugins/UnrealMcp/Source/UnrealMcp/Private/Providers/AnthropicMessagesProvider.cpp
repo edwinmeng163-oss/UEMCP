@@ -1,5 +1,6 @@
 #include "Providers/AnthropicMessagesProvider.h"
 
+#include "Providers/ProviderHelpers.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -32,12 +33,6 @@ namespace
 		TSharedPtr<FJsonObject> InitialInputObject;
 	};
 
-	FString ProviderIdForError(const FAiProviderConfig& Config)
-	{
-		const FString Id = Config.Id.TrimStartAndEnd();
-		return Id.IsEmpty() ? TEXT("<unnamed>") : Id;
-	}
-
 	TSharedPtr<FJsonObject> AnthropicMessage(const FString& Role, const TArray<TSharedPtr<FJsonValue>>& ContentBlocks)
 	{
 		TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
@@ -59,22 +54,6 @@ namespace
 		TArray<TSharedPtr<FJsonValue>> Blocks;
 		Blocks.Add(TextBlock(Text));
 		return AnthropicMessage(Role, Blocks);
-	}
-
-	FString BytesToString(const TArray<uint8>& Bytes)
-	{
-		if (Bytes.IsEmpty()) { return FString(); }
-		const FUTF8ToTCHAR Converter(reinterpret_cast<const UTF8CHAR*>(Bytes.GetData()), Bytes.Num());
-		return FString(Converter.Length(), Converter.Get());
-	}
-
-	FString SerializeToolResult(const FUnrealMcpExecutionResult& ToolResult)
-	{
-		TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
-		Object->SetStringField(TEXT("text"), ToolResult.Text);
-		Object->SetBoolField(TEXT("is_error"), ToolResult.bIsError);
-		if (ToolResult.StructuredContent.IsValid()) { Object->SetObjectField(TEXT("structured_content"), ToolResult.StructuredContent); }
-		return UnrealMcp::JsonObjectToString(Object);
 	}
 
 	class FAnthropicRun final : public IUnrealMcpAssistantHandle, public TSharedFromThis<FAnthropicRun, ESPMode::ThreadSafe>
@@ -418,7 +397,7 @@ namespace
 		{
 			FString BodyString;
 			bool bShouldHandleToolCalls = false;
-			{ const FScopeLock Lock(&StateMutex); if (bCompleted) { return; } if (ActiveRequest == HttpRequest) { ActiveRequest.Reset(); } BodyString = BytesToString(RawResponseBytes); bShouldHandleToolCalls = bToolUseStopSeen && StreamToolUses.Num() > 0; }
+			{ const FScopeLock Lock(&StateMutex); if (bCompleted) { return; } if (ActiveRequest == HttpRequest) { ActiveRequest.Reset(); } BodyString = UnrealMcp::Providers::BytesToString(RawResponseBytes); bShouldHandleToolCalls = bToolUseStopSeen && StreamToolUses.Num() > 0; }
 			if (bCancellationRequested.load(std::memory_order_relaxed)) { Finish(TEXT("Generation stopped."), false, true); }
 			else if (!bSucceeded || !HttpResponse.IsValid()) { Finish(TEXT("The Anthropic request failed before a valid HTTP response was returned."), true); }
 			else if (HttpResponse->GetResponseCode() < 200 || HttpResponse->GetResponseCode() >= 300) { Finish(FString::Printf(TEXT("Anthropic error %d: %s"), HttpResponse->GetResponseCode(), *ExtractErrorMessage(BodyString)), true); }
@@ -520,7 +499,7 @@ namespace
 			TSharedPtr<FJsonObject> ResultBlock = MakeShared<FJsonObject>();
 			ResultBlock->SetStringField(TEXT("type"), TEXT("tool_result"));
 			ResultBlock->SetStringField(TEXT("tool_use_id"), ToolUse.Id);
-			ResultBlock->SetStringField(TEXT("content"), SerializeToolResult(Result));
+			ResultBlock->SetStringField(TEXT("content"), UnrealMcp::Providers::SerializeToolResult(Result));
 			ResultBlock->SetBoolField(TEXT("is_error"), Result.bIsError);
 			return MakeShared<FJsonValueObject>(ResultBlock);
 		}
@@ -635,7 +614,7 @@ namespace UnrealMcp
 
 	bool FAnthropicMessagesProvider::ValidateConfig(const FAiProviderConfig& Config, FString& OutError) const
 	{
-		const FString ProviderId = ProviderIdForError(Config);
+		const FString ProviderId = UnrealMcp::Providers::ProviderIdForError(Config);
 		if (Config.ApiKey.TrimStartAndEnd().IsEmpty())
 		{
 			OutError = FString::Printf(TEXT("Provider '%s': API key is empty."), *ProviderId);

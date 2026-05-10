@@ -1,4 +1,5 @@
 #include "Providers/OpenAiChatCompletionsProvider.h"
+#include "Providers/ProviderHelpers.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -26,31 +27,12 @@ namespace
 		FString UnrealToolName;
 		FString ArgumentsJson;
 	};
-	FString ProviderIdForError(const FAiProviderConfig& Config)
-	{
-		const FString Id = Config.Id.TrimStartAndEnd();
-		return Id.IsEmpty() ? TEXT("<unnamed>") : Id;
-	}
 	TSharedPtr<FJsonObject> ChatMessage(const FString& Role, const FString& Content)
 	{
 		TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
 		Message->SetStringField(TEXT("role"), Role);
 		Message->SetStringField(TEXT("content"), Content);
 		return Message;
-	}
-	FString BytesToString(const TArray<uint8>& Bytes)
-	{
-		if (Bytes.IsEmpty()) { return FString(); }
-		const FUTF8ToTCHAR Converter(reinterpret_cast<const UTF8CHAR*>(Bytes.GetData()), Bytes.Num());
-		return FString(Converter.Length(), Converter.Get());
-	}
-	FString SerializeToolResult(const FUnrealMcpExecutionResult& ToolResult)
-	{
-		TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
-		Object->SetStringField(TEXT("text"), ToolResult.Text);
-		Object->SetBoolField(TEXT("is_error"), ToolResult.bIsError);
-		if (ToolResult.StructuredContent.IsValid()) { Object->SetObjectField(TEXT("structured_content"), ToolResult.StructuredContent); }
-		return UnrealMcp::JsonObjectToString(Object);
 	}
 	class FChatCompletionsRun final : public IUnrealMcpAssistantHandle, public TSharedFromThis<FChatCompletionsRun, ESPMode::ThreadSafe>
 	{
@@ -350,7 +332,7 @@ namespace
 		{
 			FString BodyString;
 			bool bShouldHandleToolCalls = false;
-			{ const FScopeLock Lock(&StateMutex); if (bCompleted) { return; } if (ActiveRequest == HttpRequest) { ActiveRequest.Reset(); } BodyString = BytesToString(RawResponseBytes); bShouldHandleToolCalls = bToolCallsFinished && StreamToolCalls.Num() > 0; }
+			{ const FScopeLock Lock(&StateMutex); if (bCompleted) { return; } if (ActiveRequest == HttpRequest) { ActiveRequest.Reset(); } BodyString = UnrealMcp::Providers::BytesToString(RawResponseBytes); bShouldHandleToolCalls = bToolCallsFinished && StreamToolCalls.Num() > 0; }
 			if (bCancellationRequested.load(std::memory_order_relaxed)) { Finish(TEXT("Generation stopped."), false, true); }
 			else if (!bSucceeded || !HttpResponse.IsValid()) { Finish(TEXT("The AI request failed before a valid HTTP response was returned."), true); }
 			else if (HttpResponse->GetResponseCode() < 200 || HttpResponse->GetResponseCode() >= 300) { Finish(FString::Printf(TEXT("AI request failed. HTTP %d: %s"), HttpResponse->GetResponseCode(), *ExtractErrorMessage(BodyString)), true); }
@@ -435,7 +417,7 @@ namespace
 				}
 			}
 			EmitToolFinished(ToolCall, Result);
-			TSharedPtr<FJsonObject> Message = ChatMessage(TEXT("tool"), SerializeToolResult(Result));
+			TSharedPtr<FJsonObject> Message = ChatMessage(TEXT("tool"), UnrealMcp::Providers::SerializeToolResult(Result));
 			Message->SetStringField(TEXT("tool_call_id"), ToolCall.Id);
 			return Message;
 		}
@@ -524,7 +506,7 @@ namespace UnrealMcp
 	}
 	bool FOpenAiChatCompletionsProvider::ValidateConfig(const FAiProviderConfig& Config, FString& OutError) const
 	{
-		const FString ProviderId = ProviderIdForError(Config);
+		const FString ProviderId = UnrealMcp::Providers::ProviderIdForError(Config);
 		if (Config.ApiKey.TrimStartAndEnd().IsEmpty())
 		{
 			OutError = FString::Printf(TEXT("Provider '%s': API key is empty."), *ProviderId);

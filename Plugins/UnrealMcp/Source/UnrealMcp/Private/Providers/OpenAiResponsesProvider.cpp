@@ -1,15 +1,7 @@
 #include "Providers/OpenAiResponsesProvider.h"
+#include "Providers/ProviderHelpers.h"
 
 #include "UnrealMcpAssistantRun.h"
-
-namespace
-{
-	FString GetProviderIdForError(const FAiProviderConfig& Config)
-	{
-		const FString TrimmedId = Config.Id.TrimStartAndEnd();
-		return TrimmedId.IsEmpty() ? TEXT("<unnamed>") : TrimmedId;
-	}
-}
 
 namespace UnrealMcp
 {
@@ -20,7 +12,7 @@ namespace UnrealMcp
 
 	bool FOpenAiResponsesProvider::ValidateConfig(const FAiProviderConfig& Config, FString& OutError) const
 	{
-		const FString ProviderId = GetProviderIdForError(Config);
+		const FString ProviderId = UnrealMcp::Providers::ProviderIdForError(Config);
 		if (Config.ApiKey.TrimStartAndEnd().IsEmpty())
 		{
 			OutError = FString::Printf(TEXT("Provider '%s': API key is empty."), *ProviderId);

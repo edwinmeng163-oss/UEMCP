@@ -1,5 +1,6 @@
 #include "Providers/CodexProvider.h"
 
+#include "Providers/ProviderHelpers.h"
 #include "Async/Async.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
@@ -16,11 +17,6 @@ namespace
 	const TCHAR* ForcedCodexModel = TEXT("gpt-5.5");
 	const TCHAR* ForcedCodexReasoning = TEXT("xhigh");
 	const TCHAR* ForcedCodexSandbox = TEXT("workspace-write");
-	FString ProviderIdForError(const FAiProviderConfig& Config)
-	{
-		const FString Id = Config.Id.TrimStartAndEnd();
-		return Id.IsEmpty() ? TEXT("<unnamed>") : Id;
-	}
 
 	bool ContainsDangerousShellCharacters(const FString& Value, FString& OutFailureReason)
 	{
@@ -111,7 +107,7 @@ namespace
 		{
 			OutError = FString::Printf(
 				TEXT("Provider '%s': CodexExtraArgs must not override %s away from '%s' (got '%s')."),
-				*ProviderIdForError(Config),
+				*UnrealMcp::Providers::ProviderIdForError(Config),
 				*FlagName,
 				*RequiredValue,
 				*Value);
@@ -124,7 +120,7 @@ namespace
 		TArray<FString> Tokens;
 		if (!TokenizeExtraArgs(Config.CodexExtraArgs.TrimStartAndEnd(), Tokens, OutError))
 		{
-			OutError = FString::Printf(TEXT("Provider '%s': %s"), *ProviderIdForError(Config), *OutError);
+			OutError = FString::Printf(TEXT("Provider '%s': %s"), *UnrealMcp::Providers::ProviderIdForError(Config), *OutError);
 			return false;
 		}
 
@@ -135,7 +131,7 @@ namespace
 			{
 				if (Index + 1 >= Tokens.Num())
 				{
-					OutError = FString::Printf(TEXT("Provider '%s': CodexExtraArgs flag %s requires a value."), *ProviderIdForError(Config), *FlagName);
+					OutError = FString::Printf(TEXT("Provider '%s': CodexExtraArgs flag %s requires a value."), *UnrealMcp::Providers::ProviderIdForError(Config), *FlagName);
 					return false;
 				}
 				OutValue = Tokens[++Index];
@@ -184,7 +180,7 @@ namespace
 			}
 			if (Token == TEXT("--fast"))
 			{
-				OutError = FString::Printf(TEXT("Provider '%s': CodexExtraArgs must not use --fast because this provider forces model '%s'."), *ProviderIdForError(Config), ForcedCodexModel);
+				OutError = FString::Printf(TEXT("Provider '%s': CodexExtraArgs must not use --fast because this provider forces model '%s'."), *UnrealMcp::Providers::ProviderIdForError(Config), ForcedCodexModel);
 				return false;
 			}
 			if (Token == TEXT("-s") || Token == TEXT("--sandbox"))
@@ -484,7 +480,7 @@ namespace
 
 		static bool ValidateCodexConfig(const FAiProviderConfig& InConfig, TArray<FString>& OutFilteredExtraArgs, FString& OutError)
 		{
-			const FString ProviderId = ProviderIdForError(InConfig);
+			const FString ProviderId = UnrealMcp::Providers::ProviderIdForError(InConfig);
 			const FString BinaryPath = InConfig.CodexBinaryPath.TrimStartAndEnd();
 			if (BinaryPath.IsEmpty())
 			{
