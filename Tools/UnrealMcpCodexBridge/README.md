@@ -54,9 +54,26 @@ From the repository root:
 bun run --cwd Tools/UnrealMcpCodexBridge src/index.ts
 ```
 
+Or from the bridge directory on macOS/Linux:
+
+```bash
+./start-bridge.sh
+```
+
+On Windows, use either launcher from the repository root:
+
+```cmd
+Tools\UnrealMcpCodexBridge\start-bridge.cmd
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Tools\UnrealMcpCodexBridge\start-bridge.ps1
+```
+
 Expected startup output:
 
 ```text
+Codex binary: /opt/homebrew/bin/codex
 UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=unix endpoint=/tmp/uevolve-codex-bridge-<id>/codex.sock
 Codex model=gpt-5.5 effort=xhigh approvalPolicy=reject log=/tmp/uevolve-codex-bridge-<pid>.log
@@ -80,14 +97,18 @@ On Windows, it automatically uses localhost WebSocket transport instead:
 codex app-server --listen ws://127.0.0.1:<auto-port>
 ```
 
-The start command is the same on every platform:
+The bridge resolves the Codex binary before spawning:
 
-```bash
-bun run --cwd Tools/UnrealMcpCodexBridge src/index.ts
-```
+- `UEVOLVE_CODEX_BIN` wins when set. It must be an absolute path to
+  `codex.exe`, `codex.cmd`, or the POSIX `codex` binary.
+- Otherwise the bridge runs `where codex` on Windows or `which codex` on
+  macOS/Linux and uses the first result.
+- If the resolved Windows path ends in `.cmd` or `.bat`, the bridge starts
+  Codex in shell mode so `cmd.exe` can interpret the npm shim. The startup log
+  marks this as `shell mode for Windows shim`.
 
-No `.bat` helper is required. If a firewall or local policy requires a stable
-Codex App Server port, set `UEVOLVE_CODEX_APP_SERVER_PORT`.
+If a firewall or local policy requires a stable Codex App Server port, set
+`UEVOLVE_CODEX_APP_SERVER_PORT`.
 
 ## Configuration
 
@@ -97,6 +118,7 @@ Environment variables:
 UEVOLVE_CODEX_BRIDGE_PORT=8766
 UEVOLVE_CODEX_BRIDGE_PATH=/uevolve
 UEVOLVE_CODEX_CWD=<working directory for Codex turns; default is repo root>
+UEVOLVE_CODEX_BIN=<absolute path to codex.exe/codex.cmd/codex>
 UEVOLVE_CODEX_APPROVAL_POLICY=reject|auto-approve
 UEVOLVE_CODEX_TRANSPORT=ws|unix
 UEVOLVE_CODEX_APP_SERVER_PORT=<port for ws transport; default is auto>

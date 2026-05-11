@@ -30,6 +30,7 @@ const child = await startCodexAppServer((reason) => {
 });
 child.proc.stdout.on("data", (chunk) => process.stdout.write(`[codex] ${chunk}`));
 child.proc.stderr.on("data", (chunk) => process.stderr.write(`[codex] ${chunk}`));
+console.log(`Codex binary: ${child.codexBin}${child.shellMode ? " (shell mode for Windows shim)" : ""}`);
 
 function onNotification(message: any): void {
   const params = message.params ?? {};

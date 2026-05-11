@@ -27,6 +27,8 @@ export type StartedAppServer = {
   endpoint: string;
   transport: CodexTransport;
   dir: string;
+  codexBin: string;
+  shellMode: boolean;
   spawnArgs: string[];
   mcpRegistration: McpRegistration;
 };
@@ -189,9 +191,17 @@ export async function startCodexAppServer(
   }
   Object.assign(configOverrides, options.configOverrides ?? {});
   for (const [key, value] of Object.entries(configOverrides)) spawnArgs.push("-c", `${key}=${value}`);
-  const proc = spawn("codex", spawnArgs, { stdio: ["ignore", "pipe", "pipe"] });
+  const codexBin = await resolveCodexBinary();
+  const shellMode = shouldUseShellForCodex(codexBin);
+  let proc: ChildProcessWithoutNullStreams;
+  try {
+    proc = spawn(codexBin, spawnArgs, { shell: shellMode, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  } catch (error) {
+    throw new Error(failedCodexLaunchMessage(error));
+  }
+  proc.once("error", (error) => onExit(failedCodexLaunchMessage(error)));
   proc.once("exit", (code, signal) => onExit(`codex app-server exited code=${code} signal=${signal}`));
-  return { proc, endpoint, transport, dir, spawnArgs, mcpRegistration };
+  return { proc, endpoint, transport, dir, codexBin, shellMode, spawnArgs, mcpRegistration };
 }
 
 export async function waitForEndpoint(endpoint: string, transport: CodexTransport): Promise<void> {
@@ -240,6 +250,46 @@ function selectedTransport(): CodexTransport {
   if (requested === "ws" || requested === "unix") return requested;
   if (requested) throw new Error(`Invalid UEVOLVE_CODEX_TRANSPORT: ${requested}`);
   return process.platform === "win32" ? "ws" : "unix";
+}
+
+async function resolveCodexBinary(): Promise<string> {
+  const override = process.env.UEVOLVE_CODEX_BIN?.trim();
+  if (override) {
+    if (!path.isAbsolute(override)) throw new Error(`UEVOLVE_CODEX_BIN must be an absolute path. Got: ${override}`);
+    if (!fs.existsSync(override)) throw new Error(`UEVOLVE_CODEX_BIN does not exist: ${override}`);
+    return override;
+  }
+
+  const resolver = process.platform === "win32" ? "where" : "which";
+  const resolved = await resolveFirstPath(resolver, "codex");
+  if (!resolved) {
+    throw new Error(`Unable to find codex with '${resolver} codex'. Set UEVOLVE_CODEX_BIN to the full path of codex.exe or codex.cmd.`);
+  }
+  return resolved;
+}
+
+async function resolveFirstPath(command: string, name: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, [name], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (chunk) => (stdout += chunk.toString("utf8")));
+    proc.stderr.on("data", (chunk) => (stderr += chunk.toString("utf8")));
+    proc.once("error", (error) => reject(new Error(`Failed to run '${command} ${name}': ${error.message}`)));
+    proc.once("exit", (code) => {
+      const first = stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+      if (code === 0 && first) resolve(first);
+      else reject(new Error(`'${command} ${name}' failed with code ${code}${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
+    });
+  }).catch(() => "");
+}
+
+function shouldUseShellForCodex(codexBin: string): boolean {
+  return process.platform === "win32" && [".cmd", ".bat"].includes(path.extname(codexBin).toLowerCase());
+}
+
+function failedCodexLaunchMessage(error: unknown): string {
+  return `Failed to launch codex. Set UEVOLVE_CODEX_BIN to the full path of codex.exe or codex.cmd. Got error: ${error instanceof Error ? error.message : String(error)}`;
 }
 
 async function selectedPort(): Promise<number> {
