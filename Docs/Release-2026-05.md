@@ -128,6 +128,11 @@ cd UEvolve
 # 1. 装依赖
 # - 通过 Epic Games Launcher 装 UE 5.7
 # - https://bun.sh 下载 Windows 安装器
+#   装完 Bun 后，打开新的终端运行 bun --version 确认可用
+#   若提示 bun: command not found，把 %USERPROFILE%\.bun\bin 加到用户 PATH
+#   （System Properties → Environment Variables → User PATH），或用 Scoop 安装：
+#   scoop install bun（会自动设置 PATH）
+#   改 PATH 后先关闭并重开终端 / VS Code / Explorer，再重试 start-bridge.cmd
 # - npm install -g @openai/codex-cli   (或装 Codex Desktop 桌面应用)
 
 # 2. 拉代码
@@ -360,6 +365,11 @@ cd UEvolve
 ```powershell
 # Install UE 5.7 via Epic Games Launcher.
 # Install Bun from https://bun.sh (Windows installer).
+# After installing Bun, open a new terminal and verify bun --version works.
+# If you see bun: command not found, add %USERPROFILE%\.bun\bin to User PATH
+# (System Properties → Environment Variables → User PATH), or install via Scoop:
+# scoop install bun, which sets PATH automatically.
+# After changing PATH, close and reopen any terminal / VS Code / Explorer window before retrying start-bridge.cmd.
 # npm install -g @openai/codex-cli   (or install Codex Desktop instead)
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
@@ -585,6 +595,11 @@ cd UEvolve
 ```powershell
 # Epic Games Launcher で UE 5.7 をインストール
 # https://bun.sh から Windows 用 Bun をインストール
+# Bun のインストール後、新しいターミナルで bun --version が動くことを確認
+# bun: command not found の場合は、%USERPROFILE%\.bun\bin をユーザー PATH に追加
+# （System Properties → Environment Variables → User PATH）、または Scoop でインストール：
+# scoop install bun（PATH は自動設定）
+# PATH 変更後は、ターミナル / VS Code / Explorer を閉じて開き直してから start-bridge.cmd を再試行
 # npm install -g @openai/codex-cli  （または Codex Desktop アプリを使用）
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
