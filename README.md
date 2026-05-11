@@ -112,6 +112,8 @@ endpoint:
 ws://127.0.0.1:8766/uevolve
 ```
 
+Windows note: after installing Bun from `https://bun.sh`, open a new terminal and verify `bun --version` works. If you see `bun: command not found`, add `%USERPROFILE%\.bun\bin` to User PATH (`System Properties → Environment Variables → User PATH`), or install via Scoop with `scoop install bun`, which sets PATH automatically. After changing PATH, close and reopen any terminal / VS Code / Explorer window before retrying `start-bridge.cmd`.
+
 Start it from the repository root:
 
 ```bash
