@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/edwinmeng163-oss/UEvolve/Schemas/UnrealMcpToolPackageManifest.schema.json",
+  "title": "UEvolve Tool Package Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "toolName",
+    "version",
+    "created_at",
+    "source_repo_commit",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": "UEvolve.ToolPackage.v1"
+    },
+    "toolName": {
+      "type": "string",
+      "pattern": "^unreal\\.[a-z0-9_\\.]+$"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_repo_commit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "kind",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "pattern": "(^/|\\.\\.|\\\\)"
+            }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "registry",
+              "scaffold",
+              "test",
+              "doc"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        }
+      }
+    }
+  }
+}

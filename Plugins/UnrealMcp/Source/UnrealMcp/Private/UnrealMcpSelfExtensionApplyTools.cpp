@@ -680,6 +680,7 @@ namespace UnrealMcp
 				return MakeExecutionResult(FailureReason, StructuredContent, true);
 			}
 			const FString ModuleSourcePath = GetMcpModuleSourcePath();
+			// Category C: self-extension applies ToolRegistry patches to the active project's explicit registry mirror.
 			const FString RegistrySourcePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpToolRegistry/tools.json")));
 			const FString RegistryMirrorPath = GetToolRegistryMirrorPath();
 

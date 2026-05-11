@@ -21,6 +21,7 @@ public class UnrealMcp : ModuleRules
 			"CoreUObject",
 			"DeveloperSettings",
 			"Engine",
+			"FileUtilities",
 			"HTTP",
 			"HTTPServer",
 			"InputCore",

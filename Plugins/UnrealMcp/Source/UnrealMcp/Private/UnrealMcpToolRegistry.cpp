@@ -291,6 +291,7 @@ namespace UnrealMcp
 
 		void AddRegistryCandidatePaths(TArray<FString>& OutPaths)
 		{
+			// Category C: ToolRegistry lookup intentionally checks the active project before the packaged plugin resource fallback.
 			OutPaths.Add(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpToolRegistry/tools.json"))));
 
 			const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMcp"));

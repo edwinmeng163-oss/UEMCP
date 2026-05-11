@@ -69,6 +69,8 @@ namespace UnrealMcp
 		const FString& SnippetName,
 		const FString& ToolName);
 	FUnrealMcpExecutionResult ValidateMcpToolSchema(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
+	FUnrealMcpExecutionResult ExportToolPackage(const FJsonObject& Arguments);
+	FUnrealMcpExecutionResult ImportToolPackage(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult GenerateMcpTests(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	FUnrealMcpExecutionResult ApplyMcpScaffold(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult RollbackLastMcpExtension(const FJsonObject& Arguments);

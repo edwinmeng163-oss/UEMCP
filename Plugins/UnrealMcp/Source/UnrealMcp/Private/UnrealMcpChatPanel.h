@@ -64,6 +64,8 @@ private:
 	FReply HandleRefreshSkillsClicked();
 	FReply HandleReadSelectedSkillClicked();
 	FReply HandleApplySelectedSkillClicked();
+	FReply HandleExportToolPackageClicked();
+	FReply HandleImportToolPackageClicked();
 	FReply HandleReadMemoryClicked();
 	FReply HandleWriteCurrentTaskMemoryClicked();
 	void HandleInputCommitted(const FText& InText, ETextCommit::Type CommitType);
@@ -89,6 +91,9 @@ private:
 	FString GetSelectedSkillApplyMode() const;
 	FString GetSkillTaskOrFallback() const;
 	FString BuildSkillAskPrompt(const FString& SkillName, const FString& Task) const;
+	bool ShowExportToolPackageDialog(FString& OutToolName, bool& bOutDryRun);
+	bool ShowImportToolPackageDialog(FString& OutPackagePath, bool& bOutDryRun);
+	FString BuildToolPackageSummary(const FString& ToolName, const FUnrealMcpExecutionResult& Result) const;
 	void AppendToolExecutionResult(const FString& ToolName, const FJsonObject& Arguments, const FUnrealMcpExecutionResult& Result);
 	void UpdateToolEntryWithResult(
 		const TSharedPtr<FUnrealMcpChatEntry>& Entry,

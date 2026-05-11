@@ -206,6 +206,67 @@ namespace UnrealMcp
 					TEXT("UnrealMcpSelfExtensionTools.cpp")),
 				MakeObjectSchema());
 
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("toolName"), MakeStringProperty(TEXT("Live MCP tool name to export into a portable package."), FString()));
+				Properties->SetObjectField(TEXT("version"), MakeStringProperty(TEXT("Optional package version suffix. Defaults to a UTC timestamp."), FString()));
+				Properties->SetObjectField(TEXT("packagePath"), MakeStringProperty(TEXT("Optional project-relative package zip path. Defaults to Saved/UnrealMcp/Packages/<toolName>-<version>.zip."), FString()));
+				Properties->SetObjectField(TEXT("scaffoldDir"), MakeStringProperty(TEXT("Optional project-relative scaffold directory to bundle instead of the default tool scaffold path."), FString()));
+				Properties->SetObjectField(TEXT("outputRoot"), MakeStringProperty(TEXT("Project-relative scaffold root used when scaffoldDir is empty."), TEXT("Tools/UnrealMcpToolScaffolds")));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview package manifest and entries without writing the zip."), true));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("toolName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.tools.export_package"),
+					TEXT("Export Tool Package"),
+					TEXT("Exports a live MCP tool registry entry plus optional scaffold, tests, and docs into a portable zip package with a hashed manifest."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpToolPackager.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/SelfExtensionPipeline.md#tool-sharing");
+				Descriptor.Reason = TEXT("Descriptor: writes reviewed tool-sharing packages under Saved/UnrealMcp/Packages without mutating source files.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("packagePath"), MakeStringProperty(TEXT("Project-relative or absolute tool package zip path."), FString()));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Validate and preview the import plan without mutating registry, scaffold, or test files."), true));
+				Properties->SetObjectField(TEXT("overwriteScaffold"), MakeBoolProperty(TEXT("Allow scaffold files from the package to overwrite existing scaffold files."), false));
+				Properties->SetObjectField(TEXT("skipLock"), MakeBoolProperty(TEXT("Testing-only escape hatch for in-process test execution; normal Chat use should leave this false."), false));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("packagePath")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.tools.import_package"),
+					TEXT("Import Tool Package"),
+					TEXT("Validates a tool package manifest and imports scaffold/test files plus a deduplicated ToolRegistry entry after dry-run review."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpToolPackager.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/SelfExtensionPipeline.md#tool-sharing");
+				Descriptor.Reason = TEXT("Descriptor: mutates tool-sharing registry/scaffold/test assets only after package hash validation and extension-session locking.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
 			TSharedPtr<FJsonObject> WorkbenchProperties = MakeShared<FJsonObject>();
 			WorkbenchProperties->SetObjectField(TEXT("memoryKey"), MakeStringProperty(TEXT("Project memory key to highlight in pipeline/workbench status."), TEXT("mcp.extension.pipeline")));
 			WorkbenchProperties->SetObjectField(TEXT("includeBuildLogTail"), MakeBoolProperty(TEXT("Whether to include the latest build log tail."), false));

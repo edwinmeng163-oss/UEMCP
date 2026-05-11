@@ -6,6 +6,7 @@
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "UnrealMcpSharedPathResolver.h"
 
 namespace UnrealMcp
 {
@@ -754,23 +755,6 @@ namespace UnrealMcp
 				return true;
 			}
 
-			void AddUniqueMcpTestRoot(TArray<FString>& Roots, const FString& Candidate)
-			{
-				for (const FString& Existing : Roots)
-				{
-					if (Existing.Equals(Candidate, ESearchCase::IgnoreCase))
-					{
-						return;
-					}
-				}
-				Roots.Add(Candidate);
-			}
-
-			FString GetProjectLocalMcpTestRoot()
-			{
-				return NormalizeFullPathForCompare(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpTests")));
-			}
-
 			void FindMcpTestJsonFilesRecursive(const FString& Directory, TArray<FString>& OutFiles)
 			{
 				OutFiles.Reset();
@@ -782,13 +766,6 @@ namespace UnrealMcp
 				OutFiles.Sort();
 			}
 
-			bool McpTestRootHasJson(const FString& Root)
-			{
-				TArray<FString> JsonFiles;
-				FindMcpTestJsonFilesRecursive(Root, JsonFiles);
-				return JsonFiles.Num() > 0;
-			}
-
 			bool ResolveDefaultMcpTestRoot(
 				FString& OutRoot,
 				TArray<FString>& OutCandidateRoots,
@@ -798,32 +775,9 @@ namespace UnrealMcp
 				OutCandidateRoots.Reset();
 				OutFailureReason.Reset();
 
-				const FString ProjectLocalRoot = GetProjectLocalMcpTestRoot();
-				AddUniqueMcpTestRoot(OutCandidateRoots, ProjectLocalRoot);
-				if (FPaths::DirectoryExists(ProjectLocalRoot) && McpTestRootHasJson(ProjectLocalRoot))
+				if (ResolveSharedRepoRoot(TEXT("UnrealMcpTests"), { TEXT("*.json") }, OutRoot, OutCandidateRoots))
 				{
-					OutRoot = ProjectLocalRoot;
 					return true;
-				}
-
-				FString AncestorDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-				FPaths::NormalizeDirectoryName(AncestorDir);
-				FPaths::CollapseRelativeDirectories(AncestorDir);
-				for (int32 ParentIndex = 0; ParentIndex < 4; ++ParentIndex)
-				{
-					const FString ParentDir = FPaths::GetPath(AncestorDir);
-					if (ParentDir.IsEmpty() || ParentDir.Equals(AncestorDir, ESearchCase::CaseSensitive))
-					{
-						break;
-					}
-					AncestorDir = ParentDir;
-					const FString CandidateRoot = NormalizeFullPathForCompare(FPaths::Combine(AncestorDir, TEXT("Tools/UnrealMcpTests")));
-					AddUniqueMcpTestRoot(OutCandidateRoots, CandidateRoot);
-					if (FPaths::DirectoryExists(CandidateRoot) && McpTestRootHasJson(CandidateRoot))
-					{
-						OutRoot = CandidateRoot;
-						return true;
-					}
 				}
 
 				OutFailureReason = FString::Printf(

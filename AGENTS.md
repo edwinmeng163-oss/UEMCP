@@ -276,6 +276,7 @@ Self-extension:
 - classify errors
 - compile-error fix plan
 - supervisor installer
+- export/import reviewed tool packages with hashed manifests for sharing
 
 RAG and recommendation:
 
@@ -331,7 +332,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 115 entries across:
+At the time this file was written, the registry contained 117 entries across:
 
 - actors
 - blueprint
@@ -462,6 +463,20 @@ Descriptor-first path for real new tools:
 7. Build the editor.
 8. Restart Unreal Editor before expecting new C++ tools to appear.
 9. Run tool audit, workbench status, and relevant test suites.
+
+Tool sharing path for reviewed tools:
+
+```text
+unreal.tools.export_package dryRun=true
+unreal.tools.export_package dryRun=false
+unreal.tools.import_package dryRun=true
+unreal.tools.import_package dryRun=false
+```
+
+Packages live under `Saved/UnrealMcp/Packages`, contain
+`manifest.json`, `registry/tool.json`, and optional scaffold/test/docs entries,
+and validate SHA-256 hashes before import. Real import requires the extension
+lock and rejects duplicate ToolRegistry names.
 
 Preferred self-extension tool flow:
 

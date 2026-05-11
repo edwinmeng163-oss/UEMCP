@@ -7,6 +7,7 @@
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "UnrealMcpSharedPathResolver.h"
 #include "UnrealMcpToolRegistry.h"
 
 namespace UnrealMcp
@@ -168,7 +169,9 @@ namespace UnrealMcp
 		}
 
 		TArray<FString> VersionedTestFiles;
-		const FString VersionedTestRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpTests")));
+		TArray<FString> VersionedTestRootCandidates;
+		FString VersionedTestRoot;
+		ResolveSharedRepoRoot(TEXT("UnrealMcpTests"), { TEXT("*.json") }, VersionedTestRoot, VersionedTestRootCandidates);
 		IFileManager::Get().FindFilesRecursive(VersionedTestFiles, *VersionedTestRoot, TEXT("*.json"), true, false);
 		const int32 VersionedTestCaseCount = VersionedTestFiles.Num();
 		const int32 TestCaseCount = SavedTestCaseCount + VersionedTestCaseCount;
@@ -188,6 +191,7 @@ namespace UnrealMcp
 		StructuredContent->SetNumberField(TEXT("savedTestCaseCount"), SavedTestCaseCount);
 		StructuredContent->SetNumberField(TEXT("versionedTestCaseCount"), VersionedTestCaseCount);
 		StructuredContent->SetStringField(TEXT("versionedTestRoot"), VersionedTestRoot);
+		StructuredContent->SetArrayField(TEXT("versionedTestRootCandidates"), MakeSharedRepoRootCandidateValues(VersionedTestRootCandidates, { TEXT("*.json") }));
 		StructuredContent->SetBoolField(TEXT("supervisorLogFound"), bHasSupervisorLog);
 		if (bHasSupervisorLog)
 		{

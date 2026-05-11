@@ -265,7 +265,7 @@ namespace UnrealMcp
 					Failures.Add(FString::Printf(TEXT("Skill draft path does not exist before promote: %s."), *ResolvedDraftPath));
 				}
 			}
-			Evidence.Add(TEXT("Skill roots are project-local; promotion writes to Tools/UnrealMcpSkills only after tool validation."));
+			Evidence.Add(TEXT("Skill roots resolve from the active project up to the shared repo root; promotion writes to Tools/UnrealMcpSkills only after tool validation."));
 		}
 		else if (Category == TEXT("scaffold"))
 		{

@@ -12,6 +12,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UnrealMcpKnowledgeBridge.h"
+#include "UnrealMcpSharedPathResolver.h"
 #include "UnrealMcpToolRegistrar.h"
 #include "UnrealMcpToolRegistry.h"
 
@@ -122,6 +123,26 @@ namespace UnrealMcp
 				return Relative;
 			}
 			return FullPath;
+		}
+
+		FString ResolveVersionedKnowledgeRoot(TArray<FString>* OutCandidateRoots = nullptr)
+		{
+			TArray<FString> CandidateRoots;
+			FString KnowledgeRoot;
+			ResolveSharedRepoRoot(TEXT("UnrealMcpKnowledge"), { TEXT("README.md"), TEXT("*.json") }, KnowledgeRoot, CandidateRoots);
+			if (OutCandidateRoots)
+			{
+				*OutCandidateRoots = CandidateRoots;
+			}
+			return KnowledgeRoot;
+		}
+
+		FString ResolveVersionedProjectRoot(TArray<FString>* OutKnowledgeRootCandidates = nullptr)
+		{
+			const FString KnowledgeRoot = ResolveVersionedKnowledgeRoot(OutKnowledgeRootCandidates);
+			const FString ToolsRoot = FPaths::GetPath(KnowledgeRoot);
+			const FString ProjectRoot = FPaths::GetPath(ToolsRoot);
+			return ProjectRoot.IsEmpty() ? FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()) : ProjectRoot;
 		}
 
 		bool LoadJsonObjectFromString(const FString& JsonText, TSharedPtr<FJsonObject>& OutObject)
@@ -847,12 +868,17 @@ namespace UnrealMcp
 				OutCards);
 		}
 
-		void AddVersionedDocumentationCards(int32 MaxChunkChars, int32 OverlapChars, TArray<FKnowledgeCard>& OutCards)
+		void AddVersionedDocumentationCards(
+			int32 MaxChunkChars,
+			int32 OverlapChars,
+			TArray<FKnowledgeCard>& OutCards,
+			TArray<FString>* OutKnowledgeRootCandidates = nullptr)
 		{
-			const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			const FString ProjectDir = ResolveVersionedProjectRoot(OutKnowledgeRootCandidates);
 			const TArray<FString> RootDocs = {
 				FPaths::Combine(ProjectDir, TEXT("README.md")),
 				FPaths::Combine(ProjectDir, TEXT("Plugins/UnrealMcp/README.md")),
+				// Category A: ProjectDir is the shared repo root resolved from Tools/UnrealMcpKnowledge.
 				FPaths::Combine(ProjectDir, TEXT("Tools/UnrealMcpKnowledge/README.md")),
 				FPaths::Combine(ProjectDir, TEXT("Tools/UnrealMcpTests/README.md"))
 			};
@@ -928,10 +954,19 @@ namespace UnrealMcp
 				}
 			}
 
-			void AddSkillMarkdownCards(int32 MaxChunkChars, TArray<FKnowledgeCard>& OutCards, int32& OutSkillFileCount)
+			void AddSkillMarkdownCards(
+				int32 MaxChunkChars,
+				TArray<FKnowledgeCard>& OutCards,
+				int32& OutSkillFileCount,
+				TArray<FString>* OutSkillRootCandidates = nullptr)
 			{
-				const FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-				const FString SkillRoot = FPaths::Combine(ProjectDir, TEXT("Tools/UnrealMcpSkills"));
+				TArray<FString> SkillRootCandidates;
+				FString SkillRoot;
+				ResolveSharedRepoRoot(TEXT("UnrealMcpSkills"), { TEXT("SKILL.md"), TEXT("*.skill") }, SkillRoot, SkillRootCandidates);
+				if (OutSkillRootCandidates)
+				{
+					*OutSkillRootCandidates = SkillRootCandidates;
+				}
 				if (!FPaths::DirectoryExists(SkillRoot))
 				{
 					return;
@@ -1742,6 +1777,8 @@ namespace UnrealMcp
 			int32 ActivityEventCount = 0;
 			int32 SkillFileCount = 0;
 			TArray<FString> SourceFiles;
+			TArray<FString> VersionedKnowledgeRootCandidates;
+			TArray<FString> SkillRootCandidates;
 
 		if (bIncludeOfficialDocs && FPaths::DirectoryExists(SourceRoot))
 		{
@@ -1758,7 +1795,7 @@ namespace UnrealMcp
 
 		if (bIncludeVersionedDocs)
 		{
-			AddVersionedDocumentationCards(MaxChunkChars, OverlapChars, Cards);
+			AddVersionedDocumentationCards(MaxChunkChars, OverlapChars, Cards, &VersionedKnowledgeRootCandidates);
 		}
 
 		if (bIncludeToolRegistry)
@@ -1768,7 +1805,7 @@ namespace UnrealMcp
 
 		if (bIncludeSkills)
 		{
-			AddSkillMarkdownCards(MaxChunkChars, Cards, SkillFileCount);
+			AddSkillMarkdownCards(MaxChunkChars, Cards, SkillFileCount, &SkillRootCandidates);
 		}
 
 		if (bIncludeActivityLog)
@@ -1802,6 +1839,8 @@ namespace UnrealMcp
 		StructuredContent->SetStringField(TEXT("action"), TEXT("knowledge_index_refresh"));
 		StructuredContent->SetStringField(TEXT("indexRoot"), MakeProjectRelativePath(IndexRoot));
 		StructuredContent->SetStringField(TEXT("sourceRoot"), MakeProjectRelativePath(SourceRoot));
+		StructuredContent->SetArrayField(TEXT("versionedKnowledgeRootCandidates"), MakeSharedRepoRootCandidateValues(VersionedKnowledgeRootCandidates, { TEXT("README.md"), TEXT("*.json") }));
+		StructuredContent->SetArrayField(TEXT("skillRootCandidates"), MakeSharedRepoRootCandidateValues(SkillRootCandidates, { TEXT("SKILL.md"), TEXT("*.skill") }));
 		StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 			StructuredContent->SetNumberField(TEXT("cardCount"), Cards.Num());
 			StructuredContent->SetNumberField(TEXT("sourceDocumentsJsonlCount"), SourceFiles.Num());
@@ -2513,8 +2552,12 @@ namespace UnrealMcp
 
 	FUnrealMcpExecutionResult KnowledgeEvalRun(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray)
 	{
-		FString EvalPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpKnowledge/Evals"));
-		Arguments.TryGetStringField(TEXT("evalPath"), EvalPath);
+		TArray<FString> EvalPathCandidates;
+		FString EvalPath;
+		if (!Arguments.TryGetStringField(TEXT("evalPath"), EvalPath) || EvalPath.TrimStartAndEnd().IsEmpty())
+		{
+			ResolveSharedRepoRoot(TEXT("UnrealMcpKnowledge/Evals"), { TEXT("*.json") }, EvalPath, EvalPathCandidates);
+		}
 		EvalPath = ResolveProjectPathForJson(EvalPath);
 
 		bool bRefreshIndex = false;
@@ -2538,6 +2581,10 @@ namespace UnrealMcp
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 			StructuredContent->SetStringField(TEXT("action"), TEXT("knowledge_eval_run"));
 			StructuredContent->SetStringField(TEXT("evalPath"), MakeProjectRelativePath(EvalPath));
+			if (EvalPathCandidates.Num() > 0)
+			{
+				StructuredContent->SetArrayField(TEXT("evalPathCandidates"), MakeSharedRepoRootCandidateValues(EvalPathCandidates, { TEXT("*.json") }));
+			}
 			return MakeExecutionResult(FString::Printf(TEXT("Knowledge eval path was not found: %s"), *EvalPath), StructuredContent, true);
 		}
 
@@ -2888,6 +2935,10 @@ namespace UnrealMcp
 		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 		StructuredContent->SetStringField(TEXT("action"), TEXT("knowledge_eval_run"));
 		StructuredContent->SetStringField(TEXT("evalPath"), MakeProjectRelativePath(EvalPath));
+		if (EvalPathCandidates.Num() > 0)
+		{
+			StructuredContent->SetArrayField(TEXT("evalPathCandidates"), MakeSharedRepoRootCandidateValues(EvalPathCandidates, { TEXT("*.json") }));
+		}
 		StructuredContent->SetNumberField(TEXT("fileCount"), FileCount);
 		StructuredContent->SetNumberField(TEXT("caseCount"), CaseCount);
 		StructuredContent->SetNumberField(TEXT("passedCount"), PassedCount);

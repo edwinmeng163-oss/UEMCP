@@ -1,0 +1,19 @@
+{
+  "name": "tools_export_package_missing_required",
+  "description": "Export package rejects calls without toolName.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 450,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.tools.export_package",
+      "arguments": {
+        "dryRun": true
+      }
+    }
+  }
+}

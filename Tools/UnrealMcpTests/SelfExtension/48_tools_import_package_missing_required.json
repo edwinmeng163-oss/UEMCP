@@ -1,0 +1,19 @@
+{
+  "name": "tools_import_package_missing_required",
+  "description": "Import package rejects calls without packagePath.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 453,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.tools.import_package",
+      "arguments": {
+        "dryRun": true
+      }
+    }
+  }
+}

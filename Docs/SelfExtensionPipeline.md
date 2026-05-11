@@ -83,6 +83,57 @@ python3 Tools/unreal_mcp_supervisor.py install --platform all --output-dir Tools
 
 The generated launchers are local and ignored; versioned templates are stored under `Tools/UnrealMcpSupervisorTemplates`.
 
+## Tool Sharing
+
+Reviewed tool work can be moved between projects with package export/import
+instead of copying loose scaffold files by hand.
+
+`unreal.tools.export_package` accepts a live `toolName`, optional `version`,
+optional `scaffoldDir`, optional `packagePath`, and `dryRun`. It requires the
+tool to exist in the live registry, then builds a manifest preview from:
+
+- the ToolRegistry entry JSON;
+- the tool scaffold directory when one is present or explicitly supplied;
+- versioned MCP test fixtures that call that tool;
+- the file referenced by the registry `docsPath`, when available.
+
+Real export writes a zip under:
+
+```text
+Saved/UnrealMcp/Packages/<toolName>-<version>.zip
+```
+
+The zip contains `manifest.json`, `registry/tool.json`, and optional
+`scaffold/`, `tests/`, and `docs/` entries. The manifest schema is
+`Schemas/UnrealMcpToolPackageManifest.schema.json`; every entry is recorded
+with `path`, `kind`, `sizeBytes`, and `sha256`, plus package metadata such as
+`toolName`, `version`, `created_at`, and `source_repo_commit`.
+
+`unreal.tools.import_package` accepts a `packagePath`, `dryRun`, and optional
+`overwriteScaffold`. It validates the manifest, rejects unsafe archive paths,
+checks every SHA-256 hash, reads `registry/tool.json`, and prepares an import
+plan. Dry run is the normal review step and does not write anything.
+
+Real import requires the self-extension lock. It writes scaffold files under
+`Tools/UnrealMcpToolScaffolds/<toolName>`, writes package test fixtures under
+`Tools/UnrealMcpTests`, and appends the registry entry to
+`Tools/UnrealMcpToolRegistry/tools.json` only when that tool name is not already
+present. Duplicate registry names are reported in dry run and rejected for real
+imports.
+
+Recommended sharing flow:
+
+```text
+/tool unreal.tools.export_package {"toolName":"unreal.my_tool","dryRun":true}
+/tool unreal.tools.export_package {"toolName":"unreal.my_tool","version":"reviewed-1","dryRun":false}
+/tool unreal.tools.import_package {"packagePath":"Saved/UnrealMcp/Packages/unreal.my_tool-reviewed-1.zip","dryRun":true}
+/tool unreal.tools.import_package {"packagePath":"Saved/UnrealMcp/Packages/unreal.my_tool-reviewed-1.zip","dryRun":false}
+```
+
+After a real import, run `python3 Tools/validate_tool_registry.py`, build the
+editor, restart, then run `unreal.mcp_tool_audit` and the relevant MCP test
+suite before treating the imported tool as available.
+
 ## Failure Flow
 
 When a pipeline step fails, `unreal.mcp_extension_pipeline` attaches `failureAnalyses`.

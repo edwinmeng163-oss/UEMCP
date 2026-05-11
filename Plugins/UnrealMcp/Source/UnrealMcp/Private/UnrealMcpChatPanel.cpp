@@ -3,6 +3,7 @@
 #include "Algo/Reverse.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HttpModule.h"
@@ -21,6 +22,7 @@
 #include "UnrealMcpSettings.h"
 #include "Widgets/Images/SThrobber.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -30,8 +32,10 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SWindow.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -79,6 +83,11 @@ namespace UnrealMcpChat
 	FString GetChatPanelStateFilePath()
 	{
 		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("chat_panel.json"));
+	}
+
+	FString GetSavedPackageRoot()
+	{
+		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("Packages"));
 	}
 
 	const FAiProviderConfig* FindProviderById(const UUnrealMcpSettings& Settings, const FString& ProviderId)
@@ -1105,6 +1114,46 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 					.AutoHeight()
 					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("ToolPackageBarTitle", "Tool Packages"))
+							.Font(FAppStyle::GetFontStyle("SmallFont"))
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("ExportToolPackageButton", "Export Tool Package"))
+							.ToolTipText(LOCTEXT("ExportToolPackageTooltip", "Call unreal.tools.export_package for a registry tool and show the package manifest."))
+							.IsEnabled_Lambda([this]()
+							{
+								return !bAssistantRequestInFlight;
+							})
+							.OnClicked(this, &SUnrealMcpChatPanel::HandleExportToolPackageClicked)
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("ImportToolPackageButton", "Import Tool Package"))
+							.ToolTipText(LOCTEXT("ImportToolPackageTooltip", "Call unreal.tools.import_package for a package zip, usually as a dry-run plan first."))
+							.IsEnabled_Lambda([this]()
+							{
+								return !bAssistantRequestInFlight;
+							})
+							.OnClicked(this, &SUnrealMcpChatPanel::HandleImportToolPackageClicked)
+						]
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+					[
 						SAssignNew(SkillDescriptionText, STextBlock)
 						.AutoWrapText(true)
 						.ColorAndOpacity(FLinearColor(0.72f, 0.75f, 0.80f, 1.0f))
@@ -1461,6 +1510,74 @@ FReply SUnrealMcpChatPanel::HandleApplySelectedSkillClicked()
 	{
 		InputTextBox->SetText(FText::FromString(AskPrompt));
 	}
+	return FReply::Handled();
+}
+
+FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
+{
+	if (bAssistantRequestInFlight)
+	{
+		return FReply::Handled();
+	}
+	if (!OwnerModule)
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		return FReply::Handled();
+	}
+
+	FString ToolName;
+	bool bDryRun = true;
+	if (!ShowExportToolPackageDialog(ToolName, bDryRun))
+	{
+		return FReply::Handled();
+	}
+	ToolName = ToolName.TrimStartAndEnd();
+	if (ToolName.IsEmpty())
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Enter a tool name before exporting a package."), true);
+		return FReply::Handled();
+	}
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("toolName"), ToolName);
+	Arguments->SetBoolField(TEXT("dryRun"), bDryRun);
+	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.tools.export_package"), *Arguments);
+	AppendToolExecutionResult(TEXT("unreal.tools.export_package"), *Arguments, Result);
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.export_package"), Result), Result.bIsError);
+	return FReply::Handled();
+}
+
+FReply SUnrealMcpChatPanel::HandleImportToolPackageClicked()
+{
+	if (bAssistantRequestInFlight)
+	{
+		return FReply::Handled();
+	}
+	if (!OwnerModule)
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		return FReply::Handled();
+	}
+
+	FString PackagePath;
+	bool bDryRun = true;
+	if (!ShowImportToolPackageDialog(PackagePath, bDryRun))
+	{
+		return FReply::Handled();
+	}
+	PackagePath = PackagePath.TrimStartAndEnd();
+	if (PackagePath.IsEmpty())
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Choose or enter a package zip before importing."), true);
+		return FReply::Handled();
+	}
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("packagePath"), PackagePath);
+	Arguments->SetBoolField(TEXT("dryRun"), bDryRun);
+	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.tools.import_package"), *Arguments);
+	AppendToolExecutionResult(TEXT("unreal.tools.import_package"), *Arguments, Result);
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.import_package"), Result), Result.bIsError);
 	return FReply::Handled();
 }
 
@@ -2029,6 +2146,289 @@ FString SUnrealMcpChatPanel::BuildSkillAskPrompt(const FString& SkillName, const
 		TEXT("/ask Use project skill '%s' for this task: %s\nIf you need the skill instructions, call unreal.skill_read or unreal.skill_apply first, then continue with the task."),
 		*SkillName,
 		*Task);
+}
+
+bool SUnrealMcpChatPanel::ShowExportToolPackageDialog(FString& OutToolName, bool& bOutDryRun)
+{
+	bool bAccepted = false;
+	TSharedPtr<SEditableTextBox> ToolNameTextBox;
+	TSharedPtr<SCheckBox> DryRunCheckBox;
+
+	TSharedRef<SWindow> Window = SNew(SWindow)
+		.Title(LOCTEXT("ExportToolPackageDialogTitle", "Export Tool Package"))
+		.ClientSize(FVector2D(460.0f, 170.0f))
+		.SupportsMaximize(false)
+		.SupportsMinimize(false);
+
+	Window->SetContent(
+		SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(10.0f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ExportToolPackageToolNameLabel", "Tool name"))
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 10.0f)
+			[
+				SAssignNew(ToolNameTextBox, SEditableTextBox)
+				.HintText(LOCTEXT("ExportToolPackageToolNameHint", "unreal.skill_list"))
+				.SelectAllTextWhenFocused(true)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 12.0f)
+			[
+				SAssignNew(DryRunCheckBox, SCheckBox)
+				.IsChecked(ECheckBoxState::Checked)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ExportToolPackageDryRun", "Dry run"))
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			[
+				SNew(SUniformGridPanel)
+				.SlotPadding(FMargin(4.0f, 0.0f))
+				+ SUniformGridPanel::Slot(0, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("ExportToolPackageCancel", "Cancel"))
+					.OnClicked_Lambda([Window]()
+					{
+						Window->RequestDestroyWindow();
+						return FReply::Handled();
+					})
+				]
+				+ SUniformGridPanel::Slot(1, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("ExportToolPackageRun", "Run"))
+					.OnClicked_Lambda([Window, &bAccepted]()
+					{
+						bAccepted = true;
+						Window->RequestDestroyWindow();
+						return FReply::Handled();
+					})
+				]
+			]
+		]);
+
+	FSlateApplication::Get().AddModalWindow(Window, AsShared());
+	if (!bAccepted)
+	{
+		return false;
+	}
+
+	OutToolName = ToolNameTextBox.IsValid() ? ToolNameTextBox->GetText().ToString().TrimStartAndEnd() : FString();
+	bOutDryRun = DryRunCheckBox.IsValid() && DryRunCheckBox->IsChecked();
+	return true;
+}
+
+bool SUnrealMcpChatPanel::ShowImportToolPackageDialog(FString& OutPackagePath, bool& bOutDryRun)
+{
+	bool bAccepted = false;
+	TArray<FString> PackageFiles;
+	const FString PackageRoot = FPaths::ConvertRelativePathToFull(UnrealMcpChat::GetSavedPackageRoot());
+	IFileManager::Get().FindFilesRecursive(PackageFiles, *PackageRoot, TEXT("*.zip"), true, false);
+	PackageFiles.Sort();
+
+	TArray<TSharedPtr<FString>> PackageOptions;
+	for (const FString& PackageFile : PackageFiles)
+	{
+		PackageOptions.Add(MakeShared<FString>(PackageFile));
+	}
+	TSharedPtr<FString> SelectedPackage = PackageOptions.Num() > 0 ? PackageOptions[0] : TSharedPtr<FString>();
+	TSharedPtr<SEditableTextBox> PackagePathTextBox;
+	TSharedPtr<SCheckBox> DryRunCheckBox;
+
+	TSharedRef<SWindow> Window = SNew(SWindow)
+		.Title(LOCTEXT("ImportToolPackageDialogTitle", "Import Tool Package"))
+		.ClientSize(FVector2D(560.0f, 220.0f))
+		.SupportsMaximize(false)
+		.SupportsMinimize(false);
+
+	Window->SetContent(
+		SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(10.0f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ImportToolPackageSavedLabel", "Saved packages"))
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 10.0f)
+			[
+				SNew(SComboBox<TSharedPtr<FString>>)
+				.OptionsSource(&PackageOptions)
+				.InitiallySelectedItem(SelectedPackage)
+				.OnGenerateWidget_Lambda([](TSharedPtr<FString> Package)
+				{
+					return SNew(STextBlock)
+						.Text(FText::FromString(Package.IsValid() ? FPaths::GetCleanFilename(*Package) : TEXT("No saved packages")));
+				})
+				.OnSelectionChanged_Lambda([&SelectedPackage, &PackagePathTextBox](TSharedPtr<FString> Package, ESelectInfo::Type)
+				{
+					SelectedPackage = Package;
+					if (Package.IsValid() && PackagePathTextBox.IsValid())
+					{
+						PackagePathTextBox->SetText(FText::FromString(*Package));
+					}
+				})
+				[
+					SNew(STextBlock)
+					.Text_Lambda([&SelectedPackage]()
+					{
+						return FText::FromString(SelectedPackage.IsValid() ? FPaths::GetCleanFilename(*SelectedPackage) : TEXT("No saved packages"));
+					})
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ImportToolPackagePathLabel", "Package path"))
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 10.0f)
+			[
+				SAssignNew(PackagePathTextBox, SEditableTextBox)
+				.Text(FText::FromString(SelectedPackage.IsValid() ? *SelectedPackage : FString()))
+				.HintText(LOCTEXT("ImportToolPackagePathHint", "Saved/UnrealMcp/Packages/tool-version.zip or absolute path"))
+				.SelectAllTextWhenFocused(true)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 12.0f)
+			[
+				SAssignNew(DryRunCheckBox, SCheckBox)
+				.IsChecked(ECheckBoxState::Checked)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ImportToolPackageDryRun", "Dry run"))
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			[
+				SNew(SUniformGridPanel)
+				.SlotPadding(FMargin(4.0f, 0.0f))
+				+ SUniformGridPanel::Slot(0, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("ImportToolPackageCancel", "Cancel"))
+					.OnClicked_Lambda([Window]()
+					{
+						Window->RequestDestroyWindow();
+						return FReply::Handled();
+					})
+				]
+				+ SUniformGridPanel::Slot(1, 0)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("ImportToolPackageRun", "Run"))
+					.OnClicked_Lambda([Window, &bAccepted]()
+					{
+						bAccepted = true;
+						Window->RequestDestroyWindow();
+						return FReply::Handled();
+					})
+				]
+			]
+		]);
+
+	FSlateApplication::Get().AddModalWindow(Window, AsShared());
+	if (!bAccepted)
+	{
+		return false;
+	}
+
+	OutPackagePath = PackagePathTextBox.IsValid() ? PackagePathTextBox->GetText().ToString().TrimStartAndEnd() : FString();
+	bOutDryRun = DryRunCheckBox.IsValid() && DryRunCheckBox->IsChecked();
+	return true;
+}
+
+FString SUnrealMcpChatPanel::BuildToolPackageSummary(const FString& ToolName, const FUnrealMcpExecutionResult& Result) const
+{
+	if (!Result.StructuredContent.IsValid())
+	{
+		return Result.Text;
+	}
+
+	const TSharedPtr<FJsonObject>& StructuredContent = Result.StructuredContent;
+	FString PackagePath;
+	StructuredContent->TryGetStringField(TEXT("packagePath"), PackagePath);
+	FString PackagedToolName;
+	StructuredContent->TryGetStringField(TEXT("toolName"), PackagedToolName);
+	bool bDryRun = true;
+	StructuredContent->TryGetBoolField(TEXT("dryRun"), bDryRun);
+
+	if (ToolName.Equals(TEXT("unreal.tools.export_package"), ESearchCase::CaseSensitive))
+	{
+		double EntryCount = 0.0;
+		StructuredContent->TryGetNumberField(TEXT("entryCount"), EntryCount);
+		FString Version;
+		int32 ManifestFileCount = 0;
+		const TSharedPtr<FJsonObject>* Manifest = nullptr;
+		if (StructuredContent->TryGetObjectField(TEXT("manifestPreview"), Manifest) && Manifest && (*Manifest).IsValid())
+		{
+			(*Manifest)->TryGetStringField(TEXT("version"), Version);
+			const TArray<TSharedPtr<FJsonValue>>* Files = nullptr;
+			if ((*Manifest)->TryGetArrayField(TEXT("files"), Files) && Files)
+			{
+				ManifestFileCount = Files->Num();
+			}
+		}
+		return FString::Printf(
+			TEXT("%s\nTool: %s\nPackage: %s\nManifest: version %s, %d file hashes, %.0f package entries."),
+			*Result.Text,
+			*PackagedToolName,
+			*PackagePath,
+			*Version,
+			ManifestFileCount,
+			EntryCount);
+	}
+
+	double PlanCount = 0.0;
+	StructuredContent->TryGetNumberField(TEXT("plannedEntryCount"), PlanCount);
+	const TArray<TSharedPtr<FJsonValue>>* PlanValues = nullptr;
+	if (StructuredContent->TryGetArrayField(TEXT("importPlan"), PlanValues) && PlanValues)
+	{
+		PlanCount = PlanValues->Num();
+	}
+	const TArray<TSharedPtr<FJsonValue>>* ValidatedValues = nullptr;
+	const int32 ValidatedCount = StructuredContent->TryGetArrayField(TEXT("validatedFiles"), ValidatedValues) && ValidatedValues ? ValidatedValues->Num() : 0;
+	bool bDuplicateRegistryEntry = false;
+	StructuredContent->TryGetBoolField(TEXT("duplicateRegistryEntry"), bDuplicateRegistryEntry);
+	return FString::Printf(
+		TEXT("%s\nTool: %s\nPackage: %s\nImport plan: %.0f entries, %d validated hashes, duplicate registry entry: %s, dry run: %s."),
+		*Result.Text,
+		*PackagedToolName,
+		*PackagePath,
+		PlanCount,
+		ValidatedCount,
+		bDuplicateRegistryEntry ? TEXT("yes") : TEXT("no"),
+		bDryRun ? TEXT("yes") : TEXT("no"));
 }
 
 void SUnrealMcpChatPanel::AppendToolExecutionResult(const FString& ToolName, const FJsonObject& Arguments, const FUnrealMcpExecutionResult& Result)

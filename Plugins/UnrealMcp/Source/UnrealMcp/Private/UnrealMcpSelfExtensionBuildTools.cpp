@@ -9,6 +9,7 @@
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "UnrealMcpSharedPathResolver.h"
 
 namespace UnrealMcp
 {
@@ -633,7 +634,10 @@ namespace UnrealMcp
 
 		FString GetMcpSupervisorScriptPath()
 		{
-			return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/unreal_mcp_supervisor.py")));
+			TArray<FString> ToolsRootCandidates;
+			FString ToolsRoot;
+			ResolveSharedRepoRoot(FString(), { TEXT("unreal_mcp_supervisor.py") }, ToolsRoot, ToolsRootCandidates);
+			return FPaths::ConvertRelativePathToFull(FPaths::Combine(ToolsRoot, TEXT("unreal_mcp_supervisor.py")));
 		}
 
 		FString MakeSupervisorDefaultArgsJson(const FString& MemoryKey)
@@ -661,7 +665,7 @@ namespace UnrealMcp
 			bool bDryRun = false;
 
 			Arguments.TryGetStringField(TEXT("platform"), Platform);
-			Arguments.TryGetStringField(TEXT("outputDir"), OutputDir);
+			const bool bHasExplicitOutputDir = Arguments.TryGetStringField(TEXT("outputDir"), OutputDir);
 			Arguments.TryGetStringField(TEXT("label"), Label);
 			Arguments.TryGetStringField(TEXT("memoryKey"), MemoryKey);
 			Arguments.TryGetStringField(TEXT("argsJson"), ArgsJson);
@@ -696,7 +700,12 @@ namespace UnrealMcp
 
 			FString ResolvedOutputDir;
 			FString FailureReason;
-			if (!ResolveProjectPathInsideProject(OutputDir, ResolvedOutputDir, FailureReason))
+			TArray<FString> SupervisorOutputCandidates;
+			if (!bHasExplicitOutputDir)
+			{
+				ResolveSharedRepoRoot(TEXT("UnrealMcpSupervisor"), TArray<FString>(), ResolvedOutputDir, SupervisorOutputCandidates);
+			}
+			else if (!ResolveProjectPathInsideProject(OutputDir, ResolvedOutputDir, FailureReason))
 			{
 				return MakeExecutionResult(FailureReason, nullptr, true);
 			}
@@ -767,6 +776,10 @@ namespace UnrealMcp
 			StructuredContent->SetStringField(TEXT("endpointUrl"), EndpointUrl);
 			StructuredContent->SetStringField(TEXT("supervisorLogDir"), FPaths::ConvertRelativePathToFull(SupervisorLogDir));
 			StructuredContent->SetStringField(TEXT("supervisorScriptPath"), SupervisorScriptPath);
+			if (SupervisorOutputCandidates.Num() > 0)
+			{
+				StructuredContent->SetArrayField(TEXT("outputDirCandidates"), MakeSharedRepoRootCandidateValues(SupervisorOutputCandidates, TArray<FString>()));
+			}
 			StructuredContent->SetStringField(TEXT("executable"), PythonExecutable);
 			StructuredContent->SetStringField(TEXT("params"), Params);
 			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);

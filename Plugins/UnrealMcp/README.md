@@ -88,6 +88,8 @@ Editor action tools:
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
+- `unreal.tools.export_package`
+- `unreal.tools.import_package`
 - `unreal.knowledge_index_refresh`
 - `unreal.knowledge_search`
 - `unreal.tool_recommend`
@@ -621,7 +623,16 @@ Project-local skills:
 /tool unreal.skill_apply {"skillName":"mcp-self-extension","task":"Extend Unreal MCP safely from Editor Chat."}
 ```
 
-The project skill tools scan `Tools/UnrealMcpSkills` by default for `SKILL.md` or `*.skill` files. Applying a skill returns the instruction text to Chat and can record the skill/task in project memory.
+The project skill tools scan the active project's `Tools/UnrealMcpSkills`, then parent repo roots, for `SKILL.md` or `*.skill` files. Applying a skill returns the instruction text to Chat and can record the skill/task in project memory.
+
+Tool package sharing:
+
+```text
+/tool unreal.tools.export_package {"toolName":"unreal.skill_list","dryRun":true}
+/tool unreal.tools.import_package {"packagePath":"Saved/UnrealMcp/Packages/unreal.skill_list-reviewed.zip","dryRun":true}
+```
+
+Export writes reviewed packages under `Saved/UnrealMcp/Packages`; import validates `manifest.json` SHA-256 entries before previewing or applying registry/scaffold/test changes. See `Docs/SelfExtensionPipeline.md#tool-sharing`.
 
 Skill distillation tools:
 

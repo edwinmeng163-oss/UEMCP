@@ -18,6 +18,7 @@
 #include "Subsystems/EditorAssetSubsystem.h"
 #include "UObject/UObjectGlobals.h"
 #include "UnrealMcpKnowledgeBridge.h"
+#include "UnrealMcpSharedPathResolver.h"
 
 namespace UnrealMcp
 {
@@ -477,7 +478,10 @@ namespace UnrealMcp
 			TArray<TSharedPtr<FJsonValue>> Skills;
 			if (bIncludeSkills)
 			{
-				const FString SkillsRoot = FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpSkills"));
+				TArray<FString> SkillRootCandidates;
+				FString SkillsRoot;
+				ResolveSharedRepoRoot(TEXT("UnrealMcpSkills"), { TEXT("SKILL.md"), TEXT("*.skill") }, SkillsRoot, SkillRootCandidates);
+				Snapshot->SetArrayField(TEXT("skillRootCandidates"), MakeSharedRepoRootCandidateValues(SkillRootCandidates, { TEXT("SKILL.md"), TEXT("*.skill") }));
 				TArray<FString> SkillDirs;
 				FindImmediateChildren(SkillsRoot, TEXT("*"), false, true, SkillDirs);
 				for (const FString& SkillDir : SkillDirs)

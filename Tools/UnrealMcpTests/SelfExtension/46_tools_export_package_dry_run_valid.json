@@ -1,0 +1,27 @@
+{
+  "name": "tools_export_package_dry_run_valid",
+  "description": "Export package dry run returns a manifest preview for a live tool.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "tools_export_package",
+    "dryRun": true,
+    "toolName": "unreal.skill_list"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 451,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.tools.export_package",
+      "arguments": {
+        "toolName": "unreal.skill_list",
+        "version": "phase2-test",
+        "scaffoldDir": "Tools/UnrealMcpTests/Fixtures/PackageFakeScaffold",
+        "dryRun": true
+      }
+    }
+  }
+}

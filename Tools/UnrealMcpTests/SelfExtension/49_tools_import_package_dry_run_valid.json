@@ -1,0 +1,26 @@
+{
+  "name": "tools_import_package_dry_run_valid",
+  "description": "Import package dry run validates the freshly exported fake-scaffold package without mutating the registry.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "tools_import_package",
+    "dryRun": true,
+    "toolName": "unreal.skill_list"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 454,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.tools.import_package",
+      "arguments": {
+        "packagePath": "Saved/UnrealMcp/Packages/unreal.skill_list-phase2-test.zip",
+        "dryRun": true,
+        "skipLock": true
+      }
+    }
+  }
+}

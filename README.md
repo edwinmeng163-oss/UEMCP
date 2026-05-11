@@ -186,6 +186,9 @@ Unreal MCP currently supports:
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
+- Tool package sharing:
+  - `unreal.tools.export_package`
+  - `unreal.tools.import_package`
 - Local knowledge / RAG helpers:
   - `unreal.knowledge_index_refresh`
   - `unreal.knowledge_search`
@@ -364,8 +367,9 @@ Build/test handoff note:
 - Stable core MCP test fixtures live in `Tools/UnrealMcpTests/Core`; runtime-generated test scaffolds stay under ignored `Saved/UnrealMcp`.
 - `unreal.mcp_diff_last_apply` reads `Saved/UnrealMcp/LastExtensionApply.json` and returns a before/after source diff preview from the backup snapshots created by `mcp_apply_scaffold`.
 - `unreal.mcp_clean_test_artifacts` defaults to `dryRun:true` and only previews generated `Saved/UnrealMcp/TestScaffolds`; destructive cleanup must explicitly set `dryRun:false`, and optional filters such as `nameContains` should be used for targeted cleanup.
+- `unreal.tools.export_package` and `unreal.tools.import_package` move reviewed tool registry/scaffold/test/doc bundles between projects with manifest SHA-256 validation and import dry runs. See [Tool Sharing](Docs/SelfExtensionPipeline.md#tool-sharing).
 - `unreal.project_memory_view`, `unreal.project_memory_edit`, and `unreal.project_memory_delete` turn `Saved/UnrealMcp/ProjectMemory.json` into a manageable long-term project memory store with filters, field-level edits, content merge/replace, tag modes, dry-run edits, and safe dry-run deletion.
-- `unreal.skill_list`, `unreal.skill_read`, and `unreal.skill_apply` scan project-local `SKILL.md` or `*.skill` files under `Tools/UnrealMcpSkills` by default. Applying a skill returns its instructions to Chat and can write a memory record of the applied skill/task.
+- `unreal.skill_list`, `unreal.skill_read`, and `unreal.skill_apply` scan `SKILL.md` or `*.skill` files under the active project `Tools/UnrealMcpSkills`, then parent repo roots. Applying a skill returns its instructions to Chat and can write a memory record of the applied skill/task.
 - `unreal.skill_recording_start`, `unreal.skill_recording_stop`, and `unreal.skill_activity_status` manage opt-in local activity recording. Recording is off by default; after explicit start, mutating MCP tool calls/results are logged as high-level metadata, read-only/status tools are skipped, and the editor writes a heartbeat roughly once per minute while recording is active.
 - Activity logs are local-only JSONL files under `Saved/UnrealMcp/ActivityLog/*.jsonl`; generated drafts go to `Saved/UnrealMcp/SkillDrafts/<skill-name>/SKILL.md`.
 - `unreal.skill_distill_from_activity` summarizes a session into a reusable skill draft; `unreal.skill_save_draft` can write a manual draft; `unreal.skill_promote_draft` defaults to dry-run, uses the extension lock, detects conflicts, and can back up/manifest existing promoted skills before writing `Tools/UnrealMcpSkills/<skill-name>/SKILL.md`.

@@ -88,6 +88,7 @@ namespace UnrealMcp
 				|| ToolName == TEXT("unreal.mcp_rollback_last_extension")
 				|| ToolName == TEXT("unreal.mcp_backup_project_state")
 				|| ToolName == TEXT("unreal.mcp_rollback_to_manifest")
+				|| ToolName == TEXT("unreal.tools.import_package")
 				|| ToolName == TEXT("unreal.mcp_supervisor_install")
 				|| ToolName == TEXT("unreal.mcp_generate_tests")
 				|| ToolName == TEXT("unreal.mcp_build_editor")
@@ -101,6 +102,7 @@ namespace UnrealMcp
 			return ToolName == TEXT("unreal.mcp_apply_scaffold")
 				|| ToolName == TEXT("unreal.mcp_rollback_last_extension")
 				|| ToolName == TEXT("unreal.mcp_rollback_to_manifest")
+				|| ToolName == TEXT("unreal.tools.import_package")
 				|| ToolName == TEXT("unreal.mcp_generate_tests")
 				|| ToolName == TEXT("unreal.mcp_extension_pipeline");
 		}
@@ -159,6 +161,12 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.mcp_tool_audit"))
 		{
 			OutResult = AuditMcpTools(ToolsArray);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.tools.export_package"))
+		{
+			OutResult = ExportToolPackage(Arguments);
 			return true;
 		}
 
@@ -312,6 +320,12 @@ namespace UnrealMcp
 			if (ToolName == TEXT("unreal.mcp_rollback_to_manifest"))
 			{
 				OutResult = RollbackToManifest(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.tools.import_package"))
+			{
+				OutResult = ImportToolPackage(Arguments);
 				return true;
 			}
 

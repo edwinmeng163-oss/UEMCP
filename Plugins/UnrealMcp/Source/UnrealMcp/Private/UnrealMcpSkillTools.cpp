@@ -12,6 +12,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UnrealMcpActivityLog.h"
+#include "UnrealMcpSharedPathResolver.h"
 #include "UnrealMcpSession.h"
 
 namespace UnrealMcp
@@ -134,69 +135,26 @@ namespace UnrealMcp
 			return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp/SkillDrafts")));
 		}
 
-		FString NormalizeFullPath(const FString& Path)
+		const TArray<FString>& GetSkillRootContentPatterns()
 		{
-			FString FullPath = FPaths::ConvertRelativePathToFull(Path);
-			FPaths::NormalizeFilename(FullPath);
-			FPaths::CollapseRelativeDirectories(FullPath);
-			return FullPath;
-		}
-
-		FString GetProjectLocalSkillRoot()
-		{
-			return NormalizeFullPath(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpSkills")));
-		}
-
-		void AddUniqueSkillRoot(TArray<FString>& Roots, const FString& Candidate)
-		{
-			for (const FString& Existing : Roots)
-			{
-				if (Existing.Equals(Candidate, ESearchCase::IgnoreCase))
-				{
-					return;
-				}
-			}
-			Roots.Add(Candidate);
+			static const TArray<FString> Patterns = { TEXT("SKILL.md"), TEXT("*.skill") };
+			return Patterns;
 		}
 
 		TArray<FString> GetDefaultProjectSkillRoots()
 		{
 			TArray<FString> Roots;
-			const FString ProjectLocalRoot = GetProjectLocalSkillRoot();
-			Roots.Add(ProjectLocalRoot);
-
-			FString AncestorDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
-			FPaths::NormalizeDirectoryName(AncestorDir);
-			FPaths::CollapseRelativeDirectories(AncestorDir);
-			for (int32 ParentIndex = 0; ParentIndex < 4; ++ParentIndex)
-			{
-				const FString ParentDir = FPaths::GetPath(AncestorDir);
-				if (ParentDir.IsEmpty() || ParentDir.Equals(AncestorDir, ESearchCase::CaseSensitive))
-				{
-					break;
-				}
-				AncestorDir = ParentDir;
-				const FString CandidateRoot = NormalizeFullPath(FPaths::Combine(AncestorDir, TEXT("Tools/UnrealMcpSkills")));
-				if (!CandidateRoot.Equals(ProjectLocalRoot, ESearchCase::IgnoreCase) && FPaths::DirectoryExists(CandidateRoot))
-				{
-					AddUniqueSkillRoot(Roots, CandidateRoot);
-				}
-			}
-
+			FString ResolvedRoot;
+			ResolveSharedRepoRoot(TEXT("UnrealMcpSkills"), GetSkillRootContentPatterns(), ResolvedRoot, Roots);
 			return Roots;
 		}
 
 		FString GetProjectSkillRoot()
 		{
-			const TArray<FString> Roots = GetDefaultProjectSkillRoots();
-			for (const FString& Root : Roots)
-			{
-				if (FPaths::DirectoryExists(Root))
-				{
-					return Root;
-				}
-			}
-			return Roots.Num() > 0 ? Roots[0] : GetProjectLocalSkillRoot();
+			TArray<FString> Roots;
+			FString ResolvedRoot;
+			ResolveSharedRepoRoot(TEXT("UnrealMcpSkills"), GetSkillRootContentPatterns(), ResolvedRoot, Roots);
+			return ResolvedRoot;
 		}
 
 		FString GetSkillPromotionBackupRoot()
@@ -710,7 +668,7 @@ namespace UnrealMcp
 
 		FString GetDefaultProjectSkillRoot()
 		{
-			return GetProjectLocalSkillRoot();
+			return GetProjectSkillRoot();
 		}
 
 		FString SkillNameFromPath(const FString& SkillPath)
@@ -907,6 +865,7 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
 				RootObject->SetStringField(TEXT("root"), ResolvedRoot);
 				RootObject->SetBoolField(TEXT("exists"), FPaths::DirectoryExists(ResolvedRoot));
+				RootObject->SetBoolField(TEXT("hasSkills"), SharedRepoRootHasAny(ResolvedRoot, GetSkillRootContentPatterns()));
 				RootObjects.Add(MakeShared<FJsonValueObject>(RootObject));
 				CollectSkillPathsFromRoot(ResolvedRoot, SkillPaths);
 			}

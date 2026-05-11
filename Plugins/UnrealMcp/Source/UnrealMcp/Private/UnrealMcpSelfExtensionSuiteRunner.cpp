@@ -163,6 +163,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Ar
 	bool bExecuteTool = true;
 	bool bExpectToolListed = true;
 	bool bRunSuite = false;
+	bool bAllowDefaultTestFixtureRoot = false;
 
 	Arguments.TryGetStringField(TEXT("toolName"), ToolName);
 	Arguments.TryGetStringField(TEXT("testRequestPath"), TestRequestPath);
@@ -174,6 +175,15 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Ar
 	Arguments.TryGetBoolField(TEXT("executeTool"), bExecuteTool);
 	Arguments.TryGetBoolField(TEXT("expectToolListed"), bExpectToolListed);
 	Arguments.TryGetBoolField(TEXT("runSuite"), bRunSuite);
+	Arguments.TryGetBoolField(TEXT("__allowDefaultTestFixtureRoot"), bAllowDefaultTestFixtureRoot);
+
+	const bool bHasExplicitTestSelection = Arguments.HasField(TEXT("toolName"))
+		|| Arguments.HasField(TEXT("testRequestPath"))
+		|| Arguments.HasField(TEXT("scaffoldDir"));
+	if (!bHasExplicitTestSelection && !Arguments.HasField(TEXT("readProjectMemory")))
+	{
+		bReadProjectMemory = false;
+	}
 
 	if (bRunSuite)
 	{
@@ -302,6 +312,28 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Ar
 		ResolvedTestRequestPath = FPaths::ConvertRelativePathToFull(TestRequestPath);
 		FPaths::NormalizeFilename(ResolvedTestRequestPath);
 		FPaths::CollapseRelativeDirectories(ResolvedTestRequestPath);
+	}
+	else if (bAllowDefaultTestFixtureRoot && !TestRequestPath.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> DefaultRootArguments = MakeShared<FJsonObject>();
+		DefaultRootArguments->SetBoolField(TEXT("__allowDefaultTestFixtureRoot"), true);
+		FString IgnoredToolName;
+		if (UnrealMcp::ResolveMcpTestsDirectory(*DefaultRootArguments, DefaultResolvedTestsDir, DefaultResolvedScaffoldDir, IgnoredToolName, ResolveFailure, &TestRootCandidates))
+		{
+			FString CandidateTestRequestPath = FPaths::ConvertRelativePathToFull(TestRequestPath);
+			FPaths::NormalizeFilename(CandidateTestRequestPath);
+			FPaths::CollapseRelativeDirectories(CandidateTestRequestPath);
+			if (UnrealMcp::IsPathInsideDirectory(CandidateTestRequestPath, DefaultResolvedScaffoldDir))
+			{
+				ResolvedTestRequestPath = CandidateTestRequestPath;
+				bUsedDefaultTestFixtureRoot = true;
+			}
+		}
+
+		if (ResolvedTestRequestPath.IsEmpty() && !UnrealMcp::ResolveProjectPathInsideProject(TestRequestPath, ResolvedTestRequestPath, ResolveFailure))
+		{
+			return UnrealMcp::MakeExecutionResult(ResolveFailure, nullptr, true);
+		}
 	}
 	else if (!UnrealMcp::ResolveProjectPathInsideProject(TestRequestPath, ResolvedTestRequestPath, ResolveFailure))
 	{
@@ -563,6 +595,14 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 	Arguments.TryGetBoolField(TEXT("fallbackToSingleTest"), bFallbackToSingleTest);
 	Arguments.TryGetBoolField(TEXT("includePassedStructuredContent"), bIncludePassedStructuredContent);
 
+	const bool bHasExplicitTestSelection = Arguments.HasField(TEXT("toolName"))
+		|| Arguments.HasField(TEXT("testsDir"))
+		|| Arguments.HasField(TEXT("scaffoldDir"));
+	if (!bHasExplicitTestSelection && !Arguments.HasField(TEXT("readProjectMemory")))
+	{
+		bReadProjectMemory = false;
+	}
+
 	ToolName = ToolName.TrimStartAndEnd();
 	TestsDir = TestsDir.TrimStartAndEnd();
 	ScaffoldDir = ScaffoldDir.TrimStartAndEnd();
@@ -660,6 +700,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 		SingleArguments->SetBoolField(TEXT("readProjectMemory"), false);
 		SingleArguments->SetBoolField(TEXT("writeProjectMemory"), false);
 		SingleArguments->SetBoolField(TEXT("executeTool"), bExecuteTool);
+		SingleArguments->SetBoolField(TEXT("__allowDefaultTestFixtureRoot"), bUsedDefaultTestFixtureRoot);
 		const FUnrealMcpExecutionResult SingleResult = RunMcpToolTest(*SingleArguments);
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
@@ -720,6 +761,7 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 		TestArguments->SetBoolField(TEXT("readProjectMemory"), false);
 		TestArguments->SetBoolField(TEXT("writeProjectMemory"), false);
 		TestArguments->SetBoolField(TEXT("executeTool"), bExecuteTool);
+		TestArguments->SetBoolField(TEXT("__allowDefaultTestFixtureRoot"), bUsedDefaultTestFixtureRoot);
 
 		const FUnrealMcpExecutionResult TestResult = RunMcpToolTest(*TestArguments);
 		const bool bPassed = !TestResult.bIsError;
