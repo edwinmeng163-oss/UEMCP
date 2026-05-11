@@ -46,7 +46,9 @@ The plugin supports Unreal Engine 5.6 and 5.7 from the same source tree.
 `UEvolve.uproject` is the local development host and defaults its
 `EngineAssociation` to `5.6` as the lower bound; UE 5.7 users can switch the
 local project association when opening or generating project files.
-`Examples/UEvolveExample` is optional validation/demo content.
+Two optional sample-content hosts ship alongside the root:
+`Examples/UEvolveExample` (UE 5.6.1) and `Examples/UEvolveExample57`
+(UE 5.7.4). Pick the variant matching the installed engine.
 
 ## Product Goal
 

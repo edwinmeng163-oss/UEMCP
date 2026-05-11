@@ -9,7 +9,7 @@ after meaningful changes.
 
 This repository is an Unreal Engine 5.6 / 5.7 editor-tooling workbench focused on editor automation, AI-assisted project inspection, Blueprint scaffolding, UMG setup, and local Model Context Protocol workflows.
 
-Its main deliverable is the **Unreal MCP** editor plugin under `Plugins/UnrealMcp`. The plugin exposes Unreal Editor operations through a localhost MCP endpoint and an in-editor chat panel. The repository root includes `UEvolve.uproject` as the default local development host, while `Examples/UEvolveExample` remains an optional validation/demo project.
+Its main deliverable is the **Unreal MCP** editor plugin under `Plugins/UnrealMcp`. The plugin exposes Unreal Editor operations through a localhost MCP endpoint and an in-editor chat panel. The repository root includes `UEvolve.uproject` (UE 5.6) as the default local development host. Two optional sample-content hosts ship alongside it: `Examples/UEvolveExample/UEvolveExample.uproject` for UE 5.6.1 and `Examples/UEvolveExample57/UEvolveExample57.uproject` for UE 5.7.4 — open the one that matches the engine you have installed.
 
 > 📘 **New here?** Start with [`Docs/Release-2026-05.md`](Docs/Release-2026-05.md) — trilingual (中文 · English · 日本語) release notes plus a step-by-step setup guide for macOS, Linux, and Windows, including the multi-provider AI configuration (OpenAI / Kimi / GLM / DeepSeek / Anthropic Claude / Codex) and the Codex Desktop bridge.
 
@@ -28,7 +28,7 @@ Its main deliverable is the **Unreal MCP** editor plugin under `Plugins/UnrealMc
 - 自扩展链路包含 schema 校验、patch 片段校验、dry-run diff、备份 manifest、UBT 编译、测试套件、rollback、project memory 和 supervisor 重启恢复。
 - Skill 蒸馏链路会记录高层 Editor/Chat/MCP 活动到本地 JSONL，并把一次任务/session 总结成可审查的 `SKILL.md` 草稿，确认后再 promote 到项目技能库。
 - 引入多人协作保护：CODEOWNERS、工具命名规范、Manifest schema、extension session lock、ToolRegistry 风险元数据和冲突检测规则。
-- 仓库根目录提供 `UEvolve.uproject` 作为统一的本地开发入口；`Examples/UEvolveExample` 只作为可选示例工程和本地测试资源。
+- 仓库根目录提供 `UEvolve.uproject` 作为统一的本地开发入口；`Examples/UEvolveExample`（UE 5.6.1）和 `Examples/UEvolveExample57`（UE 5.7.4）是两个可选的示例工程，按你装的引擎版本选一个。
 
 ## Current Status
 
@@ -37,7 +37,7 @@ The repository currently contains:
 - `UEvolve.uproject`, the root Unreal Engine 5.6 local development host for the workbench, forward-compatible with UE 5.7.
 - `open_uevolve.command`, a macOS convenience launcher that opens the root host project.
 - `Plugins/UnrealMcp`, an editor plugin for local MCP and in-editor AI/chat workflows.
-- `Examples/UEvolveExample`, an optional Unreal Engine 5.6 / 5.7 C++ example project used to validate the plugin with sample content.
+- `Examples/UEvolveExample` (UE 5.6.1) and `Examples/UEvolveExample57` (UE 5.7.4), two optional C++ example projects used to validate the plugin with sample content — open whichever matches the engine you have installed.
 - Git LFS setup for Unreal binary assets.
 - Project-level README and ignore rules suitable for public GitHub hosting.
 - Self-extension safety rails: schema validation, patch-fragment validation, dry-run diffs, backups, build/test handoff, rollback manifests, project memory, and project-local skills.
@@ -513,10 +513,11 @@ Then open your own `.uproject`, enable `UnrealMcp` if prompted, and rebuild the 
 
 For the full self-extension workbench experience, also copy the repository `Tools/`, `Schemas/`, and `Docs/` folders into your project root. The plugin can run without them for basic MCP/chat usage, but versioned tests, skill templates, supervisor launchers, manifests, documentation health checks, and generated scaffolds use those project-root folders.
 
-The repository also includes an optional example host project:
+The repository also includes two optional example host projects — pick the one that matches your installed engine:
 
 ```text
-Examples/UEvolveExample/UEvolveExample.uproject
+Examples/UEvolveExample/UEvolveExample.uproject       (UE 5.6.1)
+Examples/UEvolveExample57/UEvolveExample57.uproject   (UE 5.7.4)
 ```
 
 For local development in this repository, use the root host project instead:
@@ -540,14 +541,14 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## Deployment Guide / 部署指南
 
-UEvolve is an Unreal Editor plugin workflow rather than a packaged game/server deployment. The repository root is the canonical local development checkout: `UEvolve.uproject` loads the workbench plugin, `Plugins/UnrealMcp` is the reusable plugin, and `Examples/UEvolveExample` is only a sample project for validation.
+UEvolve is an Unreal Editor plugin workflow rather than a packaged game/server deployment. The repository root is the canonical local development checkout: `UEvolve.uproject` loads the workbench plugin, `Plugins/UnrealMcp` is the reusable plugin, and `Examples/UEvolveExample` (UE 5.6.1) and `Examples/UEvolveExample57` (UE 5.7.4) are two sample projects for validation — pick the one matching your installed engine.
 
 There are four common entry points:
 
 - Root local development host: open `UEvolve.uproject` from the repository root, or run `./open_uevolve.command` on macOS.
 - Windows root local development host: run `.\open_uevolve.ps1` from PowerShell, or double-click `UEvolve.uproject`.
 - Existing project install: copy or symlink `Plugins/UnrealMcp` into `<YourProject>/Plugins/UnrealMcp`, copy `Tools/`, `Schemas/`, and `Docs/` for the full self-extension workflow, enable `UnrealMcp` plus `PythonScriptPlugin`, then compile that project.
-- Example project install: open `Examples/UEvolveExample/UEvolveExample.uproject` only when you want to test the plugin with bundled sample content.
+- Example project install: open `Examples/UEvolveExample/UEvolveExample.uproject` (UE 5.6.1) or `Examples/UEvolveExample57/UEvolveExample57.uproject` (UE 5.7.4) when you want to test the plugin with bundled sample content.
 
 The root `Config/` folder is committed as a safe template. It disables Android File Server by default and keeps `SecurityToken=` empty so repository checkouts do not carry machine-local credentials. If Unreal generates local tokens or user-specific editor settings after launch, keep them local and do not commit them.
 
@@ -673,7 +674,7 @@ For a command-line editor build on macOS:
 
 If the editor asks to rebuild modules on first open, allow it to rebuild.
 
-The bundled sample project remains available at `Examples/UEvolveExample/UEvolveExample.uproject`, but the root host is the default path used by the README and supervisor.
+Two bundled sample projects remain available: `Examples/UEvolveExample/UEvolveExample.uproject` (UE 5.6.1) and `Examples/UEvolveExample57/UEvolveExample57.uproject` (UE 5.7.4); the root host is the default path used by the README and supervisor.
 
 ### 5. Windows Deployment Notes
 

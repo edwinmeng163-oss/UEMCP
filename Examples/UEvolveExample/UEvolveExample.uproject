@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"EngineAssociation": "5.6",
 	"Category": "Editor Automation",
-	"Description": "UEvolve example host project for the Unreal MCP self-extension workbench.",
+	"Description": "UEvolve example host project for the Unreal MCP self-extension workbench (UE 5.6 variant; the 5.7 variant lives next to this one under Examples/UEvolveExample57).",
 	"AdditionalPluginDirectories": [
 		"../../Plugins"
 	],
