@@ -12,6 +12,7 @@ class SEditableTextBox;
 class SScrollBox;
 class STextBlock;
 class SVerticalBox;
+enum class EAiProviderKind : uint8;
 struct FUnrealMcpExecutionResult;
 
 enum class EUnrealMcpChatEntryType : uint8
@@ -32,6 +33,7 @@ struct FUnrealMcpChatEntry
 	FString ToolCallId;
 	bool bIsError = false;
 	bool bIsPending = false;
+	bool bToolCardExpanded = false;
 };
 
 struct FUnrealMcpSkillOption
@@ -66,8 +68,12 @@ private:
 	FReply HandleWriteCurrentTaskMemoryClicked();
 	void HandleInputCommitted(const FText& InText, ETextCommit::Type CommitType);
 	void HandlePresetClicked(FString CommandText);
+	void HandleProviderSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo); void HandleModelSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo); void HandleModelTextCommitted(const FText& InText, ETextCommit::Type CommitType);
 	void HandleSkillSelectionChanged(TSharedPtr<FUnrealMcpSkillOption> NewSelection, ESelectInfo::Type SelectInfo);
 	void HandleSkillApplyModeChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo);
+	void RefreshProviderOptions(); void RefreshModelOptionsForActiveProvider(); void LoadRecentModelsFromDisk(); void SaveRecentModelsToDisk() const;
+	void SetActiveProviderById(const FString& NewId); void RememberRecentModel(const FString& ProviderId, const FString& Model);
+	FText GetCurrentProviderDisplayText() const; FText GetCurrentModelDisplayText() const; bool IsActiveProviderModelLocked() const; static FString KindShortName(EAiProviderKind Kind);
 	void SendCurrentInput();
 	void SendCommand(const FString& CommandText);
 	void StopAssistantRequest();
@@ -92,7 +98,7 @@ private:
 	TSharedPtr<FUnrealMcpChatEntry> AppendToolCard(const FString& ToolName, const FString& ToolCallId, const FString& ArgumentsJson);
 	void AddEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry);
 	void AddEntryWidgetToPane(const TSharedPtr<FUnrealMcpChatEntry>& Entry, bool bScrollAfterAdd);
-	TSharedRef<SWidget> BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry) const;
+	TSharedRef<SWidget> BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry);
 	void RebuildEntryWidgets(bool bScrollTranscript, bool bScrollToolLog);
 	void InvalidateEntryWidgets();
 	bool MoveEntryToEnd(const TSharedPtr<FUnrealMcpChatEntry>& Entry);
@@ -100,6 +106,10 @@ private:
 	void ScrollToolLogToEnd();
 	EActiveTimerReturnType HandleDeferredTranscriptScroll(double InCurrentTime, float InDeltaTime);
 	EActiveTimerReturnType HandleDeferredToolLogScroll(double InCurrentTime, float InDeltaTime);
+	FText GetActiveRequestProgressText() const;
+	FString BuildEntryCopyText(const FUnrealMcpChatEntry& Entry) const;
+	bool IsTranscriptNearBottom() const;
+	FReply HandleEntryCopyClicked(TSharedPtr<FUnrealMcpChatEntry> Entry);
 	void LoadHistory();
 	void SaveHistory() const;
 	void ResetHistory(bool bAddReadyMessage);
@@ -117,6 +127,7 @@ private:
 	mutable FString LastRagContextPrompt;
 	mutable FString LastRagContextBlock;
 	bool bAssistantRequestInFlight = false;
+	FDateTime ActiveAssistantRequestStartTime;
 	bool bHasInjectedPersistedContextThisSession = false;
 	TArray<TSharedPtr<FUnrealMcpChatEntry>> Entries;
 	TMap<FString, TSharedPtr<FUnrealMcpChatEntry>> ToolEntriesByCallId;
@@ -124,11 +135,15 @@ private:
 	TSharedPtr<FUnrealMcpSkillOption> SelectedSkill;
 	TArray<TSharedPtr<FString>> SkillApplyModes;
 	TSharedPtr<FString> SelectedSkillApplyMode;
+	TArray<TSharedPtr<FString>> ProviderOptionIds; TSharedPtr<FString> SelectedProviderId;
+	TArray<TSharedPtr<FString>> ModelOptions; TSharedPtr<FString> SelectedModel;
+	TMap<FString, TArray<FString>> RecentModelsByProvider;
 	TSharedPtr<FUnrealMcpChatEntry> ActiveAssistantEntry;
 	TSharedPtr<IUnrealMcpAssistantHandle, ESPMode::ThreadSafe> ActiveAssistantHandle;
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveAiTestRequest;
 	TSharedPtr<SEditableTextBox> InputTextBox;
 	TSharedPtr<SEditableTextBox> SkillTaskTextBox;
+	TSharedPtr<SEditableTextBox> ModelEditableTextBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ProviderComboBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ModelComboBox;
 	TSharedPtr<SComboBox<TSharedPtr<FUnrealMcpSkillOption>>> SkillComboBox;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> SkillApplyModeComboBox;
 	TSharedPtr<STextBlock> SkillDescriptionText;
@@ -137,7 +152,9 @@ private:
 	TSharedPtr<SScrollBox> ToolLogScrollBox;
 	TSharedPtr<SVerticalBox> ToolLogEntriesBox;
 	bool bDeferredTranscriptScrollActive = false;
+	bool bDeferredTranscriptShouldAutoScroll = true;
 	int32 DeferredTranscriptScrollFrames = 0;
 	bool bDeferredToolLogScrollActive = false;
+	bool bDeferredToolLogShouldAutoScroll = true;
 	int32 DeferredToolLogScrollFrames = 0;
 };

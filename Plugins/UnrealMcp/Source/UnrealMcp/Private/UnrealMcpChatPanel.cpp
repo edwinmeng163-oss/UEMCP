@@ -19,11 +19,13 @@
 #include "Styling/AppStyle.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSettings.h"
+#include "Widgets/Images/SThrobber.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSpacer.h"
@@ -74,6 +76,37 @@ namespace UnrealMcpChat
 		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("ChatHistory.json"));
 	}
 
+	FString GetChatPanelStateFilePath()
+	{
+		return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("chat_panel.json"));
+	}
+
+	const FAiProviderConfig* FindProviderById(const UUnrealMcpSettings& Settings, const FString& ProviderId)
+	{
+		for (const FAiProviderConfig& Provider : Settings.Providers)
+		{ if (Provider.Id.Equals(ProviderId, ESearchCase::CaseSensitive)) { return &Provider; } }
+		return nullptr;
+	}
+
+	FAiProviderConfig* FindMutableProviderById(UUnrealMcpSettings& Settings, const FString& ProviderId)
+	{
+		for (FAiProviderConfig& Provider : Settings.Providers)
+		{ if (Provider.Id.Equals(ProviderId, ESearchCase::CaseSensitive)) { return &Provider; } }
+		return nullptr;
+	}
+
+	FString ProviderKindShortName(EAiProviderKind Kind)
+	{
+		switch (Kind)
+		{ case EAiProviderKind::OpenAiResponses: return TEXT("OpenAI"); case EAiProviderKind::OpenAiChatCompat: return TEXT("OpenAI-compat"); case EAiProviderKind::AnthropicMessages: return TEXT("Anthropic"); case EAiProviderKind::Codex: return TEXT("Codex"); case EAiProviderKind::CodexAppServer: return TEXT("CodexDesktop"); default: return TEXT("Unknown"); }
+	}
+
+	FString FormatProviderLabel(const FAiProviderConfig& Provider)
+	{
+		const FString DisplayName = Provider.DisplayName.TrimStartAndEnd().IsEmpty() ? Provider.Id : Provider.DisplayName.TrimStartAndEnd();
+		return FString::Printf(TEXT("%s (%s)"), *DisplayName, *ProviderKindShortName(Provider.Kind));
+	}
+
 	FLinearColor GetBorderColor(const FUnrealMcpChatEntry& Entry)
 	{
 		switch (Entry.Type)
@@ -92,12 +125,17 @@ namespace UnrealMcpChat
 
 	FLinearColor GetBackgroundColor(const FUnrealMcpChatEntry& Entry)
 	{
+		if (Entry.bIsError)
+		{
+			return FLinearColor(0.40f, 0.10f, 0.10f, 0.40f);
+		}
+
 		switch (Entry.Type)
 		{
 		case EUnrealMcpChatEntryType::User:
 			return FLinearColor(0.08f, 0.12f, 0.18f, 0.95f);
 		case EUnrealMcpChatEntryType::Assistant:
-			return Entry.bIsError ? FLinearColor(0.20f, 0.08f, 0.08f, 0.95f) : FLinearColor(0.08f, 0.16f, 0.10f, 0.95f);
+			return FLinearColor(0.08f, 0.16f, 0.10f, 0.95f);
 		case EUnrealMcpChatEntryType::Tool:
 			return FLinearColor(0.18f, 0.14f, 0.07f, 0.95f);
 		case EUnrealMcpChatEntryType::System:
@@ -171,6 +209,50 @@ namespace UnrealMcpChat
 		}
 
 		return FString::Join(Lines, TEXT("\n"));
+	}
+
+	FString GetToolStatusIcon(const FUnrealMcpChatEntry& Entry)
+	{
+		if (Entry.bIsPending)
+		{
+			return TEXT("...");
+		}
+
+		return Entry.bIsError ? TEXT("✗") : TEXT("✓");
+	}
+
+	FString BuildEntryTitleText(const FUnrealMcpChatEntry& Entry)
+	{
+		const FString ErrorPrefix = Entry.bIsError ? TEXT("⚠ ") : FString();
+		if (Entry.Type == EUnrealMcpChatEntryType::Tool)
+		{
+			const FString Status = Entry.bIsPending ? TEXT("running") : (Entry.bIsError ? TEXT("error") : TEXT("done"));
+			return FString::Printf(TEXT("%s%s Tool • %s (%s)"), *ErrorPrefix, *GetToolStatusIcon(Entry), *Entry.Title, *Status);
+		}
+
+		return ErrorPrefix + Entry.Speaker;
+	}
+
+	FSlateColor GetEntryTitleColor(const FUnrealMcpChatEntry& Entry)
+	{
+		return Entry.bIsError ? FSlateColor(FLinearColor(1.0f, 0.60f, 0.60f, 1.0f)) : FSlateColor::UseForeground();
+	}
+
+	bool IsScrollBoxNearBottom(const TSharedPtr<SScrollBox>& ScrollBox)
+	{
+		if (!ScrollBox.IsValid())
+		{
+			return true;
+		}
+
+		if (ScrollBox->GetViewOffsetFraction() > 0.95f)
+		{
+			return true;
+		}
+
+		const float ScrollOffset = ScrollBox->GetScrollOffset();
+		const float EndOffset = ScrollBox->GetScrollOffsetOfEnd();
+		return EndOffset <= 0.0f || (EndOffset - ScrollOffset) <= 50.0f;
 	}
 
 	TSharedRef<SWidget> MakeSelectableReadOnlyText(
@@ -625,6 +707,9 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 		MakeShared<FString>(UnrealMcpChat::SkillApplyModeAskNow())
 	};
 	SelectedSkillApplyMode = SkillApplyModes.IsValidIndex(1) ? SkillApplyModes[1] : nullptr;
+	LoadRecentModelsFromDisk();
+	RefreshProviderOptions();
+	RefreshModelOptionsForActiveProvider();
 
 	ChildSlot
 	[
@@ -784,6 +869,135 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 					.AutoHeight()
 					[
 						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SHorizontalBox)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() == 0 ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+							[
+								SNew(STextBlock)
+								.Font(FAppStyle::GetFontStyle("SmallFont"))
+								.Text(LOCTEXT("NoAiProvidersConfigured", "No AI providers configured. Open AI Settings to add one."))
+							]
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							[
+								SNew(SButton)
+								.Text(LOCTEXT("NoAiProvidersSettingsButton", "AI Settings"))
+								.OnClicked(this, &SUnrealMcpChatPanel::HandleOpenAiSettingsClicked)
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox)
+							.MinDesiredWidth(200.0f)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							[
+								SAssignNew(ProviderComboBox, SComboBox<TSharedPtr<FString>>)
+								.OptionsSource(&ProviderOptionIds)
+								.InitiallySelectedItem(SelectedProviderId)
+								.OnGenerateWidget_Lambda([this](TSharedPtr<FString> ProviderId)
+								{
+									FString Label = ProviderId.IsValid() ? *ProviderId : TEXT("<provider>");
+									if (const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>())
+									{
+										if (ProviderId.IsValid())
+										{
+											if (const FAiProviderConfig* Provider = UnrealMcpChat::FindProviderById(*Settings, *ProviderId))
+											{
+												Label = UnrealMcpChat::FormatProviderLabel(*Provider);
+											}
+										}
+									}
+									return SNew(STextBlock).Text(FText::FromString(Label));
+								})
+								.OnSelectionChanged(this, &SUnrealMcpChatPanel::HandleProviderSelectionChanged)
+								.ToolTipText_Lambda([this]()
+								{
+									return bAssistantRequestInFlight
+										? LOCTEXT("ProviderInFlightTooltip", "Changes apply to the next request - current run continues.")
+										: LOCTEXT("ProviderSelectorTooltip", "Select the AI provider used for the next request.");
+								})
+								[
+									SNew(STextBlock)
+									.Text_Lambda([this]()
+									{
+										return FText::FromString(TEXT("Provider: ") + GetCurrentProviderDisplayText().ToString());
+									})
+								]
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox)
+							.MinDesiredWidth(200.0f)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() > 0 && !IsActiveProviderModelLocked() ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							[
+								SAssignNew(ModelComboBox, SComboBox<TSharedPtr<FString>>)
+								.OptionsSource(&ModelOptions)
+								.InitiallySelectedItem(SelectedModel)
+								.OnGenerateWidget_Lambda([](TSharedPtr<FString> Model)
+								{
+									return SNew(STextBlock).Text(FText::FromString(Model.IsValid() ? *Model : TEXT("<model>")));
+								})
+								.OnSelectionChanged(this, &SUnrealMcpChatPanel::HandleModelSelectionChanged)
+								.ToolTipText_Lambda([this]()
+								{
+									return bAssistantRequestInFlight
+										? LOCTEXT("ModelInFlightTooltip", "Changes apply to the next request - current run continues.")
+										: LOCTEXT("ModelSelectorTooltip", "Edit the active provider model, or pick a recent model.");
+								})
+								[
+									SAssignNew(ModelEditableTextBox, SEditableTextBox)
+									.Text(GetCurrentModelDisplayText())
+									.HintText(LOCTEXT("ModelSelectorLabel", "Model"))
+									.SelectAllTextWhenFocused(true)
+									.OnTextCommitted(this, &SUnrealMcpChatPanel::HandleModelTextCommitted)
+									.ToolTipText_Lambda([this]()
+									{
+										return bAssistantRequestInFlight
+											? LOCTEXT("ModelTextInFlightTooltip", "Changes apply to the next request - current run continues.")
+											: LOCTEXT("ModelTextTooltip", "Type a model id and press Enter, or leave the field to save it.");
+									})
+								]
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SBox)
+							.MinDesiredWidth(200.0f)
+							.Visibility_Lambda([this]()
+							{
+								return ProviderOptionIds.Num() > 0 && IsActiveProviderModelLocked() ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							.ToolTipText(LOCTEXT("CodexLockedModelTooltip", "Codex variants are hard-locked to gpt-5.5 with xhigh reasoning per project policy."))
+							[
+								SNew(STextBlock)
+								.Text(this, &SUnrealMcpChatPanel::GetCurrentModelDisplayText)
+							]
+						]
 						+ SHorizontalBox::Slot()
 						.AutoWidth()
 						.Padding(0.0f, 0.0f, 6.0f, 0.0f)
@@ -979,6 +1193,36 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 				]
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				[
+					SNew(SHorizontalBox)
+					.Visibility_Lambda([this]()
+					{
+						return bAssistantRequestInFlight ? EVisibility::Visible : EVisibility::Collapsed;
+					})
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SThrobber)
+						.Visibility_Lambda([this]()
+						{
+							return bAssistantRequestInFlight ? EVisibility::Visible : EVisibility::Collapsed;
+						})
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("SmallFont"))
+						.Text(this, &SUnrealMcpChatPanel::GetActiveRequestProgressText)
+					]
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
 				.Padding(0.0f, 0.0f, 6.0f, 0.0f)
 				[
 					SNew(SButton)
@@ -1070,6 +1314,20 @@ FReply SUnrealMcpChatPanel::HandleCopyToolLogClicked()
 	{
 		FPlatformApplicationMisc::ClipboardCopy(*ToolLogText);
 	}
+	return FReply::Handled();
+}
+
+FReply SUnrealMcpChatPanel::HandleEntryCopyClicked(TSharedPtr<FUnrealMcpChatEntry> Entry)
+{
+	if (Entry.IsValid())
+	{
+		const FString EntryText = BuildEntryCopyText(*Entry);
+		if (!EntryText.IsEmpty())
+		{
+			FPlatformApplicationMisc::ClipboardCopy(*EntryText);
+		}
+	}
+
 	return FReply::Handled();
 }
 
@@ -1277,6 +1535,229 @@ void SUnrealMcpChatPanel::HandleInputCommitted(const FText& InText, ETextCommit:
 void SUnrealMcpChatPanel::HandlePresetClicked(FString CommandText)
 {
 	SendCommand(CommandText);
+}
+
+void SUnrealMcpChatPanel::HandleProviderSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo)
+{
+	if (!NewSelection.IsValid()) { return; }
+	SelectedProviderId = NewSelection;
+	if (SelectInfo != ESelectInfo::Direct) { SetActiveProviderById(*NewSelection); }
+}
+
+void SUnrealMcpChatPanel::HandleModelSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type SelectInfo)
+{
+	if (!NewSelection.IsValid() || IsActiveProviderModelLocked()) { return; }
+	SelectedModel = NewSelection;
+	if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(FText::FromString(*NewSelection)); }
+	if (SelectInfo != ESelectInfo::Direct) { HandleModelTextCommitted(FText::FromString(*NewSelection), ETextCommit::OnEnter); }
+}
+
+void SUnrealMcpChatPanel::HandleModelTextCommitted(const FText& InText, ETextCommit::Type CommitType)
+{
+	if (IsActiveProviderModelLocked() || (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)) { return; }
+	const FString Model = InText.ToString().TrimStartAndEnd();
+	if (Model.IsEmpty()) { return; }
+	UUnrealMcpSettings* Settings = GetMutableDefault<UUnrealMcpSettings>();
+	if (!Settings) { return; }
+	FAiProviderConfig* Provider = Settings->FindActiveProvider() ? UnrealMcpChat::FindMutableProviderById(*Settings, Settings->ActiveProviderId) : nullptr;
+	if (!Provider) { return; }
+	const FString ProviderId = Provider->Id;
+	if (!Provider->Model.Equals(Model, ESearchCase::CaseSensitive)) { Provider->Model = Model; Settings->SaveConfig(); }
+	RememberRecentModel(ProviderId, Model);
+	RefreshModelOptionsForActiveProvider();
+}
+
+void SUnrealMcpChatPanel::RefreshProviderOptions()
+{
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	ProviderOptionIds.Reset();
+	SelectedProviderId.Reset();
+	if (!Settings) { return; }
+
+	TArray<const FAiProviderConfig*> SortedProviders;
+	for (const FAiProviderConfig& Provider : Settings->Providers) { SortedProviders.Add(&Provider); }
+
+	SortedProviders.Sort([](const FAiProviderConfig& A, const FAiProviderConfig& B)
+	{
+		const FString ADisplay = A.DisplayName.TrimStartAndEnd().IsEmpty() ? A.Id : A.DisplayName.TrimStartAndEnd();
+		const FString BDisplay = B.DisplayName.TrimStartAndEnd().IsEmpty() ? B.Id : B.DisplayName.TrimStartAndEnd();
+		const int32 DisplayCompare = ADisplay.Compare(BDisplay, ESearchCase::IgnoreCase);
+		if (DisplayCompare != 0) { return DisplayCompare < 0; }
+		const FString AId = A.Id;
+		const FString BId = B.Id;
+		return AId.Compare(BId, ESearchCase::IgnoreCase) < 0;
+	});
+
+	for (const FAiProviderConfig* Provider : SortedProviders)
+	{
+		if (!Provider || Provider->Id.TrimStartAndEnd().IsEmpty()) { continue; }
+		TSharedPtr<FString> OptionId = MakeShared<FString>(Provider->Id);
+		ProviderOptionIds.Add(OptionId);
+		if (Provider->Id.Equals(Settings->ActiveProviderId, ESearchCase::CaseSensitive)) { SelectedProviderId = OptionId; }
+	}
+
+	if (!SelectedProviderId.IsValid() && ProviderOptionIds.Num() > 0) { SelectedProviderId = ProviderOptionIds[0]; }
+	if (ProviderComboBox.IsValid())
+	{ ProviderComboBox->RefreshOptions(); ProviderComboBox->SetSelectedItem(SelectedProviderId); }
+}
+
+void SUnrealMcpChatPanel::RefreshModelOptionsForActiveProvider()
+{
+	ModelOptions.Reset();
+	SelectedModel.Reset();
+
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	const FAiProviderConfig* Provider = Settings ? Settings->FindActiveProvider() : nullptr;
+	if (!Provider)
+	{
+		if (ModelComboBox.IsValid()) { ModelComboBox->RefreshOptions(); ModelComboBox->ClearSelection(); }
+		if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(FText::GetEmpty()); }
+		return;
+	}
+
+	const FString CurrentModel = IsActiveProviderModelLocked() ? TEXT("gpt-5.5") : Provider->Model.TrimStartAndEnd();
+	TSet<FString> SeenModels;
+	if (!CurrentModel.IsEmpty()) { SelectedModel = MakeShared<FString>(CurrentModel); ModelOptions.Add(SelectedModel); SeenModels.Add(CurrentModel); }
+
+	const TArray<FString>* RecentModels = RecentModelsByProvider.Find(Provider->Id);
+	int32 RecentAdded = 0;
+	if (RecentModels)
+	{
+		for (const FString& RecentModel : *RecentModels)
+		{
+			const FString TrimmedRecentModel = RecentModel.TrimStartAndEnd();
+			if (TrimmedRecentModel.IsEmpty() || SeenModels.Contains(TrimmedRecentModel)) { continue; }
+			ModelOptions.Add(MakeShared<FString>(TrimmedRecentModel));
+			SeenModels.Add(TrimmedRecentModel);
+			if (++RecentAdded >= 3) { break; }
+		}
+	}
+
+	if (!SelectedModel.IsValid()) { SelectedModel = MakeShared<FString>(FString()); }
+	if (ModelComboBox.IsValid())
+	{ ModelComboBox->RefreshOptions(); ModelComboBox->SetSelectedItem(ModelOptions.Num() > 0 ? SelectedModel : TSharedPtr<FString>()); }
+	if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(GetCurrentModelDisplayText()); }
+}
+
+void SUnrealMcpChatPanel::LoadRecentModelsFromDisk()
+{
+	RecentModelsByProvider.Reset();
+
+	FString JsonText;
+	if (!FFileHelper::LoadFileToString(JsonText, *UnrealMcpChat::GetChatPanelStateFilePath())) { return; }
+
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+	{ UE_LOG(LogTemp, Verbose, TEXT("[UnrealMcp] Ignoring corrupt chat panel state file.")); return; }
+
+	const TSharedPtr<FJsonObject>* RecentModelsObject = nullptr;
+	if (!RootObject->TryGetObjectField(TEXT("recentModels"), RecentModelsObject) || !RecentModelsObject || !(*RecentModelsObject).IsValid()) { return; }
+
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*RecentModelsObject)->Values)
+	{
+		if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Array) { continue; }
+
+		TArray<FString> Models;
+		for (const TSharedPtr<FJsonValue>& ModelValue : Pair.Value->AsArray())
+		{
+			if (!ModelValue.IsValid() || ModelValue->Type != EJson::String) { continue; }
+			const FString Model = ModelValue->AsString().TrimStartAndEnd();
+			if (!Model.IsEmpty() && !Models.Contains(Model)) { Models.Add(Model); }
+			if (Models.Num() >= 3) { break; }
+		}
+		if (Models.Num() > 0) { RecentModelsByProvider.Add(Pair.Key, Models); }
+	}
+}
+
+void SUnrealMcpChatPanel::SaveRecentModelsToDisk() const
+{
+	const FString StatePath = UnrealMcpChat::GetChatPanelStateFilePath();
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(StatePath), true);
+
+	TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
+	TSharedPtr<FJsonObject> RecentModelsObject = MakeShared<FJsonObject>();
+	for (const TPair<FString, TArray<FString>>& Pair : RecentModelsByProvider)
+	{
+		TArray<TSharedPtr<FJsonValue>> ModelValues;
+		for (const FString& Model : Pair.Value)
+		{
+			const FString TrimmedModel = Model.TrimStartAndEnd();
+			if (!TrimmedModel.IsEmpty()) { ModelValues.Add(MakeShared<FJsonValueString>(TrimmedModel)); }
+		}
+		RecentModelsObject->SetArrayField(Pair.Key, ModelValues);
+	}
+	RootObject->SetObjectField(TEXT("recentModels"), RecentModelsObject);
+
+	FString JsonText;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonText);
+	FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer);
+	if (!FFileHelper::SaveStringToFile(JsonText, *StatePath))
+	{ UE_LOG(LogTemp, Warning, TEXT("[UnrealMcp] Failed to save chat panel state file: %s"), *StatePath); }
+}
+
+void SUnrealMcpChatPanel::SetActiveProviderById(const FString& NewId)
+{
+	UUnrealMcpSettings* Settings = GetMutableDefault<UUnrealMcpSettings>();
+	if (!Settings || NewId.TrimStartAndEnd().IsEmpty()) { return; }
+
+	FAiProviderConfig* Provider = UnrealMcpChat::FindMutableProviderById(*Settings, NewId);
+	if (!Provider) { return; }
+
+	Settings->ActiveProviderId = NewId;
+	Settings->SaveConfig();
+	SelectedProviderId = MakeShared<FString>(NewId);
+	RefreshProviderOptions();
+	RefreshModelOptionsForActiveProvider();
+
+	const FString DisplayName = Provider->DisplayName.TrimStartAndEnd().IsEmpty() ? Provider->Id : Provider->DisplayName.TrimStartAndEnd();
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), FString::Printf(TEXT("Provider switched to %s. The change applies to the next request."), *DisplayName));
+}
+
+void SUnrealMcpChatPanel::RememberRecentModel(const FString& ProviderId, const FString& Model)
+{
+	const FString TrimmedProviderId = ProviderId.TrimStartAndEnd();
+	const FString TrimmedModel = Model.TrimStartAndEnd();
+	if (TrimmedProviderId.IsEmpty() || TrimmedModel.IsEmpty()) { return; }
+
+	TArray<FString>& Models = RecentModelsByProvider.FindOrAdd(TrimmedProviderId);
+	const TArray<FString> PreviousModels = Models;
+	Models.RemoveAll([&TrimmedModel](const FString& Existing)
+	{
+		return Existing.Equals(TrimmedModel, ESearchCase::CaseSensitive);
+	});
+	Models.Insert(TrimmedModel, 0);
+	while (Models.Num() > 3) { Models.RemoveAt(Models.Num() - 1); }
+	if (Models != PreviousModels) { SaveRecentModelsToDisk(); }
+}
+
+FText SUnrealMcpChatPanel::GetCurrentProviderDisplayText() const
+{
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	if (!Settings || !SelectedProviderId.IsValid()) { return FText::FromString(TEXT("No provider")); }
+
+	const FAiProviderConfig* Provider = UnrealMcpChat::FindProviderById(*Settings, *SelectedProviderId);
+	return FText::FromString(Provider ? UnrealMcpChat::FormatProviderLabel(*Provider) : *SelectedProviderId);
+}
+
+FText SUnrealMcpChatPanel::GetCurrentModelDisplayText() const
+{
+	if (IsActiveProviderModelLocked()) { return FText::FromString(TEXT("gpt-5.5 (locked)")); }
+	return FText::FromString(SelectedModel.IsValid() ? *SelectedModel : FString());
+}
+
+bool SUnrealMcpChatPanel::IsActiveProviderModelLocked() const
+{
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	if (!Settings) { return false; }
+	const FString ProviderId = SelectedProviderId.IsValid() ? *SelectedProviderId : Settings->ActiveProviderId;
+	const FAiProviderConfig* Provider = UnrealMcpChat::FindProviderById(*Settings, ProviderId);
+	return Provider && (Provider->Kind == EAiProviderKind::Codex || Provider->Kind == EAiProviderKind::CodexAppServer);
+}
+
+FString SUnrealMcpChatPanel::KindShortName(EAiProviderKind Kind)
+{
+	return UnrealMcpChat::ProviderKindShortName(Kind);
 }
 
 void SUnrealMcpChatPanel::HandleSkillSelectionChanged(TSharedPtr<FUnrealMcpSkillOption> NewSelection, ESelectInfo::Type SelectInfo)
@@ -1735,6 +2216,7 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 	}
 
 	bAssistantRequestInFlight = true;
+	ActiveAssistantRequestStartTime = FDateTime::UtcNow();
 	ActiveAssistantEntry = AppendMessage(EUnrealMcpChatEntryType::Assistant, TEXT("Unreal MCP AI"), FString());
 	if (ActiveAssistantEntry.IsValid())
 	{
@@ -1836,6 +2318,7 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 			if (const TSharedPtr<SUnrealMcpChatPanel> PinnedThis = WeakPanel.Pin())
 			{
 				PinnedThis->bAssistantRequestInFlight = false;
+				PinnedThis->ActiveAssistantRequestStartTime = FDateTime();
 				PinnedThis->ActiveAssistantHandle.Reset();
 				if (!Result.bIsError && !Result.ResponseId.IsEmpty())
 				{
@@ -1932,6 +2415,8 @@ void SUnrealMcpChatPanel::AddEntryWidgetToPane(const TSharedPtr<FUnrealMcpChatEn
 	}
 
 	const bool bIsToolEntry = Entry->Type == EUnrealMcpChatEntryType::Tool;
+	const bool bShouldAutoScroll = bScrollAfterAdd
+		&& (bIsToolEntry ? UnrealMcpChat::IsScrollBoxNearBottom(ToolLogScrollBox) : IsTranscriptNearBottom());
 	TSharedPtr<SVerticalBox> TargetEntriesBox = bIsToolEntry ? ToolLogEntriesBox : TranscriptEntriesBox;
 	if (!TargetEntriesBox.IsValid())
 	{
@@ -1945,7 +2430,7 @@ void SUnrealMcpChatPanel::AddEntryWidgetToPane(const TSharedPtr<FUnrealMcpChatEn
 		BuildEntryWidget(Entry)
 	];
 
-	if (!bScrollAfterAdd)
+	if (!bShouldAutoScroll)
 	{
 		return;
 	}
@@ -1962,6 +2447,9 @@ void SUnrealMcpChatPanel::AddEntryWidgetToPane(const TSharedPtr<FUnrealMcpChatEn
 
 void SUnrealMcpChatPanel::RebuildEntryWidgets(bool bScrollTranscript, bool bScrollToolLog)
 {
+	const bool bShouldScrollTranscript = bScrollTranscript && IsTranscriptNearBottom();
+	const bool bShouldScrollToolLog = bScrollToolLog && UnrealMcpChat::IsScrollBoxNearBottom(ToolLogScrollBox);
+
 	if (TranscriptEntriesBox.IsValid())
 	{
 		TranscriptEntriesBox->ClearChildren();
@@ -1978,18 +2466,131 @@ void SUnrealMcpChatPanel::RebuildEntryWidgets(bool bScrollTranscript, bool bScro
 	}
 
 	InvalidateEntryWidgets();
-	if (bScrollTranscript)
+	if (bShouldScrollTranscript)
 	{
 		ScrollTranscriptToEnd();
 	}
-	if (bScrollToolLog)
+	if (bShouldScrollToolLog)
 	{
 		ScrollToolLogToEnd();
 	}
 }
 
-TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry) const
+TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry)
 {
+	if (Entry->Type == EUnrealMcpChatEntryType::Tool)
+	{
+		return SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderBackgroundColor_Lambda([Entry]()
+			{
+				return UnrealMcpChat::GetBorderColor(*Entry);
+			})
+			.Padding(1.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor_Lambda([Entry]()
+				{
+					return UnrealMcpChat::GetBackgroundColor(*Entry);
+				})
+				.Padding(10.0f)
+				[
+					SNew(SExpandableArea)
+					.InitiallyCollapsed(!Entry->bToolCardExpanded)
+					.OnAreaExpansionChanged(FOnBooleanValueChanged::CreateLambda([Entry](bool bIsExpanded)
+					{
+						Entry->bToolCardExpanded = bIsExpanded;
+					}))
+					.HeaderContent()
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.FillWidth(1.0f)
+						.VAlign(VAlign_Center)
+						[
+							SNew(STextBlock)
+							.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+							.ColorAndOpacity_Lambda([Entry]()
+							{
+								return UnrealMcpChat::GetEntryTitleColor(*Entry);
+							})
+							.Text_Lambda([Entry]()
+							{
+								return FText::FromString(UnrealMcpChat::BuildEntryTitleText(*Entry));
+							})
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+						[
+							SNew(SButton)
+							.ContentPadding(FMargin(4.0f, 1.0f))
+							.ToolTipText(LOCTEXT("CopyEntryTooltip", "Copy this entry."))
+							.Text(LOCTEXT("CopyEntryIcon", "📋"))
+							.OnClicked_Lambda([this, Entry]()
+							{
+								return HandleEntryCopyClicked(Entry);
+							})
+						]
+					]
+					.BodyContent()
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+						[
+							UnrealMcpChat::MakeSelectableReadOnlyText(
+								TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([Entry]()
+								{
+									if (Entry->Body.IsEmpty() && Entry->bIsPending)
+									{
+										return FText::FromString(TEXT("Running..."));
+									}
+
+									return FText::FromString(Entry->Body);
+								})),
+								FAppStyle::GetFontStyle("NormalFont"))
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+						[
+							SNew(SBox)
+							.Visibility_Lambda([Entry]()
+							{
+								return Entry->Details.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+							})
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								[
+									SNew(STextBlock)
+									.Font(FAppStyle::GetFontStyle("SmallFont"))
+									.ColorAndOpacity(FLinearColor(0.78f, 0.80f, 0.84f, 1.0f))
+									.Text(LOCTEXT("DetailsLabel", "Details"))
+								]
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(0.0f, 3.0f, 0.0f, 0.0f)
+								[
+									UnrealMcpChat::MakeSelectableReadOnlyText(
+										TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([Entry]()
+										{
+											return FText::FromString(Entry->Details);
+										})),
+										FAppStyle::GetFontStyle("SmallFont"))
+								]
+							]
+						]
+					]
+				]
+			];
+	}
+
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
 		.BorderBackgroundColor_Lambda([Entry]()
@@ -2010,18 +2611,36 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				[
-					SNew(STextBlock)
-					.Font(FAppStyle::GetFontStyle("NormalFontBold"))
-					.Text_Lambda([Entry]()
-					{
-						if (Entry->Type == EUnrealMcpChatEntryType::Tool)
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+						.ColorAndOpacity_Lambda([Entry]()
 						{
-							const FString Status = Entry->bIsPending ? TEXT("running") : (Entry->bIsError ? TEXT("error") : TEXT("done"));
-							return FText::FromString(FString::Printf(TEXT("Tool • %s (%s)"), *Entry->Title, *Status));
-						}
-
-						return FText::FromString(Entry->Speaker);
-					})
+							return UnrealMcpChat::GetEntryTitleColor(*Entry);
+						})
+						.Text_Lambda([Entry]()
+						{
+							return FText::FromString(UnrealMcpChat::BuildEntryTitleText(*Entry));
+						})
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.ContentPadding(FMargin(4.0f, 1.0f))
+						.ToolTipText(LOCTEXT("CopyEntryTooltip", "Copy this entry."))
+						.Text(LOCTEXT("CopyEntryIcon", "📋"))
+						.OnClicked_Lambda([this, Entry]()
+						{
+							return HandleEntryCopyClicked(Entry);
+						})
+					]
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -2072,7 +2691,7 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 					]
 				]
 			]
-			];
+		];
 }
 
 FString SUnrealMcpChatPanel::BuildTranscriptText() const
@@ -2109,6 +2728,31 @@ FString SUnrealMcpChatPanel::BuildToolLogText() const
 	}
 
 	return FString::Join(Blocks, TEXT("\n\n"));
+}
+
+FString SUnrealMcpChatPanel::BuildEntryCopyText(const FUnrealMcpChatEntry& Entry) const
+{
+	return UnrealMcpChat::BuildEntryClipboardText(Entry);
+}
+
+FText SUnrealMcpChatPanel::GetActiveRequestProgressText() const
+{
+	if (!bAssistantRequestInFlight)
+	{
+		return FText::GetEmpty();
+	}
+
+	const FTimespan Elapsed = FDateTime::UtcNow() - ActiveAssistantRequestStartTime;
+	const int32 ElapsedSeconds = FMath::Max(0, FMath::FloorToInt(Elapsed.GetTotalSeconds()));
+
+	// FUnrealMcpAssistantEvent and FUnrealMcpAssistantTurnResult do not expose token usage yet,
+	// so the v1 progress indicator reports elapsed wall-clock time only.
+	return FText::FromString(FString::Printf(TEXT("⏱ %ds"), ElapsedSeconds));
+}
+
+bool SUnrealMcpChatPanel::IsTranscriptNearBottom() const
+{
+	return UnrealMcpChat::IsScrollBoxNearBottom(TranscriptScrollBox);
 }
 
 bool SUnrealMcpChatPanel::HasTranscriptEntries() const
@@ -2521,6 +3165,8 @@ bool SUnrealMcpChatPanel::MoveEntryToEnd(const TSharedPtr<FUnrealMcpChatEntry>& 
 
 void SUnrealMcpChatPanel::ScrollTranscriptToEnd()
 {
+	bDeferredTranscriptShouldAutoScroll = IsTranscriptNearBottom();
+
 	if (TranscriptEntriesBox.IsValid())
 	{
 		TranscriptEntriesBox->Invalidate(EInvalidateWidgetReason::Prepass);
@@ -2529,7 +3175,16 @@ void SUnrealMcpChatPanel::ScrollTranscriptToEnd()
 	if (TranscriptScrollBox.IsValid())
 	{
 		TranscriptScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
-		TranscriptScrollBox->ScrollToEnd();
+		if (bDeferredTranscriptShouldAutoScroll)
+		{
+			TranscriptScrollBox->ScrollToEnd();
+		}
+	}
+
+	if (!bDeferredTranscriptShouldAutoScroll)
+	{
+		DeferredTranscriptScrollFrames = 0;
+		return;
 	}
 
 	DeferredTranscriptScrollFrames = FMath::Max(DeferredTranscriptScrollFrames, 10);
@@ -2544,6 +3199,8 @@ void SUnrealMcpChatPanel::ScrollTranscriptToEnd()
 
 void SUnrealMcpChatPanel::ScrollToolLogToEnd()
 {
+	bDeferredToolLogShouldAutoScroll = UnrealMcpChat::IsScrollBoxNearBottom(ToolLogScrollBox);
+
 	if (ToolLogEntriesBox.IsValid())
 	{
 		ToolLogEntriesBox->Invalidate(EInvalidateWidgetReason::Prepass);
@@ -2552,7 +3209,16 @@ void SUnrealMcpChatPanel::ScrollToolLogToEnd()
 	if (ToolLogScrollBox.IsValid())
 	{
 		ToolLogScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
-		ToolLogScrollBox->ScrollToEnd();
+		if (bDeferredToolLogShouldAutoScroll)
+		{
+			ToolLogScrollBox->ScrollToEnd();
+		}
+	}
+
+	if (!bDeferredToolLogShouldAutoScroll)
+	{
+		DeferredToolLogScrollFrames = 0;
+		return;
 	}
 
 	DeferredToolLogScrollFrames = FMath::Max(DeferredToolLogScrollFrames, 10);
@@ -2578,7 +3244,16 @@ EActiveTimerReturnType SUnrealMcpChatPanel::HandleDeferredTranscriptScroll(doubl
 	if (TranscriptScrollBox.IsValid())
 	{
 		TranscriptScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
-		TranscriptScrollBox->ScrollToEnd();
+		if (bDeferredTranscriptShouldAutoScroll)
+		{
+			TranscriptScrollBox->ScrollToEnd();
+		}
+	}
+
+	if (!bDeferredTranscriptShouldAutoScroll)
+	{
+		bDeferredTranscriptScrollActive = false;
+		return EActiveTimerReturnType::Stop;
 	}
 
 	--DeferredTranscriptScrollFrames;
@@ -2604,7 +3279,16 @@ EActiveTimerReturnType SUnrealMcpChatPanel::HandleDeferredToolLogScroll(double I
 	if (ToolLogScrollBox.IsValid())
 	{
 		ToolLogScrollBox->Invalidate(EInvalidateWidgetReason::Prepass);
-		ToolLogScrollBox->ScrollToEnd();
+		if (bDeferredToolLogShouldAutoScroll)
+		{
+			ToolLogScrollBox->ScrollToEnd();
+		}
+	}
+
+	if (!bDeferredToolLogShouldAutoScroll)
+	{
+		bDeferredToolLogScrollActive = false;
+		return EActiveTimerReturnType::Stop;
 	}
 
 	--DeferredToolLogScrollFrames;
@@ -2722,9 +3406,12 @@ void SUnrealMcpChatPanel::ResetHistory(bool bAddReadyMessage)
 	ActiveAssistantEntry.Reset();
 	ActiveAssistantHandle.Reset();
 	bAssistantRequestInFlight = false;
+	ActiveAssistantRequestStartTime = FDateTime();
 	bDeferredTranscriptScrollActive = false;
+	bDeferredTranscriptShouldAutoScroll = true;
 	DeferredTranscriptScrollFrames = 0;
 	bDeferredToolLogScrollActive = false;
+	bDeferredToolLogShouldAutoScroll = true;
 	DeferredToolLogScrollFrames = 0;
 
 	if (TranscriptEntriesBox.IsValid())
