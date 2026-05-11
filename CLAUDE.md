@@ -62,9 +62,22 @@ codex "$(cat /tmp/my-prompt.md)"
 ### `codex-agent` 依赖 `bun`
 codex-orchestrator / `codex-agent` 要求 `bun` 已安装（`~/.bun/bin/bun`）。若 `bun` 缺失，**禁止**尝试修复 `codex-agent`，退回 Bash 直接调 `codex` CLI（按上述规则）。
 
+### 派单前置 header（必套）
+所有 codex 派单 prompt **必须**以 [`Tools/codex-prompt-header.md`](Tools/codex-prompt-header.md) 为前置 header，再跟单次任务的 ROLE / CONTEXT / EDIT list / CONSTRAINTS / DONE。Header 编码了仓库永久约定（双引擎兼容、`EAiProviderKind` append-only、不允许 codex 自己 commit、AGENTS.md Freshness Rule 评估、最终 report 格式）以及让 Codex Desktop 主对话流可读的 VISIBILITY narration 规则。
+
+标准姿势：
+```bash
+codex-agent start "$(cat Tools/codex-prompt-header.md; echo; echo '---'; echo; cat /tmp/my-task.md)" \
+  -m gpt-5.5 -r xhigh -s workspace-write \
+  -d <项目根>
+```
+
+修改 header 即修改全局派单纪律，需谨慎；header 文件本身入仓库由 review 把关。
+
 ## Key References
 
 - [AGENTS.md](AGENTS.md) — project briefing (READ FIRST every session)
 - [README.md](README.md) — project overview
 - [Docs/](Docs/) — architecture, pipelines, schemas
 - [Plugins/UnrealMcp/](Plugins/UnrealMcp/) — main plugin source
+- [Tools/codex-prompt-header.md](Tools/codex-prompt-header.md) — mandatory prompt header for every codex-agent dispatch
