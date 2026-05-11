@@ -754,25 +754,143 @@ namespace UnrealMcp
 				return true;
 			}
 
+			void AddUniqueMcpTestRoot(TArray<FString>& Roots, const FString& Candidate)
+			{
+				for (const FString& Existing : Roots)
+				{
+					if (Existing.Equals(Candidate, ESearchCase::IgnoreCase))
+					{
+						return;
+					}
+				}
+				Roots.Add(Candidate);
+			}
+
+			FString GetProjectLocalMcpTestRoot()
+			{
+				return NormalizeFullPathForCompare(FPaths::Combine(FPaths::ProjectDir(), TEXT("Tools/UnrealMcpTests")));
+			}
+
+			void FindMcpTestJsonFilesRecursive(const FString& Directory, TArray<FString>& OutFiles)
+			{
+				OutFiles.Reset();
+				if (!FPaths::DirectoryExists(Directory))
+				{
+					return;
+				}
+				IFileManager::Get().FindFilesRecursive(OutFiles, *Directory, TEXT("*.json"), true, false);
+				OutFiles.Sort();
+			}
+
+			bool McpTestRootHasJson(const FString& Root)
+			{
+				TArray<FString> JsonFiles;
+				FindMcpTestJsonFilesRecursive(Root, JsonFiles);
+				return JsonFiles.Num() > 0;
+			}
+
+			bool ResolveDefaultMcpTestRoot(
+				FString& OutRoot,
+				TArray<FString>& OutCandidateRoots,
+				FString& OutFailureReason)
+			{
+				OutRoot.Reset();
+				OutCandidateRoots.Reset();
+				OutFailureReason.Reset();
+
+				const FString ProjectLocalRoot = GetProjectLocalMcpTestRoot();
+				AddUniqueMcpTestRoot(OutCandidateRoots, ProjectLocalRoot);
+				if (FPaths::DirectoryExists(ProjectLocalRoot) && McpTestRootHasJson(ProjectLocalRoot))
+				{
+					OutRoot = ProjectLocalRoot;
+					return true;
+				}
+
+				FString AncestorDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+				FPaths::NormalizeDirectoryName(AncestorDir);
+				FPaths::CollapseRelativeDirectories(AncestorDir);
+				for (int32 ParentIndex = 0; ParentIndex < 4; ++ParentIndex)
+				{
+					const FString ParentDir = FPaths::GetPath(AncestorDir);
+					if (ParentDir.IsEmpty() || ParentDir.Equals(AncestorDir, ESearchCase::CaseSensitive))
+					{
+						break;
+					}
+					AncestorDir = ParentDir;
+					const FString CandidateRoot = NormalizeFullPathForCompare(FPaths::Combine(AncestorDir, TEXT("Tools/UnrealMcpTests")));
+					AddUniqueMcpTestRoot(OutCandidateRoots, CandidateRoot);
+					if (FPaths::DirectoryExists(CandidateRoot) && McpTestRootHasJson(CandidateRoot))
+					{
+						OutRoot = CandidateRoot;
+						return true;
+					}
+				}
+
+				OutFailureReason = FString::Printf(
+					TEXT("No MCP test JSON files found under default test roots: %s."),
+					*FString::Join(OutCandidateRoots, TEXT(", ")));
+				return false;
+			}
+
+			FString GetDefaultMcpTestsDirectoryForRoot(const FString& Root)
+			{
+				const FString CoreDirectory = FPaths::Combine(Root, TEXT("Core"));
+				return FPaths::DirectoryExists(CoreDirectory) ? CoreDirectory : Root;
+			}
+
 			bool ResolveMcpTestsDirectory(
 				const FJsonObject& Arguments,
 				FString& OutTestsDirectory,
 				FString& OutScaffoldDirectory,
 				FString& OutToolName,
-				FString& OutFailureReason)
+				FString& OutFailureReason,
+				TArray<FString>* OutCandidateRoots)
 			{
+				OutTestsDirectory.Reset();
+				OutScaffoldDirectory.Reset();
+				OutToolName.Reset();
+				OutFailureReason.Reset();
+				if (OutCandidateRoots)
+				{
+					OutCandidateRoots->Reset();
+				}
+
 				FString TestsDir;
 				FString ToolName;
 				FString ScaffoldDir;
 				FString OutputRoot;
+				bool bAllowDefaultTestFixtureRoot = false;
 				Arguments.TryGetStringField(TEXT("testsDir"), TestsDir);
 				Arguments.TryGetStringField(TEXT("toolName"), ToolName);
 				Arguments.TryGetStringField(TEXT("scaffoldDir"), ScaffoldDir);
 				Arguments.TryGetStringField(TEXT("outputRoot"), OutputRoot);
+				Arguments.TryGetBoolField(TEXT("__allowDefaultTestFixtureRoot"), bAllowDefaultTestFixtureRoot);
 
 				TestsDir = TestsDir.TrimStartAndEnd();
 				ToolName = ToolName.TrimStartAndEnd();
 				ScaffoldDir = ScaffoldDir.TrimStartAndEnd();
+				if (bAllowDefaultTestFixtureRoot && TestsDir.IsEmpty() && ToolName.IsEmpty() && ScaffoldDir.IsEmpty())
+				{
+					TArray<FString> CandidateRoots;
+					FString DefaultRoot;
+					if (!ResolveDefaultMcpTestRoot(DefaultRoot, CandidateRoots, OutFailureReason))
+					{
+						if (OutCandidateRoots)
+						{
+							*OutCandidateRoots = CandidateRoots;
+						}
+						return false;
+					}
+
+					if (OutCandidateRoots)
+					{
+						*OutCandidateRoots = CandidateRoots;
+					}
+					OutScaffoldDirectory = DefaultRoot;
+					OutTestsDirectory = GetDefaultMcpTestsDirectoryForRoot(DefaultRoot);
+					return true;
+				}
+
 				if (!TestsDir.TrimStartAndEnd().IsEmpty())
 				{
 					if (!ResolveProjectPathInsideProject(TestsDir, OutTestsDirectory, OutFailureReason))

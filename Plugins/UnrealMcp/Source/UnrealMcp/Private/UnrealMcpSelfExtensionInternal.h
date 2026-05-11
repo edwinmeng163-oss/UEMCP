@@ -106,5 +106,7 @@ namespace UnrealMcp
 		FString& OutTestsDirectory,
 		FString& OutScaffoldDirectory,
 		FString& OutToolName,
-		FString& OutFailureReason);
+		FString& OutFailureReason,
+		TArray<FString>* OutCandidateRoots = nullptr);
+	void FindMcpTestJsonFilesRecursive(const FString& Directory, TArray<FString>& OutFiles);
 }

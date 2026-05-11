@@ -236,6 +236,41 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Ar
 		}
 	}
 
+	TArray<FString> TestRootCandidates;
+	FString DefaultResolvedTestsDir;
+	FString DefaultResolvedScaffoldDir;
+	bool bUsedDefaultTestFixtureRoot = false;
+	if (ToolName.IsEmpty() && TestRequestPath.IsEmpty() && ScaffoldDir.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> ResolveArguments = MakeShared<FJsonObject>();
+		ResolveArguments->SetBoolField(TEXT("__allowDefaultTestFixtureRoot"), true);
+
+		FString ResolveFailure;
+		FString IgnoredToolName;
+		if (!UnrealMcp::ResolveMcpTestsDirectory(*ResolveArguments, DefaultResolvedTestsDir, DefaultResolvedScaffoldDir, IgnoredToolName, ResolveFailure, &TestRootCandidates))
+		{
+			return UnrealMcp::MakeExecutionResult(ResolveFailure, nullptr, true);
+		}
+
+		TArray<FString> DefaultTestFiles;
+		UnrealMcp::FindMcpTestJsonFilesRecursive(DefaultResolvedTestsDir, DefaultTestFiles);
+		const FString PreferredTestPath = FPaths::Combine(DefaultResolvedTestsDir, TEXT("editor_status_valid.json"));
+		if (FPaths::FileExists(PreferredTestPath))
+		{
+			TestRequestPath = PreferredTestPath;
+		}
+		else if (DefaultTestFiles.Num() > 0)
+		{
+			TestRequestPath = DefaultTestFiles[0];
+		}
+		else
+		{
+			return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("No JSON test cases found under '%s'."), *DefaultResolvedTestsDir), nullptr, true);
+		}
+		ScaffoldDir = DefaultResolvedScaffoldDir;
+		bUsedDefaultTestFixtureRoot = true;
+	}
+
 	if (TestRequestPath.IsEmpty())
 	{
 		if (!ScaffoldDir.IsEmpty())
@@ -262,7 +297,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Ar
 
 	FString ResolvedTestRequestPath;
 	FString ResolveFailure;
-	if (!UnrealMcp::ResolveProjectPathInsideProject(TestRequestPath, ResolvedTestRequestPath, ResolveFailure))
+	if (bUsedDefaultTestFixtureRoot)
+	{
+		ResolvedTestRequestPath = FPaths::ConvertRelativePathToFull(TestRequestPath);
+		FPaths::NormalizeFilename(ResolvedTestRequestPath);
+		FPaths::CollapseRelativeDirectories(ResolvedTestRequestPath);
+	}
+	else if (!UnrealMcp::ResolveProjectPathInsideProject(TestRequestPath, ResolvedTestRequestPath, ResolveFailure))
 	{
 		return UnrealMcp::MakeExecutionResult(ResolveFailure, nullptr, true);
 	}
@@ -384,6 +425,19 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpToolTest(const FJsonObject& Ar
 	StructuredContent->SetStringField(TEXT("toolName"), RequestToolName);
 	StructuredContent->SetStringField(TEXT("testRequestPath"), ResolvedTestRequestPath);
 	StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
+	StructuredContent->SetBoolField(TEXT("usedDefaultTestFixtureRoot"), bUsedDefaultTestFixtureRoot);
+	if (!DefaultResolvedScaffoldDir.IsEmpty())
+	{
+		StructuredContent->SetStringField(TEXT("scaffoldDir"), DefaultResolvedScaffoldDir);
+	}
+	if (!DefaultResolvedTestsDir.IsEmpty())
+	{
+		StructuredContent->SetStringField(TEXT("testsDir"), DefaultResolvedTestsDir);
+	}
+	if (TestRootCandidates.Num() > 0)
+	{
+		StructuredContent->SetArrayField(TEXT("testRootCandidates"), UnrealMcp::MakeJsonStringArray(TestRootCandidates));
+	}
 	StructuredContent->SetStringField(TEXT("endpointMode"), TEXT("in_process_mcp_handlers"));
 	StructuredContent->SetStringField(TEXT("endpointNote"), TEXT("tools/list and tools/call are exercised through the same in-editor MCP handlers. A network self-call to tools/call from inside tools/call would deadlock on the editor game thread."));
 	StructuredContent->SetNumberField(TEXT("toolCount"), ToolsArray.Num());
@@ -568,21 +622,31 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 	ResolveArguments->SetStringField(TEXT("testsDir"), TestsDir);
 	ResolveArguments->SetStringField(TEXT("scaffoldDir"), ScaffoldDir);
 	ResolveArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
+	ResolveArguments->SetBoolField(TEXT("__allowDefaultTestFixtureRoot"), ToolName.IsEmpty() && TestsDir.IsEmpty() && ScaffoldDir.IsEmpty());
 
 	FString ResolvedTestsDir;
 	FString ResolvedScaffoldDir;
 	FString ResolvedToolName;
 	FString ResolveFailure;
-	if (!UnrealMcp::ResolveMcpTestsDirectory(*ResolveArguments, ResolvedTestsDir, ResolvedScaffoldDir, ResolvedToolName, ResolveFailure))
+	TArray<FString> TestRootCandidates;
+	if (!UnrealMcp::ResolveMcpTestsDirectory(*ResolveArguments, ResolvedTestsDir, ResolvedScaffoldDir, ResolvedToolName, ResolveFailure, &TestRootCandidates))
 	{
 		return UnrealMcp::MakeExecutionResult(ResolveFailure, nullptr, true);
 	}
 	ToolName = ResolvedToolName;
+	const bool bUsedDefaultTestFixtureRoot = TestRootCandidates.Num() > 0;
 
 	TArray<FString> TestFiles;
 	if (FPaths::DirectoryExists(ResolvedTestsDir))
 	{
-		UnrealMcp::FindImmediateChildren(ResolvedTestsDir, TEXT("*.json"), true, false, TestFiles);
+		if (bUsedDefaultTestFixtureRoot && ResolvedTestsDir.Equals(ResolvedScaffoldDir, ESearchCase::IgnoreCase))
+		{
+			UnrealMcp::FindMcpTestJsonFilesRecursive(ResolvedTestsDir, TestFiles);
+		}
+		else
+		{
+			UnrealMcp::FindImmediateChildren(ResolvedTestsDir, TEXT("*.json"), true, false, TestFiles);
+		}
 	}
 	TestFiles.Sort();
 
@@ -603,6 +667,11 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 		StructuredContent->SetStringField(TEXT("toolName"), ToolName);
 		StructuredContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
 		StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
+		StructuredContent->SetBoolField(TEXT("usedDefaultTestFixtureRoot"), bUsedDefaultTestFixtureRoot);
+		if (TestRootCandidates.Num() > 0)
+		{
+			StructuredContent->SetArrayField(TEXT("testRootCandidates"), UnrealMcp::MakeJsonStringArray(TestRootCandidates));
+		}
 		StructuredContent->SetBoolField(TEXT("fallbackToSingleTest"), true);
 		StructuredContent->SetBoolField(TEXT("succeeded"), !SingleResult.bIsError);
 		StructuredContent->SetNumberField(TEXT("total"), 1);
@@ -626,6 +695,11 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 		StructuredContent->SetStringField(TEXT("toolName"), ToolName);
 		StructuredContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
 		StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
+		StructuredContent->SetBoolField(TEXT("usedDefaultTestFixtureRoot"), bUsedDefaultTestFixtureRoot);
+		if (TestRootCandidates.Num() > 0)
+		{
+			StructuredContent->SetArrayField(TEXT("testRootCandidates"), UnrealMcp::MakeJsonStringArray(TestRootCandidates));
+		}
 		StructuredContent->SetBoolField(TEXT("succeeded"), false);
 		StructuredContent->SetNumberField(TEXT("total"), 0);
 		return UnrealMcp::MakeExecutionResult(FString::Printf(TEXT("No JSON test cases found under '%s'."), *ResolvedTestsDir), StructuredContent, true);
@@ -692,6 +766,11 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpTestSuite(const FJsonObject& A
 	StructuredContent->SetStringField(TEXT("testsDir"), ResolvedTestsDir);
 	StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
 	StructuredContent->SetStringField(TEXT("memoryKey"), MemoryKey);
+	StructuredContent->SetBoolField(TEXT("usedDefaultTestFixtureRoot"), bUsedDefaultTestFixtureRoot);
+	if (TestRootCandidates.Num() > 0)
+	{
+		StructuredContent->SetArrayField(TEXT("testRootCandidates"), UnrealMcp::MakeJsonStringArray(TestRootCandidates));
+	}
 	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);
 	StructuredContent->SetBoolField(TEXT("executeTool"), bExecuteTool);
 	StructuredContent->SetBoolField(TEXT("stopOnFailure"), bStopOnFailure);
