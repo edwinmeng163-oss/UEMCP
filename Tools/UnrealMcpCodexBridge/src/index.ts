@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalModeFromEnv } from "./approval-policy";
@@ -14,7 +15,7 @@ const defaultEffort = requireValidEffort(envDefault("UEVOLVE_CODEX_EFFORT", "xhi
 const codexApprovalPolicy = "on-request";
 const sandbox = "workspace-write";
 const approvalMode = approvalModeFromEnv();
-const logPath = `/tmp/uevolve-codex-bridge-${process.pid}.log`;
+const logPath = path.join(os.tmpdir(), `uevolve-codex-bridge-${process.pid}.log`);
 let health: { state: HealthState; reason?: string } = { state: "starting" };
 let threadId = "";
 let codex: CodexWsClient;
