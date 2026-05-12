@@ -7,6 +7,7 @@ can run it before opening Unreal Editor or as a lightweight CI step.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -18,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "Tools" / "UnrealMcpToolRegistry" / "tools.json"
 SCHEMA_PATH = ROOT / "Tools" / "UnrealMcpToolRegistry" / "schema.json"
 MIRROR_PATH = ROOT / "Plugins" / "UnrealMcp" / "Resources" / "ToolRegistry" / "tools.json"
-TOOL_REGISTRAR_PATH = ROOT / "Plugins" / "UnrealMcp" / "Source" / "UnrealMcp" / "Private" / "UnrealMcpToolRegistrar.cpp"
+PRIVATE_SOURCE_PATH = ROOT / "Plugins" / "UnrealMcp" / "Source" / "UnrealMcp" / "Private"
+TOOL_REGISTRAR_PATH = PRIVATE_SOURCE_PATH / "UnrealMcpToolRegistrar.cpp"
 TESTS_PATH = ROOT / "Tools" / "UnrealMcpTests"
 KNOWN_CATEGORIES = {
     "actors",
@@ -64,11 +66,42 @@ BOOLEAN_FIELDS = {
 KNOWN_EXPOSURES = {"visible", "legacy_hidden"}
 KNOWN_RISK_LEVELS = {"read_only", "low", "medium", "high", "critical"}
 KNOWN_TEST_COVERAGE = {"missing", "core", "category", "manual", "external"}
+EXPECTED_NON_STANDARD_DISPATCH: set[str] = {
+    "unreal.spawn_actor_basic",  # Alias: visible tool shares the unreal.spawn_actor dispatcher branch.
+    "unreal.spawn_actor_batch_basic",  # Alias: visible tool shares the unreal.spawn_actor_batch dispatcher branch.
+    "unreal.editor.engine_version",  # Forwarded from UnrealMcpEditorTools.cpp to UnrealMcpEditorEngineVersionTool.cpp.
+    "unreal.tools.export_package",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpToolPackager.cpp.
+    "unreal.tools.list_exportable",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpToolPackager.cpp.
+    "unreal.tools.import_package",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpToolPackager.cpp.
+    "unreal.knowledge_index_refresh",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpKnowledgeTools.cpp.
+    "unreal.knowledge_search",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpKnowledgeTools.cpp.
+    "unreal.tool_recommend",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpKnowledgeTools.cpp.
+    "unreal.tool_gap_analyze",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpKnowledgeTools.cpp.
+    "unreal.workflow_recommend",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpKnowledgeTools.cpp.
+    "unreal.knowledge_eval_run",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpKnowledgeTools.cpp.
+    "unreal.preview_change_plan",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpSelfExtensionPrecisionTools.cpp.
+    "unreal.capture_project_snapshot",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpSelfExtensionPrecisionTools.cpp.
+    "unreal.diff_project_snapshot",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpSelfExtensionPrecisionTools.cpp.
+    "unreal.verify_task_outcome",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpSelfExtensionPrecisionTools.cpp.
+    "unreal.mcp_classify_error",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpSelfExtensionPrecisionTools.cpp.
+    "unreal.mcp_prepare_test_sandbox",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpSelfExtensionPrecisionTools.cpp.
+    "unreal.workflow_run",  # Forwarded by UnrealMcpSelfExtensionTools.cpp into UnrealMcpWorkflowTools.cpp.
+}
 
 
 def load_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--strict-dispatch",
+        action="store_true",
+        help="Treat descriptor/dispatcher source-integrity warnings as validation errors.",
+    )
+    return parser.parse_args(argv)
 
 
 def validate_registry_shape(registry: dict[str, Any], schema: dict[str, Any], issues: list[str]) -> None:
@@ -127,6 +160,37 @@ def collect_test_expectations() -> dict[str, dict[str, Any]]:
     return expectations
 
 
+def collect_descriptor_entries(registrar_path: Path) -> dict[str, str]:
+    """Return {tool_name: source_file_basename} from MakeDescriptor calls."""
+    registrar_text = registrar_path.read_text(encoding="utf-8")
+    descriptor_pattern = re.compile(
+        r'MakeDescriptor\(\s*'
+        r'TEXT\("(?P<name>unreal\.[^"]+)"\)\s*,\s*'
+        r'TEXT\("(?:\\.|[^"])*"\)\s*,\s*'
+        r'TEXT\("(?:\\.|[^"])*"\)\s*,\s*'
+        r'TEXT\("(?:\\.|[^"])*"\)\s*,\s*'
+        r'TEXT\("(?P<source>[^"]+\.cpp)"\)',
+        re.DOTALL,
+    )
+    entries: dict[str, str] = {}
+    for match in descriptor_pattern.finditer(registrar_text):
+        entries[match.group("name")] = Path(match.group("source")).name
+    return entries
+
+
+def verify_dispatcher_branch(tool_name: str, source_file: Path) -> bool:
+    """Return true when source_file has a literal if ToolName branch."""
+    if not source_file.exists():
+        return False
+    source_text = source_file.read_text(encoding="utf-8")
+    branch_pattern = re.compile(
+        r'if\s*\(\s*ToolName\s*==\s*TEXT\("'
+        + re.escape(tool_name)
+        + r'"\)\s*\)'
+    )
+    return bool(branch_pattern.search(source_text))
+
+
 def expected_coverage_for_test(expectation: dict[str, Any]) -> str:
     executed_suites = expectation["executedSuites"]
     if "Core" in executed_suites:
@@ -172,7 +236,8 @@ def collect_handler_entries(tools: list[dict[str, Any]]) -> dict[str, str]:
     return entries
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
     issues: list[str] = []
     registry = load_json(REGISTRY_PATH)
     schema = load_json(SCHEMA_PATH)
@@ -183,6 +248,7 @@ def main() -> int:
     if registry != mirror:
         issues.append("Registry mirror content differs from Tools/UnrealMcpToolRegistry/tools.json.")
     handler_entries = collect_handler_entries(tools)
+    descriptor_entries = collect_descriptor_entries(TOOL_REGISTRAR_PATH)
     test_expectations = collect_test_expectations()
 
     if [tool.get("name") for tool in tools] != [tool.get("name") for tool in mirror_tools]:
@@ -234,6 +300,32 @@ def main() -> int:
         if count > 1:
             issues.append(f"{name}: duplicate registry entries: {count}")
 
+    dispatch_matched = 0
+    dispatch_allowlisted = 0
+    dispatch_warnings: list[str] = []
+    for tool in tools:
+        if tool.get("exposure") != "visible":
+            continue
+        name = str(tool.get("name", ""))
+        if name in EXPECTED_NON_STANDARD_DISPATCH:
+            dispatch_allowlisted += 1
+            continue
+        descriptor_source = descriptor_entries.get(name)
+        if not descriptor_source:
+            dispatch_warnings.append(f"{name}: missing MakeDescriptor entry in {TOOL_REGISTRAR_PATH.relative_to(ROOT)}")
+            continue
+        source_file = PRIVATE_SOURCE_PATH / descriptor_source
+        if not source_file.exists():
+            dispatch_warnings.append(f"{name}: descriptor source file does not exist: {source_file.relative_to(ROOT)}")
+            continue
+        if verify_dispatcher_branch(name, source_file):
+            dispatch_matched += 1
+        else:
+            dispatch_warnings.append(f"{name}: missing ToolName dispatcher branch in {source_file.relative_to(ROOT)}")
+
+    if args.strict_dispatch:
+        issues.extend(f"dispatch integrity: {warning}" for warning in dispatch_warnings)
+
     summary = {
         "toolCount": len(tools),
         "mirrorToolCount": len(mirror_tools),
@@ -241,16 +333,28 @@ def main() -> int:
         "issueCount": len(issues),
         "schemaPath": str(SCHEMA_PATH.relative_to(ROOT)),
         "testFixtureToolCount": len(test_expectations),
+        "dispatchCheck": {
+            "allowlisted": dispatch_allowlisted,
+            "matched": dispatch_matched,
+            "strict": args.strict_dispatch,
+            "warnings": len(dispatch_warnings),
+        },
         "categories": sorted({tool.get("category", "") for tool in tools}),
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
+    if dispatch_warnings and not args.strict_dispatch:
+        print("\nDispatch warnings:", file=sys.stderr)
+        for warning in dispatch_warnings:
+            print(f"- {warning}", file=sys.stderr)
     if issues:
         print("\nIssues:", file=sys.stderr)
         for issue in issues:
             print(f"- {issue}", file=sys.stderr)
+    print(f"dispatch check: {dispatch_matched} matched, {len(dispatch_warnings)} warnings, {dispatch_allowlisted} allowlisted")
+    if issues:
         return 1
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
