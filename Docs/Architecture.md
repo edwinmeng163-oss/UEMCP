@@ -15,7 +15,7 @@ Core layers:
 - Precision tools: `unreal.preview_change_plan`, `unreal.capture_project_snapshot`, `unreal.diff_project_snapshot`, `unreal.verify_task_outcome`, `unreal.mcp_classify_error`, Blueprint graph inspectors, and Widget tree dumping give Chat a read-back loop before and after edits.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
-- `Tools/UnrealMcpCodexBridge`: Bun daemon for Plan B Codex Desktop/App Server integration. It spawns `codex app-server` on a temporary Unix socket, connects through Codex's WebSocket-over-UDS App Server transport, and exposes a small UE-facing WebSocket protocol on `ws://127.0.0.1:8766/uevolve`.
+- `Tools/UnrealMcpCodexBridge`: Bun daemon for Plan B Codex Desktop/App Server integration. It spawns `codex app-server` on a platform-selected transport (Unix socket on macOS/Linux, localhost WebSocket on Windows), connects through Codex's App Server WebSocket transport, and exposes a small UE-facing WebSocket protocol on `ws://127.0.0.1:8766/uevolve`.
 - `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
 - `Schemas/UnrealMcpExtensionManifest.schema.json`: versioned contract for source apply manifests.
 - `Tools/UnrealMcpToolRegistry/schema.json`: versioned contract for explicit tool metadata under `Tools/UnrealMcpToolRegistry/tools.json`.
@@ -34,10 +34,12 @@ plugin does not consume it yet; P7.B will add the UE-side client.
 
 Bridge runtime shape:
 
-- Spawned process: `codex app-server --listen unix://<temp>/codex.sock`.
-- App Server transport: HTTP WebSocket upgrade over Unix domain socket, then one
-  Codex JSON-RPC object per WebSocket text frame. The app-server protocol does
-  not use the standard `jsonrpc:"2.0"` field.
+- Spawned process: `codex app-server --listen unix://<temp>/codex.sock` on
+  macOS/Linux, or `codex app-server --listen ws://127.0.0.1:<port>` on Windows.
+- App Server transport: HTTP WebSocket upgrade over the selected Unix-domain or
+  TCP WebSocket endpoint, then one Codex JSON-RPC object per WebSocket text
+  frame. The app-server protocol does not use the standard `jsonrpc:"2.0"`
+  field.
 - UE-facing transport: WebSocket on `ws://127.0.0.1:8766/uevolve`.
 - Model defaults: `UEVOLVE_CODEX_MODEL` defaults to `gpt-5.5`, and
   `UEVOLVE_CODEX_EFFORT` defaults to `xhigh`; UE-facing turns may override both
@@ -60,7 +62,7 @@ Recommended split:
 - `Private/ToolHandlers`: first-class handler registration metadata.
 - `Private/Execution`: shared execution guard plus category-specific preflight/postcheck verifiers.
 - `Private/Tools/SelfExtension`: self-extension workbench, pipeline status, audit/schema/patch-fragment helpers, MCP test execution, and extension pipeline helpers. Self-extension dispatch now lives in `UnrealMcpSelfExtensionTools.cpp`; module-private orchestration methods are invoked through explicit callbacks.
-- `Private/Tools/Editor`: status, logs, maps, assets, PIE, console, Python, Content Browser focus, map/asset opening, and save-dirty-packages. These editor tools now live in `UnrealMcpEditorTools.cpp`.
+- `Private/Tools/Editor`: status, engine version, logs, maps, assets, PIE, console, Python, Content Browser focus, map/asset opening, and save-dirty-packages. These editor tools live in `UnrealMcpEditorTools.cpp` plus focused editor tool files such as `UnrealMcpEditorEngineVersionTool.cpp`.
 - `Private/Tools/Actors`: actor selection, transforms, spawning, layout, batch edits. Actor query/selection, basic write tools, batch edits, point-light edits, static-mesh actor configuration, actor layout tools, and spawn tools now live in `UnrealMcpActorTools.cpp`.
 - `Private/Tools/Blueprint`: Blueprint class and graph editing in `UnrealMcpBlueprintTools.cpp`, with read-only graph inspection through `unreal.bp_list_graph_nodes` and `unreal.bp_trace_pin_connections`, plus outcome verification in `UnrealMcpBlueprintOutcomeVerifier.cpp`.
 - `Private/Tools/Widget`: Widget Blueprint hierarchy, layout, event binding, template helpers, and read-only hierarchy inspection through `unreal.widget_dump_tree` in `UnrealMcpWidgetTools.cpp`, with outcome verification in `UnrealMcpWidgetOutcomeVerifier.cpp`.
@@ -68,6 +70,7 @@ Recommended split:
 - `Private/Tools/SelfExtension`: validate, apply, build, test, audit, rollback, pipeline.
 - `Private/Tools/Memory`: project memory CRUD in `UnrealMcpMemoryTools.cpp`.
 - `Private/Tools/Skills`: project skill discovery, application, local activity recording, and skill distillation. Skill dispatch now lives in `UnrealMcpSkillTools.cpp`; promote still receives its extension-lock behavior through an explicit module callback.
+- `Private/Tests`: module-private automation tests such as `UnrealMcpEngineCompatTests.cpp`.
 - `Private/UI`: Chat panel and future Workbench panel.
 
 ## Tool Descriptor and Registry Role

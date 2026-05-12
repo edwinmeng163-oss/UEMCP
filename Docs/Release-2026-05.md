@@ -41,7 +41,7 @@
 `Tools/UnrealMcpCodexBridge/` —— Bun TypeScript daemon，把 Codex App Server 协议（WebSocket-over-UDS / WebSocket-over-TCP）桥到一个简单的 `ws://127.0.0.1:8766/uevolve` 接口给 UE plugin 用。
 
 **关键能力**：
-- Codex 通过此桥能**直接调用 Unreal MCP 工具**（`unreal.spawn_actor` / `unreal.execute_python` / 全部 114 个工具），不再只是给文字方案
+- Codex 通过此桥能**直接调用 Unreal MCP 工具**（`unreal.spawn_actor` / `unreal.execute_python` / 全部可见工具），不再只是给文字方案
 - 安全姿态：Codex 自身的 file edit / shell exec 全拒；只放行带 `codex_approval_kind: "mcp_tool_call"` 且 `serverName === "unrealmcp"` 的 MCP 工具调用 —— 由 UE MCP 自己的 audit/dry-run/safety 兜底
 - 跨平台：macOS/Linux 用 Unix Domain Socket，Windows 自动切 `ws://127.0.0.1:<auto-port>`
 - 模型与 reasoning effort 可由用户选择：Model 在 ChatPanel 顶部 combo 编辑，ReasoningEffort 在 `Project Settings > Plugins > Unreal MCP > AI > Providers` 设置；`Codex` CLI provider 仍保持 `gpt-5.5` + `xhigh` 硬锁
@@ -284,7 +284,7 @@ A Provider/Model selector at the top of the chat panel switches between configur
 `Tools/UnrealMcpCodexBridge/` is a Bun TypeScript daemon that bridges the Codex App Server protocol (WebSocket-over-UDS on POSIX, WebSocket-over-TCP on Windows) to a simple `ws://127.0.0.1:8766/uevolve` endpoint consumed by the UE plugin.
 
 **Capabilities**:
-- Codex can **invoke Unreal MCP tools directly** (`unreal.spawn_actor`, `unreal.execute_python`, all 114 tools) instead of only emitting `/tool ...` text suggestions.
+- Codex can **invoke Unreal MCP tools directly** (`unreal.spawn_actor`, `unreal.execute_python`, the visible tool set) instead of only emitting `/tool ...` text suggestions.
 - Safety posture: Codex's built-in file edit and shell exec are universally rejected; only MCP tool-call approvals whose `serverName === "unrealmcp"` AND `_meta.codex_approval_kind === "mcp_tool_call"` are auto-accepted. UE MCP's own audit / dry-run / safety layer is trusted to gate destructive work.
 - Cross-platform: macOS/Linux uses a Unix Domain Socket transport; Windows defaults to `ws://127.0.0.1:<auto-port>`.
 - Model and reasoning effort are user-selectable: edit Model in the chat panel combo and ReasoningEffort in `Project Settings > Plugins > Unreal MCP > AI > Providers`. The separate `Codex` CLI provider remains locked to `gpt-5.5` + `xhigh`.
@@ -514,7 +514,7 @@ In the chat panel:
 `Tools/UnrealMcpCodexBridge/` は Bun の TypeScript daemon で、Codex App Server プロトコル（POSIX では WebSocket-over-UDS、Windows では WebSocket-over-TCP）を UE plugin が消費するシンプルな `ws://127.0.0.1:8766/uevolve` エンドポイントに橋渡しします。
 
 **主要機能**：
-- Codex が **Unreal MCP ツール（`unreal.spawn_actor`、`unreal.execute_python` 等、計 114 個）を直接呼び出せる**ようになります。これまでのように `/tool ...` 文字列を返すだけ、ではなく実行されます
+- Codex が **Unreal MCP ツール（`unreal.spawn_actor`、`unreal.execute_python` 等、表示される全ツール）を直接呼び出せる**ようになります。これまでのように `/tool ...` 文字列を返すだけ、ではなく実行されます
 - セーフティポスチャ：Codex 内蔵のファイル編集・シェル実行はすべて拒否。MCP ツール呼び出し承認のうち、`serverName === "unrealmcp"` かつ `_meta.codex_approval_kind === "mcp_tool_call"` のものだけが自動承認されます。破壊的変更は UE MCP 側の audit / dry-run / safety レイヤーが担保します
 - クロスプラットフォーム：macOS/Linux は Unix Domain Socket、Windows は `ws://127.0.0.1:<auto-port>`
 - モデルと reasoning effort はユーザーが選択可能です。Model はチャットパネル上部の combo で編集し、ReasoningEffort は `Project Settings > Plugins > Unreal MCP > AI > Providers` で設定します。別の `Codex` CLI provider は引き続き `gpt-5.5` + `xhigh` 固定です

@@ -102,10 +102,11 @@ The P7.A Codex bridge lives at:
 Tools/UnrealMcpCodexBridge
 ```
 
-It starts a fresh `codex app-server` subprocess on a temporary Unix socket,
-connects using the Codex WebSocket-over-UDS App Server transport, initializes a
-single thread with daemon defaults (`UEVOLVE_CODEX_MODEL`, default `gpt-5.5`,
-and `UEVOLVE_CODEX_EFFORT`, default `xhigh`), then serves the UE-facing
+It starts a fresh `codex app-server` subprocess on a platform-selected transport
+(Unix socket on macOS/Linux, localhost WebSocket on Windows), connects using the
+Codex App Server WebSocket transport, initializes a single thread with daemon
+defaults (`UEVOLVE_CODEX_MODEL`, default `gpt-5.5`, and
+`UEVOLVE_CODEX_EFFORT`, default `xhigh`), then serves the UE-facing
 endpoint:
 
 ```text
@@ -131,7 +132,8 @@ changes, permission escalation, MCP elicitation, and user-input requests are not
 allowed in V1. See `Tools/UnrealMcpCodexBridge/README.md` for protocol,
 configuration, per-turn model/effort selection, logging, and limitations. The
 separate Codex CLI subprocess provider remains locked to `gpt-5.5` with `xhigh`
-reasoning.
+reasoning and is supported on macOS/Linux only; Windows users should use the
+`CodexAppServer` bridge provider.
 
 ## Tool Coverage
 

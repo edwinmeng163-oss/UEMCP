@@ -423,6 +423,7 @@ UnrealMcpKnowledgeBridge.h
   shared bridge for knowledge-index card writes
 
 UnrealMcpEditorTools.cpp
+UnrealMcpEditorEngineVersionTool.cpp
 UnrealMcpActorTools.cpp
 UnrealMcpBlueprintTools.cpp
 UnrealMcpWidgetTools.cpp
@@ -441,6 +442,9 @@ UnrealMcpEditorTabs.cpp
 
 UnrealMcpAssistantRun.cpp/.h
   AI Responses API interaction, tool loop, context compression, timeouts
+
+Private/Tests/*.cpp
+  module-private automation tests such as engine-compat smoke coverage
 ```
 
 The largest current files are still ChatPanel, ActorTools, KnowledgeTools,
@@ -642,7 +646,8 @@ Tools/UnrealMcpCodexBridge
 ```
 
 The daemon is not part of the UE plugin yet. It spawns a fresh
-`codex app-server` subprocess on a temporary Unix socket, performs App Server
+`codex app-server` subprocess on a platform-selected transport (Unix socket on
+macOS/Linux, localhost WebSocket on Windows), performs App Server
 initialization and `thread/start`, then exposes a small UE-facing WebSocket API:
 
 ```text
@@ -669,7 +674,13 @@ escalation, MCP elicitation, dynamic tool calls, and tool user-input requests
 are declined or left unanswered with empty results.
 `UEVOLVE_CODEX_APPROVAL_POLICY=auto-approve` exists for local bridge development
 only. The separate Codex CLI subprocess provider remains hard-locked to
-`gpt-5.5` with `xhigh` reasoning.
+`gpt-5.5` with `xhigh` reasoning and is macOS/Linux-only; Windows users should
+use the `CodexAppServer` provider path.
+
+At startup, the bridge auto-manages `~/.codex/config.toml` with
+`[mcp_servers.unrealmcp]` using `transport="streamable-http"` so Codex CLI,
+Codex Desktop GUI, and bridge-spawned sessions discover the editor MCP server
+through the same native config path.
 
 Connecting to an already-running Codex Desktop IPC socket is deferred; V1 always
 spawns its own app-server and marks health `failed` if that child exits.

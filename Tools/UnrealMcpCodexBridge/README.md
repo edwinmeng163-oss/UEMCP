@@ -78,8 +78,10 @@ Codex binary: /opt/homebrew/bin/codex
 Registered MCP server 'unrealmcp' with Codex; the model is instructed to use it via mcpServer/tool/call.
 UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=unix endpoint=/tmp/uevolve-codex-bridge-<id>/codex.sock
-MCP status: not queried at bridge startup; Codex will discover tools lazily from config
-Codex defaults model=gpt-5.5 effort=xhigh approvalPolicy=reject log=/tmp/uevolve-codex-bridge-<pid>.log
+Codex app-server args: app-server --listen unix:///tmp/.../codex.sock -c mcp_servers.unrealmcp.url="http://127.0.0.1:8765/mcp" -c mcp_servers.unrealmcp.transport="streamable-http"
+MCP registration: {"enabled":true,"name":"unrealmcp","url":"http://127.0.0.1:8765/mcp"}
+MCP status: not queried at bridge startup; Codex verifies tools lazily from native config during turns
+Codex defaults model=gpt-5.5 effort=xhigh approvalPolicy=reject sandbox=workspace-write log=/tmp/uevolve-codex-bridge-<pid>.log
 ```
 
 Stop with `Ctrl-C`. On shutdown, the bridge interrupts any in-flight Codex turn,
@@ -172,10 +174,12 @@ By default, the bridge starts Codex with the running Unreal MCP endpoint
 registered as an App Server MCP server:
 
 ```bash
-codex app-server --listen <unix-or-ws-endpoint> -c mcp_servers.unrealmcp.url="http://127.0.0.1:8765/mcp"
+codex app-server --listen <unix-or-ws-endpoint> \
+  -c mcp_servers.unrealmcp.url="http://127.0.0.1:8765/mcp" \
+  -c mcp_servers.unrealmcp.transport="streamable-http"
 ```
 
-That makes Codex see the Unreal tool inventory, including tools such as
+That streamable HTTP registration makes Codex see the Unreal tool inventory, including tools such as
 `unreal.editor_status`, `unreal.execute_python`, `unreal.spawn_actor`, and the
 self-extension `unreal.mcp_*` tools exposed by the editor.
 The bridge thread instructions direct Codex to call this registered MCP server
