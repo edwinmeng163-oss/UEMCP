@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalModeFromEnv } from "./approval-policy";
+import { ensureUnrealMcpServerRegistered } from "./codex-config";
 import { CodexWsClient, startCodexAppServer, waitForEndpoint } from "./codex-protocol";
 import { createBridgeServer, send, type HealthState } from "./server";
 
@@ -12,6 +13,7 @@ const port = Number(process.env.UEVOLVE_CODEX_BRIDGE_PORT ?? 8766);
 const wsPath = process.env.UEVOLVE_CODEX_BRIDGE_PATH ?? "/uevolve";
 const defaultModel = requireValidModel(envDefault("UEVOLVE_CODEX_MODEL", "gpt-5.5"), "UEVOLVE_CODEX_MODEL");
 const defaultEffort = requireValidEffort(envDefault("UEVOLVE_CODEX_EFFORT", "xhigh"), "UEVOLVE_CODEX_EFFORT");
+const unrealMcpUrl = process.env.UEVOLVE_MCP_URL ?? "http://127.0.0.1:8765/mcp";
 const codexApprovalPolicy = "on-request";
 const sandbox = "workspace-write";
 const approvalMode = approvalModeFromEnv();
@@ -24,6 +26,9 @@ const active = new Map<string, { requestId: string; ws: any; turnId: string; ful
 function log(direction: string, payload: any): void {
   fs.appendFileSync(logPath, `${new Date().toISOString()} ${direction} ${JSON.stringify(payload)}\n`);
 }
+
+const codexConfig = await ensureUnrealMcpServerRegistered({ url: unrealMcpUrl });
+console.log(`${codexConfig.wroteFile ? "Registered unrealmcp in" : "unrealmcp already current in"} ${codexConfig.path}`);
 
 const child = await startCodexAppServer((reason) => {
   health = { state: "failed", reason };
@@ -59,7 +64,6 @@ await waitForEndpoint(child.endpoint, child.transport);
 codex = new CodexWsClient(child.endpoint, log, approvalMode, onNotification);
 await codex.connect();
 await codex.initialize();
-const mcpStatus = await codex.request("mcpServerStatus/list", { detail: "toolsAndAuthOnly" }).catch((error) => ({ error: String(error), data: [] }));
 const started = await codex.request("thread/start", {
   model: defaultModel,
   cwd,
@@ -119,7 +123,7 @@ console.log(`UEvolve Codex Bridge listening at ${bridge.url}`);
 console.log(`Codex app-server transport=${child.transport} endpoint=${child.endpoint}`);
 console.log(`Codex app-server args: ${formatSpawnArgs(child.spawnArgs)}`);
 console.log(`MCP registration: ${JSON.stringify(child.mcpRegistration)}`);
-console.log(`MCP status: ${summarizeMcpStatus(mcpStatus)}`);
+console.log("MCP status: not queried at bridge startup; Codex will discover tools lazily from config");
 console.log(`Codex defaults model=${defaultModel} effort=${defaultEffort} approvalPolicy=${approvalMode} sandbox=${sandbox} log=${logPath}`);
 
 async function shutdown(): Promise<void> {
@@ -158,11 +162,6 @@ Do not attempt to edit files or run commands directly. Do not attempt to write f
 }
 function formatSpawnArgs(args: string[]): string {
   return args.map((arg) => (arg.includes("bearer_token=") ? arg.replace(/bearer_token=.*/, 'bearer_token="<redacted>"') : arg)).join(" ");
-}
-function summarizeMcpStatus(status: any): string {
-  if (status?.error) return status.error;
-  const servers = status?.data ?? [];
-  return servers.map((server: any) => `${server.name}:${Object.keys(server.tools ?? {}).length} tools:${server.authStatus}`).join(", ") || "none";
 }
 function envDefault(name: string, fallback: string): string {
   return process.env[name]?.trim() || fallback;

@@ -73,10 +73,12 @@ powershell -ExecutionPolicy Bypass -File Tools\UnrealMcpCodexBridge\start-bridge
 Expected startup output:
 
 ```text
+Registered unrealmcp in /Users/<you>/.codex/config.toml
 Codex binary: /opt/homebrew/bin/codex
 Registered MCP server 'unrealmcp' with Codex; the model is instructed to use it via mcpServer/tool/call.
 UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=unix endpoint=/tmp/uevolve-codex-bridge-<id>/codex.sock
+MCP status: not queried at bridge startup; Codex will discover tools lazily from config
 Codex defaults model=gpt-5.5 effort=xhigh approvalPolicy=reject log=/tmp/uevolve-codex-bridge-<pid>.log
 ```
 
@@ -290,9 +292,11 @@ after a non-empty `turn_complete`.
 
 ## Known Limitations
 
-- The bridge always spawns a fresh `codex app-server` subprocess. Connecting to
-  a running Codex Desktop IPC socket, such as the macOS-only
-  `codex app-server proxy --sock ipc-501.sock` path, is deferred to v2.
+- On startup, the bridge ensures `~/.codex/config.toml` contains
+  `[mcp_servers.unrealmcp]` pointing at the Unreal Editor MCP endpoint, so Codex
+  CLI, Codex Desktop GUI, and bridge-spawned sessions all discover the server
+  natively through Codex config. The block is auto-managed; manual edits are
+  refreshed on the next bridge start. Verify with `codex mcp list`.
 - The bridge does not auto-restart the app-server subprocess. If Codex exits,
   health becomes `failed`.
 - V1 supports one active turn at a time on the cached thread.
