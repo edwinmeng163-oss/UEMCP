@@ -1,0 +1,22 @@
+{
+  "name": "unreal.fps.bootstrap",
+  "category": "editor",
+  "handlerName": "unreal.fps.bootstrap",
+  "exposure": "visible",
+  "riskLevel": "high",
+  "requiresWrite": true,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": true,
+  "preflightSupport": true,
+  "postcheckSupport": true,
+  "testCoverage": "manual",
+  "owner": "UEvolve Core",
+  "docsPath": "Tools/UnrealMcpToolScaffoldStarters/fps_bootstrap/README.md",
+  "reason": "Starter scaffold for the v0.13 FPS bring-up replacement; applies through unreal.mcp_apply_scaffold so backup, manifest, build, test, and rollback records are preserved.",
+  "summaryTemplate": "Bootstrapped FPS player on {args.pawnBlueprintPath} (verifyPass={result.verified.runtimeVerify})",
+  "notes": "Input schema is defined in ToolRegistrar.patch.cpp. Registry schema intentionally omits input/output schema fields."
+}

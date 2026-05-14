@@ -1,0 +1,33 @@
+{
+  "name": "fps_bootstrap_dry_run_valid",
+  "description": "Preview complete FPS bootstrap without mutating assets; validates the planned response shape for scaffold smoke testing.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "fps_bootstrap",
+    "dryRun": true,
+    "verified.axisMappings.planned": true,
+    "verified.wiringMoveForward.planned": true,
+    "verified.wiringMoveRight.planned": true,
+    "verified.runtimeVerify": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1301,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.fps.bootstrap",
+      "arguments": {
+        "pawnBlueprintPath": "/Game/__UEvolveMcpTest/FPS/BP_TestCharacter",
+        "gameModeBlueprintPath": "/Game/__UEvolveMcpTest/FPS/BP_TestGameMode",
+        "playerStartLabel": "FPS_PlayerStart",
+        "axisPrefix": "",
+        "runVerifyAfter": true,
+        "compileSave": true,
+        "dryRun": true
+      }
+    }
+  }
+}

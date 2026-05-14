@@ -1,0 +1,29 @@
+{
+  "name": "verify_input_drives_pawn_no_pie_valid",
+  "description": "Run the verifier without starting PIE so scaffold smoke testing checks structured failure evidence without mutating a fixture level.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "verify_input_drives_pawn",
+    "pass": false,
+    "pieAlreadyRunning": false
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1302,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.simulation.verify_input_drives_pawn",
+      "arguments": {
+        "pawnClass": "/Script/Engine.DefaultPawn",
+        "inputAxis": "MoveForward",
+        "axisValue": 1.0,
+        "durationSeconds": 0.1,
+        "expectedMotionDelta": 1.0,
+        "startPieIfNeeded": false
+      }
+    }
+  }
+}

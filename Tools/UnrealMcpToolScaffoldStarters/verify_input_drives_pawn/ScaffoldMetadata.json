@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "toolName": "unreal.simulation.verify_input_drives_pawn",
+  "toolId": "verify_input_drives_pawn",
+  "category": "editor",
+  "riskLevel": "medium",
+  "categorySourceFile": "UnrealMcpEditorTools.cpp",
+  "categoryTryExecute": "TryExecuteEditorTool",
+  "handlerFunctionName": "ExecuteVerifyInputDrivesPawnTool",
+  "descriptorFirst": true,
+  "requiresWrite": true,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": false,
+  "description": "Headless PIE verification that injects an axis input and checks that the possessed pawn moves or rotates by the expected amount."
+}

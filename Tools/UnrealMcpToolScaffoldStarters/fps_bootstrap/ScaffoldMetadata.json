@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "toolName": "unreal.fps.bootstrap",
+  "toolId": "fps_bootstrap",
+  "category": "editor",
+  "riskLevel": "high",
+  "categorySourceFile": "UnrealMcpEditorTools.cpp",
+  "categoryTryExecute": "TryExecuteEditorTool",
+  "handlerFunctionName": "ExecuteFpsBootstrapTool",
+  "descriptorFirst": true,
+  "requiresWrite": true,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": true,
+  "description": "Complete FPS character bring-up: registers axis mappings, wires Blueprint EventGraph nodes including forward/right vector sources for AddMovementInput.WorldDirection, sets Pawn bUseControllerRotationYaw + Camera bUsePawnControlRotation, compiles + saves, and optionally invokes unreal.simulation.verify_input_drives_pawn for self-test."
+}

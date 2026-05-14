@@ -189,6 +189,7 @@ Tools/
   UnrealMcpCodexBridge/
   UnrealMcpKnowledge/
   UnrealMcpSkills/
+  UnrealMcpToolScaffoldStarters/
   UnrealMcpSupervisorTemplates/
   UnrealMcpTests/
   UnrealMcpToolRegistry/
@@ -211,6 +212,17 @@ Plugins/*/Intermediate/
 Do not commit local runtime state, fetched docs caches, generated KnowledgeIndex
 files, API keys, generated supervisor launchers, local test content, or
 unreviewed scaffold drafts unless the user explicitly asks.
+
+Versioned scaffold starters live under:
+
+```text
+Tools/UnrealMcpToolScaffoldStarters/
+```
+
+These are reviewed starter packages that can be copied into the ignored
+`Tools/UnrealMcpToolScaffolds/` workspace, then applied with
+`unreal.mcp_apply_scaffold` so the normal manifest, backup, build, test, and
+rollback trail is preserved.
 
 ## Current High-Level Feature Set
 
