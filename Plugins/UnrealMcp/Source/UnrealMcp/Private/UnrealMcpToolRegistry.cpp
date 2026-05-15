@@ -49,6 +49,13 @@ namespace UnrealMcp
 			return EToolRiskLevel::Low;
 		}
 
+		EToolImplementationTrack ParseImplementationTrack(const FString& Value)
+		{
+			return Value.Equals(TEXT("python"), ESearchCase::IgnoreCase)
+				? EToolImplementationTrack::Python
+				: EToolImplementationTrack::Cpp;
+		}
+
 		EToolExposure ConvertDescriptorExposure(EUnrealMcpToolExposure Exposure)
 		{
 			return Exposure == EUnrealMcpToolExposure::LegacyHidden ? EToolExposure::LegacyHidden : EToolExposure::Visible;
@@ -86,6 +93,89 @@ namespace UnrealMcp
 				Object->TryGetBoolField(FieldName, bValue);
 			}
 			return bValue;
+		}
+
+		TArray<FString> GetStringArrayFieldOrDefault(const TSharedPtr<FJsonObject>& Object, const FString& FieldName)
+		{
+			TArray<FString> Values;
+			const TArray<TSharedPtr<FJsonValue>>* ArrayValues = nullptr;
+			if (!Object.IsValid() || !Object->TryGetArrayField(FieldName, ArrayValues) || ArrayValues == nullptr)
+			{
+				return Values;
+			}
+
+			for (const TSharedPtr<FJsonValue>& ArrayValue : *ArrayValues)
+			{
+				if (!ArrayValue.IsValid() || ArrayValue->Type != EJson::String)
+				{
+					continue;
+				}
+				Values.Add(ArrayValue->AsString());
+			}
+			return Values;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> MakeStringArrayValues(const TArray<FString>& Strings)
+		{
+			TArray<TSharedPtr<FJsonValue>> Values;
+			for (const FString& StringValue : Strings)
+			{
+				Values.Add(MakeShared<FJsonValueString>(StringValue));
+			}
+			return Values;
+		}
+
+		bool IsValidPythonHandlerPath(const FString& PythonHandlerPath)
+		{
+			static const FString Prefix = TEXT("Tools/UnrealMcpPyTools/");
+			static const FString Suffix = TEXT("/main.py");
+			if (!PythonHandlerPath.StartsWith(Prefix, ESearchCase::CaseSensitive)
+				|| !PythonHandlerPath.EndsWith(Suffix, ESearchCase::CaseSensitive)
+				|| PythonHandlerPath.Contains(TEXT(".."), ESearchCase::CaseSensitive)
+				|| PythonHandlerPath.Contains(TEXT("\\"), ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+
+			const int32 ModuleSegmentLength = PythonHandlerPath.Len() - Prefix.Len() - Suffix.Len();
+			if (ModuleSegmentLength <= 0)
+			{
+				return false;
+			}
+
+			const FString ModuleSegment = PythonHandlerPath.Mid(Prefix.Len(), ModuleSegmentLength);
+			return !ModuleSegment.Contains(TEXT("/"), ESearchCase::CaseSensitive);
+		}
+
+		bool IsLowerHexSha256(const FString& PythonHandlerSha256)
+		{
+			if (PythonHandlerSha256.Len() != 64)
+			{
+				return false;
+			}
+			for (const TCHAR Character : PythonHandlerSha256)
+			{
+				const bool bIsDigit = Character >= TCHAR('0') && Character <= TCHAR('9');
+				const bool bIsLowerHex = Character >= TCHAR('a') && Character <= TCHAR('f');
+				if (!bIsDigit && !bIsLowerHex)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void AddImplementationMetadataFields(const TSharedPtr<FJsonObject>& Object, const FToolRegistryEntry* Entry)
+		{
+			if (!Object.IsValid())
+			{
+				return;
+			}
+
+			Object->SetStringField(TEXT("implementationTrack"), Entry ? UnrealMcp::LexToString(Entry->ImplementationTrack) : FString(TEXT("cpp")));
+			Object->SetStringField(TEXT("pythonHandlerPath"), Entry ? Entry->PythonHandlerPath : FString());
+			Object->SetStringField(TEXT("pythonHandlerSha256"), Entry ? Entry->PythonHandlerSha256 : FString());
+			Object->SetArrayField(TEXT("pythonImportAllowList"), Entry ? MakeStringArrayValues(Entry->PythonImportAllowList) : TArray<TSharedPtr<FJsonValue>>());
 		}
 
 		void AddValidationIssue(
@@ -344,6 +434,10 @@ namespace UnrealMcp
 				Entry.Category = GetStringFieldOrDefault(ToolObject, TEXT("category"), TEXT("uncategorized"));
 				Entry.HandlerName = GetStringFieldOrDefault(ToolObject, TEXT("handlerName"), Name);
 				Entry.Exposure = ParseExposure(GetStringFieldOrDefault(ToolObject, TEXT("exposure"), TEXT("visible")));
+				Entry.ImplementationTrack = ParseImplementationTrack(GetStringFieldOrDefault(ToolObject, TEXT("implementationTrack"), TEXT("cpp")));
+				Entry.PythonHandlerPath = GetStringFieldOrDefault(ToolObject, TEXT("pythonHandlerPath"));
+				Entry.PythonHandlerSha256 = GetStringFieldOrDefault(ToolObject, TEXT("pythonHandlerSha256"));
+				Entry.PythonImportAllowList = GetStringArrayFieldOrDefault(ToolObject, TEXT("pythonImportAllowList"));
 				Entry.Notes = GetStringFieldOrDefault(ToolObject, TEXT("notes"));
 				Entry.bLoadedFromExplicitRegistry = true;
 				Entry.bLoadedFromDescriptor = false;
@@ -483,6 +577,18 @@ namespace UnrealMcp
 		}
 	}
 
+	FString LexToString(EToolImplementationTrack ImplementationTrack)
+	{
+		switch (ImplementationTrack)
+		{
+		case EToolImplementationTrack::Python:
+			return TEXT("python");
+		case EToolImplementationTrack::Cpp:
+		default:
+			return TEXT("cpp");
+		}
+	}
+
 	FToolPolicy GetToolPolicy(const FString& ToolName)
 	{
 		if (const FToolRegistryEntry* Entry = FindToolRegistryEntry(ToolName))
@@ -522,6 +628,7 @@ namespace UnrealMcp
 		PolicyObject->SetStringField(TEXT("reason"), Policy.Reason);
 		PolicyObject->SetStringField(TEXT("summaryTemplate"), Policy.SummaryTemplate);
 		PolicyObject->SetBoolField(TEXT("explicitRegistryEntry"), HasExplicitToolRegistryEntry(ToolName));
+		AddImplementationMetadataFields(PolicyObject, FindToolRegistryEntry(ToolName));
 		if (const FToolRegistryEntry* Entry = FindToolRegistryEntry(ToolName))
 		{
 			PolicyObject->SetBoolField(TEXT("descriptorBacked"), Entry->bLoadedFromDescriptor);
@@ -538,6 +645,7 @@ namespace UnrealMcp
 		TSet<FString> VisibleRegistryNames;
 		TMap<FString, int32> CategoryCounts;
 		TMap<FString, int32> TestCoverageCounts;
+		TMap<FString, int32> ImplementationTrackCounts;
 		int32 ExplicitEntryCount = 0;
 		int32 DescriptorBackedCount = 0;
 		int32 DescriptorOnlyCount = 0;
@@ -566,6 +674,7 @@ namespace UnrealMcp
 			NameCounts.FindOrAdd(Entry.Name)++;
 			CategoryCounts.FindOrAdd(Entry.Category)++;
 			TestCoverageCounts.FindOrAdd(Entry.Policy.TestCoverage)++;
+			ImplementationTrackCounts.FindOrAdd(UnrealMcp::LexToString(Entry.ImplementationTrack))++;
 			ExplicitEntryCount += Entry.bLoadedFromExplicitRegistry ? 1 : 0;
 			DescriptorBackedCount += Entry.bLoadedFromDescriptor ? 1 : 0;
 			DescriptorOnlyCount += Entry.bLoadedFromDescriptor && !Entry.bLoadedFromExplicitRegistry ? 1 : 0;
@@ -603,6 +712,17 @@ namespace UnrealMcp
 				else if (!HandlerEntry->Category.Equals(Entry.Category, ESearchCase::CaseSensitive))
 				{
 					AddValidationIssue(Issues, TEXT("warning"), TEXT("handler_category_mismatch"), Entry.Name, FString::Printf(TEXT("handlerName '%s' is registered under category '%s', but tool registry category is '%s'."), *Entry.HandlerName, *HandlerEntry->Category, *Entry.Category));
+				}
+			}
+			if (Entry.ImplementationTrack == EToolImplementationTrack::Python)
+			{
+				if (!IsValidPythonHandlerPath(Entry.PythonHandlerPath))
+				{
+					AddValidationIssue(Issues, TEXT("error"), TEXT("invalid_python_handler_path"), Entry.Name, TEXT("Python implementationTrack entries require pythonHandlerPath matching Tools/UnrealMcpPyTools/<tool>/main.py."));
+				}
+				if (!IsLowerHexSha256(Entry.PythonHandlerSha256))
+				{
+					AddValidationIssue(Issues, TEXT("error"), TEXT("invalid_python_handler_sha256"), Entry.Name, TEXT("Python implementationTrack entries require a lowercase 64-character pythonHandlerSha256."));
 				}
 			}
 			if (Entry.Policy.Owner.TrimStartAndEnd().IsEmpty())
@@ -688,6 +808,7 @@ namespace UnrealMcp
 		ValidationObject->SetNumberField(TEXT("issueCount"), Issues.Num());
 		ValidationObject->SetObjectField(TEXT("categoryCounts"), MapToJsonObject(CategoryCounts));
 		ValidationObject->SetObjectField(TEXT("testCoverageCounts"), MapToJsonObject(TestCoverageCounts));
+		ValidationObject->SetObjectField(TEXT("implementationTrackCounts"), MapToJsonObject(ImplementationTrackCounts));
 		ValidationObject->SetArrayField(TEXT("issues"), Issues);
 		if (VisibleToolsArray)
 		{
@@ -710,6 +831,7 @@ namespace UnrealMcp
 		int32 ExplicitEntryCount = 0;
 		int32 DescriptorBackedCount = 0;
 		int32 DescriptorOnlyCount = 0;
+		int32 PythonImplementationCount = 0;
 
 		for (const FToolRegistryEntry& Entry : GetToolRegistryEntries())
 		{
@@ -718,6 +840,7 @@ namespace UnrealMcp
 			EntryObject->SetStringField(TEXT("category"), Entry.Category);
 			EntryObject->SetStringField(TEXT("handlerName"), Entry.HandlerName.IsEmpty() ? Entry.Name : Entry.HandlerName);
 			EntryObject->SetStringField(TEXT("exposure"), Entry.Exposure == EToolExposure::Visible ? TEXT("visible") : TEXT("legacy_hidden"));
+			AddImplementationMetadataFields(EntryObject, &Entry);
 			EntryObject->SetStringField(TEXT("notes"), Entry.Notes);
 			EntryObject->SetBoolField(TEXT("explicitRegistryEntry"), Entry.bLoadedFromExplicitRegistry);
 			EntryObject->SetBoolField(TEXT("descriptorBacked"), Entry.bLoadedFromDescriptor);
@@ -729,6 +852,7 @@ namespace UnrealMcp
 			ExplicitEntryCount += Entry.bLoadedFromExplicitRegistry ? 1 : 0;
 			DescriptorBackedCount += Entry.bLoadedFromDescriptor ? 1 : 0;
 			DescriptorOnlyCount += Entry.bLoadedFromDescriptor && !Entry.bLoadedFromExplicitRegistry ? 1 : 0;
+			PythonImplementationCount += Entry.ImplementationTrack == EToolImplementationTrack::Python ? 1 : 0;
 			if (Entry.Exposure == EToolExposure::LegacyHidden)
 			{
 				HiddenValues.Add(EntryValue);
@@ -744,6 +868,7 @@ namespace UnrealMcp
 		StructuredContent->SetNumberField(TEXT("explicitToolRegistryEntryCount"), ExplicitEntryCount);
 		StructuredContent->SetNumberField(TEXT("descriptorBackedToolCount"), DescriptorBackedCount);
 		StructuredContent->SetNumberField(TEXT("descriptorOnlyToolCount"), DescriptorOnlyCount);
+		StructuredContent->SetNumberField(TEXT("pythonImplementationToolCount"), PythonImplementationCount);
 		StructuredContent->SetNumberField(TEXT("legacyHiddenToolCount"), HiddenValues.Num());
 		StructuredContent->SetNumberField(TEXT("handlerAliasCount"), AliasValues.Num());
 		StructuredContent->SetArrayField(TEXT("toolRegistryEntries"), EntryValues);

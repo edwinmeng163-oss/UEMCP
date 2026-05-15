@@ -22,6 +22,12 @@ namespace UnrealMcp
 		Critical
 	};
 
+	enum class EToolImplementationTrack : uint8
+	{
+		Cpp,
+		Python
+	};
+
 	struct FToolPolicy
 	{
 		EToolRiskLevel RiskLevel = EToolRiskLevel::Low;
@@ -48,6 +54,10 @@ namespace UnrealMcp
 		FString Category;
 		FString HandlerName;
 		EToolExposure Exposure = EToolExposure::Visible;
+		EToolImplementationTrack ImplementationTrack = EToolImplementationTrack::Cpp;
+		FString PythonHandlerPath;
+		FString PythonHandlerSha256;
+		TArray<FString> PythonImportAllowList;
 		FString Notes;
 		FToolPolicy Policy;
 		bool bLoadedFromExplicitRegistry = false;
@@ -62,6 +72,7 @@ namespace UnrealMcp
 	FString ResolveToolHandlerName(const FString& ToolName);
 	FToolPolicy GetToolPolicy(const FString& ToolName);
 	FString LexToString(EToolRiskLevel RiskLevel);
+	FString LexToString(EToolImplementationTrack ImplementationTrack);
 	TSharedPtr<FJsonObject> MakeToolPolicyObject(const FString& ToolName);
 	TSharedPtr<FJsonObject> MakeToolRegistryValidationObject(const TArray<TSharedPtr<FJsonValue>>* VisibleToolsArray = nullptr);
 	void AddToolRegistryStatus(const TSharedPtr<FJsonObject>& StructuredContent);
