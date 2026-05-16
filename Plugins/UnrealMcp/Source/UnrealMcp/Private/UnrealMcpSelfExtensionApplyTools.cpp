@@ -1370,15 +1370,448 @@ namespace UnrealMcp
 			return true;
 		}
 
-		FUnrealMcpExecutionResult ApplyMcpScaffold(const FJsonObject& Arguments)
+		struct FScaffoldApplyContext
 		{
+			const FJsonObject* Arguments = nullptr;
 			FString ScaffoldDirectory;
 			FString ToolName;
-			FString FailureReason;
-			if (!ResolveMcpScaffoldDirectory(Arguments, ScaffoldDirectory, ToolName, FailureReason))
+		};
+
+		struct FApplyResult
+		{
+			FUnrealMcpExecutionResult ExecutionResult;
+			TSharedPtr<FJsonObject> StructuredContent;
+		};
+
+		struct FResolvedScaffoldDependency
+		{
+			FString ToolName;
+			FString ToolId;
+			FString ScaffoldDirectory;
+			TArray<FString> Aliases;
+		};
+
+		FString MakeScaffoldDependencyKey(const FString& ToolNameOrId)
+		{
+			return SanitizeMcpToolIdForPath(ToolNameOrId).ToLower();
+		}
+
+		FString NormalizeScaffoldDirectoryForDependency(const FString& Directory)
+		{
+			FString NormalizedDirectory = FPaths::ConvertRelativePathToFull(Directory);
+			FPaths::NormalizeDirectoryName(NormalizedDirectory);
+			FPaths::CollapseRelativeDirectories(NormalizedDirectory);
+			return NormalizedDirectory;
+		}
+
+		TSharedPtr<FJsonObject> MakeDependencyIssue(const FString& Code, const FString& Message)
+		{
+			TSharedPtr<FJsonObject> Issue = MakeShared<FJsonObject>();
+			Issue->SetStringField(TEXT("severity"), TEXT("error"));
+			Issue->SetStringField(TEXT("code"), Code);
+			Issue->SetStringField(TEXT("file"), TEXT("ScaffoldMetadata.json"));
+			Issue->SetStringField(TEXT("message"), Message);
+			return Issue;
+		}
+
+		bool ReadScaffoldDependsOn(const FString& ScaffoldDirectory, TArray<FString>& OutDependsOn)
+		{
+			OutDependsOn.Reset();
+
+			const FString MetadataPath = FPaths::Combine(ScaffoldDirectory, TEXT("ScaffoldMetadata.json"));
+			if (!FPaths::FileExists(MetadataPath))
 			{
-				return MakeExecutionResult(FailureReason, nullptr, true);
+				return true;
 			}
+
+			TSharedPtr<FJsonObject> MetadataObject;
+			FString FailureReason;
+			if (!LoadJsonObjectFromFile(MetadataPath, MetadataObject, FailureReason) || !MetadataObject.IsValid())
+			{
+				// Preserve pre-G3b behavior: malformed/missing optional metadata never blocked
+				// a single-scaffold apply. It simply contributes no dependency edges.
+				return true;
+			}
+
+			FMcpScaffoldBuildRequirements Requirements;
+			ParseScaffoldBuildRequirementsMetadata(MetadataObject, Requirements);
+			OutDependsOn = Requirements.DependsOn;
+			return true;
+		}
+
+		void ReadScaffoldDependencyIdentity(const FString& ScaffoldDirectory, FString& OutToolName, FString& OutToolId)
+		{
+			OutToolName.Reset();
+			OutToolId.Reset();
+
+			const FString MetadataPath = FPaths::Combine(ScaffoldDirectory, TEXT("ScaffoldMetadata.json"));
+			TSharedPtr<FJsonObject> MetadataObject;
+			FString FailureReason;
+			if (LoadJsonObjectFromFile(MetadataPath, MetadataObject, FailureReason) && MetadataObject.IsValid())
+			{
+				MetadataObject->TryGetStringField(TEXT("toolName"), OutToolName);
+				MetadataObject->TryGetStringField(TEXT("toolId"), OutToolId);
+				OutToolName = OutToolName.TrimStartAndEnd();
+				OutToolId = OutToolId.TrimStartAndEnd();
+			}
+
+			if (OutToolName.IsEmpty())
+			{
+				const FString RegistryPatchPath = FPaths::Combine(ScaffoldDirectory, TEXT("ToolRegistryPatch.json"));
+				TSharedPtr<FJsonObject> RegistryPatchObject;
+				if (LoadJsonObjectFromFile(RegistryPatchPath, RegistryPatchObject, FailureReason) && RegistryPatchObject.IsValid())
+				{
+					RegistryPatchObject->TryGetStringField(TEXT("name"), OutToolName);
+					OutToolName = OutToolName.TrimStartAndEnd();
+				}
+			}
+
+			if (OutToolId.IsEmpty())
+			{
+				OutToolId = FPaths::GetCleanFilename(NormalizeScaffoldDirectoryForDependency(ScaffoldDirectory));
+			}
+		}
+
+		void AddScaffoldDependencyKeyFromString(const FString& Value, TArray<FString>& OutKeys)
+		{
+			if (Value.TrimStartAndEnd().IsEmpty())
+			{
+				return;
+			}
+
+			const FString Key = MakeScaffoldDependencyKey(Value);
+			if (!Key.IsEmpty() && !OutKeys.Contains(Key))
+			{
+				OutKeys.Add(Key);
+			}
+		}
+
+		void GetScaffoldDependencyKeys(const FResolvedScaffoldDependency& Node, TArray<FString>& OutKeys)
+		{
+			OutKeys.Reset();
+			AddScaffoldDependencyKeyFromString(Node.ToolName, OutKeys);
+			AddScaffoldDependencyKeyFromString(Node.ToolId, OutKeys);
+			for (const FString& Alias : Node.Aliases)
+			{
+				AddScaffoldDependencyKeyFromString(Alias, OutKeys);
+			}
+			AddScaffoldDependencyKeyFromString(FPaths::GetCleanFilename(Node.ScaffoldDirectory), OutKeys);
+		}
+
+		bool DependencyKeyMatchesNode(const FString& DependencyKey, const FResolvedScaffoldDependency& Node)
+		{
+			TArray<FString> NodeKeys;
+			GetScaffoldDependencyKeys(Node, NodeKeys);
+			return NodeKeys.Contains(DependencyKey);
+		}
+
+		FString MakeScaffoldDependencyVisitKey(const FResolvedScaffoldDependency& Node)
+		{
+			return NormalizeScaffoldDirectoryForDependency(Node.ScaffoldDirectory).ToLower();
+		}
+
+		bool MakeResolvedDependencyNodeFromDirectory(
+			const FString& DependencyReference,
+			const FString& ScaffoldDirectory,
+			FResolvedScaffoldDependency& OutNode)
+		{
+			OutNode.ScaffoldDirectory = NormalizeScaffoldDirectoryForDependency(ScaffoldDirectory);
+			ReadScaffoldDependencyIdentity(OutNode.ScaffoldDirectory, OutNode.ToolName, OutNode.ToolId);
+			if (OutNode.ToolName.IsEmpty())
+			{
+				OutNode.ToolName = DependencyReference.TrimStartAndEnd();
+			}
+			if (OutNode.ToolId.IsEmpty())
+			{
+				OutNode.ToolId = SanitizeMcpToolIdForPath(DependencyReference);
+			}
+			return !OutNode.ToolName.IsEmpty();
+		}
+
+		bool TryResolveDependencyScaffold(
+			const FString& DependencyRoot,
+			const FString& DependencyReference,
+			FResolvedScaffoldDependency& OutNode)
+		{
+			OutNode = FResolvedScaffoldDependency();
+			const FString DependencyKey = MakeScaffoldDependencyKey(DependencyReference);
+			const FString DirectCandidate = NormalizeScaffoldDirectoryForDependency(FPaths::Combine(
+				DependencyRoot,
+				SanitizeMcpToolIdForPath(DependencyReference)));
+			if (FPaths::DirectoryExists(DirectCandidate))
+			{
+				return MakeResolvedDependencyNodeFromDirectory(DependencyReference, DirectCandidate, OutNode);
+			}
+
+			TArray<FString> ChildDirectories;
+			IFileManager::Get().FindFiles(ChildDirectories, *FPaths::Combine(DependencyRoot, TEXT("*")), false, true);
+			ChildDirectories.Sort();
+			for (const FString& ChildDirectory : ChildDirectories)
+			{
+				const FString CandidateDirectory = NormalizeScaffoldDirectoryForDependency(
+					FPaths::IsRelative(ChildDirectory) ? FPaths::Combine(DependencyRoot, ChildDirectory) : ChildDirectory);
+				if (!FPaths::DirectoryExists(CandidateDirectory))
+				{
+					continue;
+				}
+
+				FResolvedScaffoldDependency CandidateNode;
+				if (!MakeResolvedDependencyNodeFromDirectory(DependencyReference, CandidateDirectory, CandidateNode))
+				{
+					continue;
+				}
+
+				TArray<FString> CandidateKeys;
+				GetScaffoldDependencyKeys(CandidateNode, CandidateKeys);
+				if (CandidateKeys.Contains(DependencyKey))
+				{
+					OutNode = CandidateNode;
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		bool ResolveDependencyScaffoldRoot(
+			const FJsonObject& Arguments,
+			const FString& CurrentScaffoldDirectory,
+			FString& OutDependencyRoot,
+			FString& OutFailureReason)
+		{
+			FString RequestedOutputRoot;
+			Arguments.TryGetStringField(TEXT("outputRoot"), RequestedOutputRoot);
+			if (!RequestedOutputRoot.TrimStartAndEnd().IsEmpty())
+			{
+				return ResolveProjectOutputDirectory(RequestedOutputRoot, OutDependencyRoot, OutFailureReason);
+			}
+
+			FString RequestedScaffoldDirectory;
+			Arguments.TryGetStringField(TEXT("scaffoldDir"), RequestedScaffoldDirectory);
+			if (!RequestedScaffoldDirectory.TrimStartAndEnd().IsEmpty())
+			{
+				OutDependencyRoot = NormalizeScaffoldDirectoryForDependency(FPaths::GetPath(CurrentScaffoldDirectory));
+				return true;
+			}
+
+			return ResolveProjectOutputDirectory(FString(), OutDependencyRoot, OutFailureReason);
+		}
+
+		bool ResolveScaffoldDependencyOrder(
+			const FResolvedScaffoldDependency& RootNode,
+			const FString& DependencyRoot,
+			TArray<FResolvedScaffoldDependency>& OutApplyOrder,
+			TArray<TSharedPtr<FJsonValue>>& Issues,
+			FString& OutFailureReason)
+		{
+			OutApplyOrder.Reset();
+			OutFailureReason.Reset();
+
+			TMap<FString, int32> VisitState;
+			TArray<FString> StackKeys;
+			TArray<FString> StackDisplayNames;
+
+			TFunction<bool(const FResolvedScaffoldDependency&)> VisitNode;
+			VisitNode = [
+				&DependencyRoot,
+				&Issues,
+				&OutApplyOrder,
+				&OutFailureReason,
+				&RootNode,
+				&StackDisplayNames,
+				&StackKeys,
+				&VisitNode,
+				&VisitState
+			](const FResolvedScaffoldDependency& Node) -> bool
+			{
+				const FString NodeKey = MakeScaffoldDependencyVisitKey(Node);
+				const int32* ExistingState = VisitState.Find(NodeKey);
+				if (ExistingState && *ExistingState == 2)
+				{
+					return true;
+				}
+				if (ExistingState && *ExistingState == 1)
+				{
+					int32 CycleStartIndex = INDEX_NONE;
+					for (int32 StackIndex = 0; StackIndex < StackKeys.Num(); ++StackIndex)
+					{
+						if (StackKeys[StackIndex] == NodeKey)
+						{
+							CycleStartIndex = StackIndex;
+							break;
+						}
+					}
+
+					TArray<FString> CyclePath;
+					if (CycleStartIndex != INDEX_NONE)
+					{
+						for (int32 PathIndex = CycleStartIndex; PathIndex < StackDisplayNames.Num(); ++PathIndex)
+						{
+							CyclePath.Add(StackDisplayNames[PathIndex]);
+						}
+					}
+					CyclePath.Add(Node.ToolName);
+
+					OutFailureReason = FString::Printf(TEXT("dependency cycle detected: %s"), *FString::Join(CyclePath, TEXT(" -> ")));
+					Issues.Add(MakeShared<FJsonValueObject>(MakeDependencyIssue(TEXT("dependency_cycle_detected"), OutFailureReason)));
+					return false;
+				}
+
+				VisitState.Add(NodeKey, 1);
+				StackKeys.Add(NodeKey);
+				StackDisplayNames.Add(Node.ToolName);
+
+				TArray<FString> DependsOn;
+				ReadScaffoldDependsOn(Node.ScaffoldDirectory, DependsOn);
+				for (const FString& DependencyToolId : DependsOn)
+				{
+					const FString DependencyKey = MakeScaffoldDependencyKey(DependencyToolId);
+					if (DependencyKeyMatchesNode(DependencyKey, Node))
+					{
+						OutFailureReason = TEXT("scaffold cannot depend on itself");
+						Issues.Add(MakeShared<FJsonValueObject>(MakeDependencyIssue(TEXT("dependency_self_reference"), OutFailureReason)));
+						return false;
+					}
+
+					FResolvedScaffoldDependency DependencyNode;
+					if (DependencyKeyMatchesNode(DependencyKey, RootNode))
+					{
+						DependencyNode = RootNode;
+					}
+					else if (!TryResolveDependencyScaffold(DependencyRoot, DependencyToolId, DependencyNode))
+					{
+						OutFailureReason = FString::Printf(TEXT("dependency scaffold not found: %s"), *DependencyToolId);
+						Issues.Add(MakeShared<FJsonValueObject>(MakeDependencyIssue(TEXT("dependency_scaffold_not_found"), OutFailureReason)));
+						return false;
+					}
+
+					if (!VisitNode(DependencyNode))
+					{
+						return false;
+					}
+				}
+
+				StackKeys.Pop(EAllowShrinking::No);
+				StackDisplayNames.Pop(EAllowShrinking::No);
+				VisitState.Add(NodeKey, 2);
+				OutApplyOrder.Add(Node);
+				return true;
+			};
+
+			return VisitNode(RootNode);
+		}
+
+		bool TryGetJsonBoolField(const TSharedPtr<FJsonObject>& Object, const FString& FieldName, bool DefaultValue)
+		{
+			if (!Object.IsValid())
+			{
+				return DefaultValue;
+			}
+			bool Value = DefaultValue;
+			Object->TryGetBoolField(FieldName, Value);
+			return Value;
+		}
+
+		int32 CountJsonArrayField(const TSharedPtr<FJsonObject>& Object, const FString& FieldName)
+		{
+			if (!Object.IsValid())
+			{
+				return 0;
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+			if (Object->TryGetArrayField(FieldName, Values) && Values)
+			{
+				return Values->Num();
+			}
+			return 0;
+		}
+
+		TSharedPtr<FJsonObject> MakeDependencyChainEntry(
+			const FResolvedScaffoldDependency& Node,
+			const FApplyResult& Result,
+			bool bDryRun)
+		{
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("toolName"), Node.ToolName);
+			Entry->SetStringField(TEXT("scaffoldDir"), Node.ScaffoldDirectory);
+			Entry->SetBoolField(TEXT("applied"), !bDryRun && !Result.ExecutionResult.bIsError);
+			if (bDryRun)
+			{
+				Entry->SetBoolField(TEXT("planned"), !Result.ExecutionResult.bIsError);
+			}
+			Entry->SetStringField(TEXT("summary"), Result.ExecutionResult.Text);
+
+			const int32 SourcesWritten = bDryRun
+				? 0
+				: CountJsonArrayField(Result.StructuredContent, TEXT("manifestFiles"));
+			Entry->SetNumberField(TEXT("sourcesWritten"), SourcesWritten);
+
+			const TSharedPtr<FJsonObject>* BuildRequirementsObject = nullptr;
+			if (Result.StructuredContent.IsValid()
+				&& Result.StructuredContent->TryGetObjectField(TEXT("buildRequirements"), BuildRequirementsObject)
+				&& BuildRequirementsObject
+				&& (*BuildRequirementsObject).IsValid())
+			{
+				Entry->SetObjectField(TEXT("buildRequirements"), *BuildRequirementsObject);
+			}
+			else
+			{
+				Entry->SetObjectField(TEXT("buildRequirements"), MakeShared<FJsonObject>());
+			}
+
+			Entry->SetNumberField(TEXT("issues"), CountJsonArrayField(Result.StructuredContent, TEXT("issues")));
+			return Entry;
+		}
+
+		TSharedPtr<FJsonObject> MakeDependencyFailureContent(
+			const FString& ToolName,
+			const FString& ScaffoldDirectory,
+			const FString& DependencyRoot,
+			bool bDryRun,
+			const FString& FailureReason,
+			const TArray<TSharedPtr<FJsonValue>>& Issues,
+			const TArray<TSharedPtr<FJsonValue>>& DependencyChain)
+		{
+			TSharedPtr<FJsonObject> RegistrationStatusObject = MakeShared<FJsonObject>();
+			RegistrationStatusObject->SetBoolField(TEXT("scaffoldExists"), FPaths::DirectoryExists(ScaffoldDirectory));
+			RegistrationStatusObject->SetBoolField(TEXT("registeredUsableNow"), false);
+			RegistrationStatusObject->SetBoolField(TEXT("requiresApply"), true);
+			RegistrationStatusObject->SetBoolField(TEXT("requiresBuildRestartForRuntimeVisibility"), true);
+			RegistrationStatusObject->SetStringField(TEXT("notRegisteredReason"), FailureReason);
+
+			TArray<TSharedPtr<FJsonValue>> NextSteps;
+			AddScaffoldNextStep(NextSteps, TEXT("Repair ScaffoldMetadata.json dependsOn or create the missing prerequisite scaffold under the dependency root."), TEXT("unreal.scaffold_mcp_tool"), FailureReason);
+			AddScaffoldNextStep(NextSteps, TEXT("Rerun mcp_apply_scaffold with dryRun=true after dependency resolution succeeds."), TEXT("unreal.mcp_apply_scaffold"), TEXT("Dependencies must apply in topological order before the requested scaffold."));
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_apply_scaffold"));
+			StructuredContent->SetStringField(TEXT("applyMode"), TEXT("descriptor_first"));
+			StructuredContent->SetStringField(TEXT("toolName"), ToolName);
+			StructuredContent->SetStringField(TEXT("toolId"), SanitizeMcpToolIdForPath(ToolName));
+			StructuredContent->SetStringField(TEXT("scaffoldDir"), ScaffoldDirectory);
+			StructuredContent->SetStringField(TEXT("dependencyRoot"), DependencyRoot);
+			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
+			StructuredContent->SetBoolField(TEXT("canApply"), false);
+			StructuredContent->SetBoolField(TEXT("patchesSafe"), false);
+			StructuredContent->SetArrayField(TEXT("issues"), Issues);
+			StructuredContent->SetArrayField(TEXT("dependencyChain"), DependencyChain);
+			StructuredContent->SetObjectField(TEXT("registrationStatus"), RegistrationStatusObject);
+			StructuredContent->SetArrayField(TEXT("nextSteps"), NextSteps);
+			return StructuredContent;
+		}
+
+		FUnrealMcpExecutionResult ApplyResolvedScaffoldExecution(const FScaffoldApplyContext& Ctx)
+		{
+			if (!Ctx.Arguments)
+			{
+				return MakeExecutionResult(TEXT("ApplyResolvedScaffold requires non-null arguments."), nullptr, true);
+			}
+
+			const FJsonObject& Arguments = *Ctx.Arguments;
+			FString ScaffoldDirectory = Ctx.ScaffoldDirectory;
+			FString ToolName = Ctx.ToolName;
+			FString FailureReason;
 
 			bool bDryRun = true;
 			bool bApplyChatCommand = false;
@@ -2448,6 +2881,139 @@ namespace UnrealMcp
 				FString::Printf(TEXT("Applied descriptor-first scaffold for %s. Backup: %s"), *ToolName, *BackupDirectory),
 				StructuredContent,
 				false);
+		}
+
+		bool ApplyResolvedScaffold(const FScaffoldApplyContext& Ctx, FApplyResult& OutResult)
+		{
+			OutResult = FApplyResult();
+			OutResult.ExecutionResult = ApplyResolvedScaffoldExecution(Ctx);
+			OutResult.StructuredContent = OutResult.ExecutionResult.StructuredContent;
+			return !OutResult.ExecutionResult.bIsError;
+		}
+
+		FUnrealMcpExecutionResult ApplyMcpScaffold(const FJsonObject& Arguments)
+		{
+			FString ScaffoldDirectory;
+			FString ToolName;
+			FString FailureReason;
+			if (!ResolveMcpScaffoldDirectory(Arguments, ScaffoldDirectory, ToolName, FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			bool bDryRun = true;
+			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
+
+			FResolvedScaffoldDependency RootNode;
+			RootNode.ToolName = ToolName;
+			RootNode.ToolId = SanitizeMcpToolIdForPath(ToolName);
+			RootNode.ScaffoldDirectory = NormalizeScaffoldDirectoryForDependency(ScaffoldDirectory);
+			FString RootMetadataToolName;
+			FString RootMetadataToolId;
+			ReadScaffoldDependencyIdentity(RootNode.ScaffoldDirectory, RootMetadataToolName, RootMetadataToolId);
+			if (!RootMetadataToolId.IsEmpty())
+			{
+				RootNode.ToolId = RootMetadataToolId;
+			}
+			if (!RootMetadataToolName.IsEmpty() && !RootMetadataToolName.Equals(RootNode.ToolName, ESearchCase::CaseSensitive))
+			{
+				RootNode.Aliases.Add(RootMetadataToolName);
+			}
+
+			TArray<FString> RootDependsOn;
+			ReadScaffoldDependsOn(RootNode.ScaffoldDirectory, RootDependsOn);
+			if (RootDependsOn.Num() == 0)
+			{
+				FApplyResult SingleResult;
+				FScaffoldApplyContext SingleCtx;
+				SingleCtx.Arguments = &Arguments;
+				SingleCtx.ScaffoldDirectory = RootNode.ScaffoldDirectory;
+				SingleCtx.ToolName = ToolName;
+				ApplyResolvedScaffold(SingleCtx, SingleResult);
+				return SingleResult.ExecutionResult;
+			}
+
+			FString DependencyRoot;
+			if (!ResolveDependencyScaffoldRoot(Arguments, ScaffoldDirectory, DependencyRoot, FailureReason))
+			{
+				TArray<TSharedPtr<FJsonValue>> Issues;
+				Issues.Add(MakeShared<FJsonValueObject>(MakeDependencyIssue(TEXT("dependency_root_invalid"), FailureReason)));
+				return MakeExecutionResult(
+					FailureReason,
+					MakeDependencyFailureContent(ToolName, ScaffoldDirectory, DependencyRoot, bDryRun, FailureReason, Issues, TArray<TSharedPtr<FJsonValue>>()),
+					true);
+			}
+
+			TArray<FResolvedScaffoldDependency> ApplyOrder;
+			TArray<TSharedPtr<FJsonValue>> DependencyIssues;
+			if (!ResolveScaffoldDependencyOrder(RootNode, DependencyRoot, ApplyOrder, DependencyIssues, FailureReason))
+			{
+				return MakeExecutionResult(
+					FailureReason,
+					MakeDependencyFailureContent(ToolName, RootNode.ScaffoldDirectory, DependencyRoot, bDryRun, FailureReason, DependencyIssues, TArray<TSharedPtr<FJsonValue>>()),
+					true);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> DependencyChain;
+			bool bChainCanApply = true;
+			FApplyResult LastResult;
+			for (const FResolvedScaffoldDependency& Node : ApplyOrder)
+			{
+				FScaffoldApplyContext NodeCtx;
+				NodeCtx.Arguments = &Arguments;
+				NodeCtx.ScaffoldDirectory = Node.ScaffoldDirectory;
+				NodeCtx.ToolName = Node.ToolName;
+
+				FApplyResult NodeResult;
+				ApplyResolvedScaffold(NodeCtx, NodeResult);
+				const bool bNodeCanApply = TryGetJsonBoolField(NodeResult.StructuredContent, TEXT("canApply"), !NodeResult.ExecutionResult.bIsError);
+				bChainCanApply &= bNodeCanApply;
+				DependencyChain.Add(MakeShared<FJsonValueObject>(MakeDependencyChainEntry(Node, NodeResult, bDryRun)));
+
+				if (NodeResult.ExecutionResult.bIsError)
+				{
+					if (!NodeResult.StructuredContent.IsValid())
+					{
+						TArray<TSharedPtr<FJsonValue>> EmptyIssues;
+						NodeResult.StructuredContent = MakeDependencyFailureContent(
+							ToolName,
+							RootNode.ScaffoldDirectory,
+							DependencyRoot,
+							bDryRun,
+							NodeResult.ExecutionResult.Text,
+							EmptyIssues,
+							DependencyChain);
+					}
+
+					NodeResult.StructuredContent->SetBoolField(TEXT("canApply"), false);
+					NodeResult.StructuredContent->SetArrayField(TEXT("dependencyChain"), DependencyChain);
+
+					TSharedPtr<FJsonObject> DependencyFailureObject = MakeShared<FJsonObject>();
+					DependencyFailureObject->SetStringField(TEXT("toolName"), Node.ToolName);
+					DependencyFailureObject->SetStringField(TEXT("scaffoldDir"), Node.ScaffoldDirectory);
+					DependencyFailureObject->SetStringField(TEXT("summary"), NodeResult.ExecutionResult.Text);
+					DependencyFailureObject->SetNumberField(TEXT("appliedBeforeFailure"), DependencyChain.Num() - 1);
+					NodeResult.StructuredContent->SetObjectField(TEXT("dependencyFailure"), DependencyFailureObject);
+
+					return MakeExecutionResult(
+						FString::Printf(TEXT("Dependency apply failed at %s: %s"), *Node.ToolName, *NodeResult.ExecutionResult.Text),
+						NodeResult.StructuredContent,
+						true);
+				}
+
+				LastResult = NodeResult;
+			}
+
+			if (LastResult.StructuredContent.IsValid())
+			{
+				LastResult.StructuredContent->SetArrayField(TEXT("dependencyChain"), DependencyChain);
+				LastResult.StructuredContent->SetBoolField(TEXT("canApply"), bChainCanApply);
+			}
+
+			LastResult.ExecutionResult.Text = bDryRun
+				? FString::Printf(TEXT("Descriptor-first dependency dry run complete for %s. canApply=%s, scaffolds=%d"), *ToolName, bChainCanApply ? TEXT("true") : TEXT("false"), ApplyOrder.Num())
+				: FString::Printf(TEXT("Applied descriptor-first dependency chain for %s. scaffolds=%d"), *ToolName, ApplyOrder.Num());
+			return LastResult.ExecutionResult;
 		}
 
 }
