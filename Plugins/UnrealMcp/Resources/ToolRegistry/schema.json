@@ -53,6 +53,12 @@
             "type": "string",
             "pattern": "^unreal\\.[a-z0-9_\\.]+$"
           },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
           "category": {
             "type": "string",
             "enum": [
@@ -163,6 +169,12 @@
           "summaryTemplate": {
             "type": "string",
             "description": "Human-readable template interpolating {args.*} and {result.*} fields for the Chat panel tool card header."
+          },
+          "inputSchema": {
+            "type": "object"
+          },
+          "outputSchema": {
+            "type": "object"
           },
           "notes": {
             "type": "string"

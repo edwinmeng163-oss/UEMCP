@@ -53,6 +53,9 @@ namespace UnrealMcp
 		FString Name;
 		FString Category;
 		FString HandlerName;
+		FString Title;
+		FString Description;
+		TSharedPtr<FJsonObject> InputSchema;
 		EToolExposure Exposure = EToolExposure::Visible;
 		EToolImplementationTrack ImplementationTrack = EToolImplementationTrack::Cpp;
 		FString PythonHandlerPath;

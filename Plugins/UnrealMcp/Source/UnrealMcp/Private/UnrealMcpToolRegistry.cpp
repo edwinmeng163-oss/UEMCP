@@ -115,6 +115,16 @@ namespace UnrealMcp
 			return Values;
 		}
 
+		TSharedPtr<FJsonObject> GetObjectFieldOrDefault(const TSharedPtr<FJsonObject>& Object, const FString& FieldName)
+		{
+			const TSharedPtr<FJsonObject>* ObjectValue = nullptr;
+			if (Object.IsValid() && Object->TryGetObjectField(FieldName, ObjectValue) && ObjectValue && (*ObjectValue).IsValid())
+			{
+				return *ObjectValue;
+			}
+			return nullptr;
+		}
+
 		TArray<TSharedPtr<FJsonValue>> MakeStringArrayValues(const TArray<FString>& Strings)
 		{
 			TArray<TSharedPtr<FJsonValue>> Values;
@@ -299,12 +309,16 @@ namespace UnrealMcp
 			return Entry;
 		}
 
-		FToolRegistryEntry MakeDescriptorRegistryEntry(const FUnrealMcpToolDescriptor& Descriptor)
+		FToolRegistryEntry MakeDescriptorRegistryEntry(const FRegisteredUnrealMcpToolDescriptor& RegisteredTool)
 		{
+			const FUnrealMcpToolDescriptor& Descriptor = RegisteredTool.Descriptor;
 			FToolRegistryEntry Entry;
 			Entry.Name = Descriptor.Name;
 			Entry.Category = Descriptor.Category;
 			Entry.HandlerName = Descriptor.HandlerName.IsEmpty() ? Descriptor.Name : Descriptor.HandlerName;
+			Entry.Title = Descriptor.Title;
+			Entry.Description = Descriptor.Description;
+			Entry.InputSchema = RegisteredTool.InputSchema;
 			Entry.Exposure = ConvertDescriptorExposure(Descriptor.Exposure);
 			Entry.Notes = Descriptor.Notes;
 			Entry.bLoadedFromExplicitRegistry = false;
@@ -332,7 +346,7 @@ namespace UnrealMcp
 			TArray<FToolRegistryEntry> Entries;
 			for (const FRegisteredUnrealMcpToolDescriptor& RegisteredTool : GetRegisteredMcpToolDescriptors())
 			{
-				Entries.Add(MakeDescriptorRegistryEntry(RegisteredTool.Descriptor));
+				Entries.Add(MakeDescriptorRegistryEntry(RegisteredTool));
 			}
 			return Entries;
 		}
@@ -349,9 +363,16 @@ namespace UnrealMcp
 			{
 				if (int32* ExistingIndex = NameToIndex.Find(OverrideEntry.Name))
 				{
-					const bool bWasDescriptorBacked = BaseEntries[*ExistingIndex].bLoadedFromDescriptor;
+					const FToolRegistryEntry ExistingEntry = BaseEntries[*ExistingIndex];
+					const bool bWasDescriptorBacked = ExistingEntry.bLoadedFromDescriptor;
 					BaseEntries[*ExistingIndex] = OverrideEntry;
 					BaseEntries[*ExistingIndex].bLoadedFromDescriptor = bWasDescriptorBacked;
+					if (bWasDescriptorBacked)
+					{
+						BaseEntries[*ExistingIndex].Title = ExistingEntry.Title;
+						BaseEntries[*ExistingIndex].Description = ExistingEntry.Description;
+						BaseEntries[*ExistingIndex].InputSchema = ExistingEntry.InputSchema;
+					}
 				}
 				else
 				{
@@ -433,6 +454,9 @@ namespace UnrealMcp
 				Entry.Name = Name;
 				Entry.Category = GetStringFieldOrDefault(ToolObject, TEXT("category"), TEXT("uncategorized"));
 				Entry.HandlerName = GetStringFieldOrDefault(ToolObject, TEXT("handlerName"), Name);
+				Entry.Title = GetStringFieldOrDefault(ToolObject, TEXT("title"));
+				Entry.Description = GetStringFieldOrDefault(ToolObject, TEXT("description"));
+				Entry.InputSchema = GetObjectFieldOrDefault(ToolObject, TEXT("inputSchema"));
 				Entry.Exposure = ParseExposure(GetStringFieldOrDefault(ToolObject, TEXT("exposure"), TEXT("visible")));
 				Entry.ImplementationTrack = ParseImplementationTrack(GetStringFieldOrDefault(ToolObject, TEXT("implementationTrack"), TEXT("cpp")));
 				Entry.PythonHandlerPath = GetStringFieldOrDefault(ToolObject, TEXT("pythonHandlerPath"));

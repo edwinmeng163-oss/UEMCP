@@ -2517,7 +2517,7 @@
       "category": "editor",
       "handlerName": "unreal.editor.python_runtime_info",
       "title": "Editor Python Runtime Info",
-      "description": "Reports read-only Python interpreter, module-count, and Unreal module/runtime details to confirm the python implementation track is working.",
+      "description": "Reports read-only Python runtime interpreter, module-count, and Unreal module details to confirm the python implementation track is working.",
       "implementationTrack": "python",
       "pythonHandlerPath": "Tools/UnrealMcpPyTools/editor_python_runtime_info/main.py",
       "pythonHandlerSha256": "56f6f019a385406e59571db5d781cf5532d7225516c78253c1ce47bae7facb39",

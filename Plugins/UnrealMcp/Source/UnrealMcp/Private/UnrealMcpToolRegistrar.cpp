@@ -2,6 +2,7 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "UnrealMcpToolRegistry.h"
 
 namespace UnrealMcp
 {
@@ -667,14 +668,64 @@ namespace UnrealMcp
 
 	void AppendRegisteredToolDefinitions(TArray<TSharedPtr<FJsonValue>>& ToolsArray)
 	{
+		TSet<FString> AddedToolNames;
+		for (const TSharedPtr<FJsonValue>& ExistingToolValue : ToolsArray)
+		{
+			if (!ExistingToolValue.IsValid() || ExistingToolValue->Type != EJson::Object || !ExistingToolValue->AsObject().IsValid())
+			{
+				continue;
+			}
+			FString ExistingName;
+			if (ExistingToolValue->AsObject()->TryGetStringField(TEXT("name"), ExistingName) && !ExistingName.IsEmpty())
+			{
+				AddedToolNames.Add(ExistingName);
+			}
+		}
+
 		for (const FRegisteredUnrealMcpToolDescriptor& RegisteredTool : GetRegisteredMcpToolDescriptors())
 		{
+			if (AddedToolNames.Contains(RegisteredTool.Descriptor.Name))
+			{
+				continue;
+			}
+
+			const int32 PreviousToolCount = ToolsArray.Num();
 			AddToolDefinition(
 				ToolsArray,
 				RegisteredTool.Descriptor.Name,
 				RegisteredTool.Descriptor.Title,
 				RegisteredTool.Descriptor.Description,
 				RegisteredTool.InputSchema);
+			if (ToolsArray.Num() > PreviousToolCount)
+			{
+				AddedToolNames.Add(RegisteredTool.Descriptor.Name);
+			}
+		}
+
+		for (const FToolRegistryEntry& Entry : GetToolRegistryEntries())
+		{
+			if (Entry.ImplementationTrack != EToolImplementationTrack::Python
+				|| Entry.Exposure != EToolExposure::Visible
+				|| Entry.bLoadedFromDescriptor
+				|| AddedToolNames.Contains(Entry.Name))
+			{
+				continue;
+			}
+
+			const FString ToolTitle = Entry.Title.IsEmpty() ? Entry.Name : Entry.Title;
+			const FString ToolDescription = Entry.Description.IsEmpty() ? Entry.Notes : Entry.Description;
+			const TSharedPtr<FJsonObject> InputSchema = Entry.InputSchema.IsValid() ? Entry.InputSchema : MakeObjectSchema();
+			const int32 PreviousToolCount = ToolsArray.Num();
+			AddToolDefinition(
+				ToolsArray,
+				Entry.Name,
+				ToolTitle,
+				ToolDescription,
+				InputSchema);
+			if (ToolsArray.Num() > PreviousToolCount)
+			{
+				AddedToolNames.Add(Entry.Name);
+			}
 		}
 	}
 
