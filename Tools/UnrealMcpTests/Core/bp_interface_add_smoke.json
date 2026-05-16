@@ -1,0 +1,20 @@
+{
+  "name": "bp_interface_add_smoke",
+  "description": "List-only smoke for adding an interface to a Blueprint. The edit call requires pre-staged Blueprint assets and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 140,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_interface_add",
+      "arguments": {
+        "blueprintPath": "/Game/__UEvolveMcpTest_chunk2b/BP_RefactorSmoke",
+        "interfacePath": "/Game/__UEvolveMcpTest_chunk2b/BPI_RefactorSmoke.BPI_RefactorSmoke_C"
+      }
+    }
+  }
+}

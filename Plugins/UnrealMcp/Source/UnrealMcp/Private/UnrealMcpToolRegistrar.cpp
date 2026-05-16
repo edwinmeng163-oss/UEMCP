@@ -336,6 +336,112 @@ namespace UnrealMcp
 				Registrar.Add(Descriptor, Schema);
 			}
 
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("macroName"), MakeStringProperty(TEXT("New valid Blueprint macro graph name."), FString()));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("macroName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_add_macro_graph"),
+					TEXT("Add Blueprint Macro Graph"),
+					TEXT("Creates a user macro graph on a Blueprint after fixed-name validation and collision checks."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2b C++ Blueprint refactor tool for macro graph creation.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("macroName"), MakeStringProperty(TEXT("Existing Blueprint macro graph name to delete."), FString()));
+				Properties->SetObjectField(TEXT("force"), MakeBoolProperty(TEXT("Delete even when UK2Node_MacroInstance references are present."), false));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("macroName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_delete_macro_graph"),
+					TEXT("Delete Blueprint Macro Graph"),
+					TEXT("Deletes a Blueprint macro graph after checking local macro instance references unless force=true."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2b C++ Blueprint refactor tool for guarded macro graph deletion.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("interfacePath"), MakeStringProperty(TEXT("Full UInterface-derived class path to implement."), FString()));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("interfacePath")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_interface_add"),
+					TEXT("Add Blueprint Interface"),
+					TEXT("Adds a Blueprint-implementable interface to a Blueprint and conforms exposed interface function graphs."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2b C++ Blueprint refactor tool for interface implementation.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("interfacePath"), MakeStringProperty(TEXT("Full implemented interface class path to remove."), FString()));
+				Properties->SetObjectField(TEXT("preserveFunctions"), MakeBoolProperty(TEXT("Keep interface function graphs as orphan functions instead of deleting them."), false));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("interfacePath")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_interface_remove"),
+					TEXT("Remove Blueprint Interface"),
+					TEXT("Removes an implemented interface from a Blueprint and optionally preserves its function graphs."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2b C++ Blueprint refactor tool for interface removal.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
 		}
 
 		void RegisterWidgetInspectorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)

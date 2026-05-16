@@ -1,0 +1,20 @@
+{
+  "name": "bp_add_macro_graph_smoke",
+  "description": "List-only smoke for adding a Blueprint macro graph. The edit call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 138,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_add_macro_graph",
+      "arguments": {
+        "blueprintPath": "/Game/__UEvolveMcpTest_chunk2b/BP_RefactorSmoke",
+        "macroName": "RefactorMacro"
+      }
+    }
+  }
+}

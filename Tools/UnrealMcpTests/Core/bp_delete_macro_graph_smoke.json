@@ -1,0 +1,21 @@
+{
+  "name": "bp_delete_macro_graph_smoke",
+  "description": "List-only smoke for deleting a Blueprint macro graph. The destructive call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 139,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_delete_macro_graph",
+      "arguments": {
+        "blueprintPath": "/Game/__UEvolveMcpTest_chunk2b/BP_RefactorSmoke",
+        "macroName": "RefactorMacro",
+        "force": false
+      }
+    }
+  }
+}

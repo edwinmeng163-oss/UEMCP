@@ -46,6 +46,10 @@ Editor action tools:
 - `unreal.create_blueprint_class`
 - `unreal.bp_add_variable`
 - `unreal.bp_add_function`
+- `unreal.bp_add_macro_graph`
+- `unreal.bp_delete_macro_graph`
+- `unreal.bp_interface_add`
+- `unreal.bp_interface_remove`
 - `unreal.bp_add_event_node`
 - `unreal.bp_add_call_function_node`
 - `unreal.bp_add_branch_node`

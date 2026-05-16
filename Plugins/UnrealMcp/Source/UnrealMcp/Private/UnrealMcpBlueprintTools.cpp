@@ -26,6 +26,7 @@
 #include "ScopedTransaction.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Subsystems/EditorAssetSubsystem.h"
+#include "UObject/Interface.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 
@@ -824,6 +825,91 @@ namespace UnrealMcp
 			return nullptr;
 		}
 
+		UEdGraph* FindMacroGraphByName(UBlueprint* Blueprint, const FString& MacroName)
+		{
+			if (!Blueprint)
+			{
+				return nullptr;
+			}
+
+			const FString TrimmedName = MacroName.TrimStartAndEnd();
+			for (UEdGraph* MacroGraph : Blueprint->MacroGraphs)
+			{
+				if (MacroGraph && MacroGraph->GetName().Equals(TrimmedName, ESearchCase::IgnoreCase))
+				{
+					return MacroGraph;
+				}
+			}
+			return nullptr;
+		}
+
+		int32 CountMacroInstanceReferences(UBlueprint* Blueprint, UEdGraph* MacroGraph)
+		{
+			if (!Blueprint || !MacroGraph)
+			{
+				return 0;
+			}
+
+			int32 ReferenceCount = 0;
+			TArray<UEdGraph*> Graphs;
+			Blueprint->GetAllGraphs(Graphs);
+			for (UEdGraph* Graph : Graphs)
+			{
+				if (!Graph)
+				{
+					continue;
+				}
+
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					UK2Node_MacroInstance* MacroNode = Cast<UK2Node_MacroInstance>(Node);
+					if (MacroNode && MacroNode->GetMacroGraph() == MacroGraph)
+					{
+						++ReferenceCount;
+					}
+				}
+			}
+
+			return ReferenceCount;
+		}
+
+		FBPInterfaceDescription* FindImplementedInterfaceDescription(UBlueprint* Blueprint, UClass* InterfaceClass)
+		{
+			if (!Blueprint || !InterfaceClass)
+			{
+				return nullptr;
+			}
+
+			for (FBPInterfaceDescription& InterfaceDescription : Blueprint->ImplementedInterfaces)
+			{
+				UClass* ImplementedClass = InterfaceDescription.Interface.Get();
+				if (ImplementedClass
+					&& (ImplementedClass == InterfaceClass || ImplementedClass->GetClassPathName() == InterfaceClass->GetClassPathName()))
+				{
+					return &InterfaceDescription;
+				}
+			}
+			return nullptr;
+		}
+
+		int32 CountInterfaceFunctions(const UClass* InterfaceClass)
+		{
+			if (!InterfaceClass)
+			{
+				return 0;
+			}
+
+			int32 FunctionCount = 0;
+			for (TFieldIterator<UFunction> FunctionIter(InterfaceClass, EFieldIteratorFlags::ExcludeSuper); FunctionIter; ++FunctionIter)
+			{
+				if (*FunctionIter)
+				{
+					++FunctionCount;
+				}
+			}
+			return FunctionCount;
+		}
+
 		FUnrealMcpExecutionResult AddVariableTool(const FJsonObject& Arguments)
 		{
 			const FString ToolName = TEXT("unreal.bp_add_variable");
@@ -956,6 +1042,357 @@ namespace UnrealMcp
 			StructuredContent->SetBoolField(TEXT("created"), true);
 			return MakeExecutionResult(
 				FString::Printf(TEXT("Created function graph %s in %s."), *FunctionGraph->GetName(), *ObjectPath),
+				StructuredContent,
+				false);
+		}
+
+		FUnrealMcpExecutionResult AddMacroGraphTool(const FJsonObject& Arguments)
+		{
+			const FString ToolName = TEXT("unreal.bp_add_macro_graph");
+			const FString Action = TEXT("bp_add_macro_graph");
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			UEditorAssetSubsystem* EditorAssetSubsystem = GetEditorAssetSubsystem();
+			if (!EditorAssetSubsystem)
+			{
+				return MakeExecutionResult(TEXT("EditorAssetSubsystem is unavailable."), nullptr, true);
+			}
+
+			FString BlueprintPath;
+			FString MacroName;
+			Arguments.TryGetStringField(TEXT("blueprintPath"), BlueprintPath);
+			Arguments.TryGetStringField(TEXT("macroName"), MacroName);
+
+			BlueprintPath = BlueprintPath.TrimStartAndEnd();
+			MacroName = MacroName.TrimStartAndEnd();
+			if (BlueprintPath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'blueprintPath'."), nullptr, true);
+			}
+			if (MacroName.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'macroName'."), nullptr, true);
+			}
+
+			FString ObjectPath;
+			FString FailureReason;
+			UBlueprint* Blueprint = LoadBlueprintAsset(EditorAssetSubsystem, BlueprintPath, ObjectPath, FailureReason);
+			if (!Blueprint)
+			{
+				return MakeBlueprintToolError(Action, TEXT("BLUEPRINT_NOT_FOUND"), FailureReason, BlueprintPath);
+			}
+
+			FString InvalidReason;
+			if (!ValidateBlueprintIdentifier(MacroName, InvalidReason))
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("action"), Action);
+				StructuredContent->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+				StructuredContent->SetStringField(TEXT("macroName"), MacroName);
+				StructuredContent->SetStringField(TEXT("reason"), InvalidReason);
+				AttachBlueprintToolError(
+					StructuredContent,
+					TEXT("INVALID_NAME"),
+					FString::Printf(TEXT("Macro graph name '%s' is invalid: %s."), *MacroName, *InvalidReason));
+				return MakeExecutionResult(FString::Printf(TEXT("Invalid macro graph name '%s': %s."), *MacroName, *InvalidReason), StructuredContent, true);
+			}
+
+			const FName MacroFName(*MacroName);
+			if (FindAnyBlueprintGraphByName(Blueprint, MacroName) || FindMemberVariableDescription(Blueprint, MacroFName))
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("RENAME_COLLISION"),
+					FString::Printf(TEXT("A Blueprint graph, macro, function, or variable named '%s' already exists in %s."), *MacroName, *ObjectPath),
+					BlueprintPath);
+			}
+
+			const FScopedTransaction Transaction(LOCTEXT("UnrealMcpBpAddMacroGraph", "Unreal MCP Add Blueprint Macro Graph"));
+			Blueprint->Modify();
+			UEdGraph* MacroGraph = FBlueprintEditorUtils::CreateNewGraph(
+				Blueprint,
+				MacroFName,
+				UEdGraph::StaticClass(),
+				UEdGraphSchema_K2::StaticClass());
+			if (!MacroGraph)
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Failed to create macro graph '%s' in %s."), *MacroName, *ObjectPath), nullptr, true);
+			}
+
+			FBlueprintEditorUtils::AddMacroGraph(Blueprint, MacroGraph, true, nullptr);
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			Blueprint->MarkPackageDirty();
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeBlueprintEditStructuredContent(Blueprint, MacroGraph, nullptr, Action);
+			StructuredContent->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+			StructuredContent->SetStringField(TEXT("macroName"), MacroName);
+			StructuredContent->SetStringField(TEXT("graphName"), MacroGraph->GetName());
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Created Blueprint macro graph %s in %s."), *MacroGraph->GetName(), *ObjectPath),
+				StructuredContent,
+				false);
+		}
+
+		FUnrealMcpExecutionResult DeleteMacroGraphTool(const FJsonObject& Arguments)
+		{
+			const FString ToolName = TEXT("unreal.bp_delete_macro_graph");
+			const FString Action = TEXT("bp_delete_macro_graph");
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			UEditorAssetSubsystem* EditorAssetSubsystem = GetEditorAssetSubsystem();
+			if (!EditorAssetSubsystem)
+			{
+				return MakeExecutionResult(TEXT("EditorAssetSubsystem is unavailable."), nullptr, true);
+			}
+
+			FString BlueprintPath;
+			FString MacroName;
+			bool bForce = false;
+			Arguments.TryGetStringField(TEXT("blueprintPath"), BlueprintPath);
+			Arguments.TryGetStringField(TEXT("macroName"), MacroName);
+			Arguments.TryGetBoolField(TEXT("force"), bForce);
+
+			BlueprintPath = BlueprintPath.TrimStartAndEnd();
+			MacroName = MacroName.TrimStartAndEnd();
+			if (BlueprintPath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'blueprintPath'."), nullptr, true);
+			}
+			if (MacroName.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'macroName'."), nullptr, true);
+			}
+
+			FString ObjectPath;
+			FString FailureReason;
+			UBlueprint* Blueprint = LoadBlueprintAsset(EditorAssetSubsystem, BlueprintPath, ObjectPath, FailureReason);
+			if (!Blueprint)
+			{
+				return MakeBlueprintToolError(Action, TEXT("BLUEPRINT_NOT_FOUND"), FailureReason, BlueprintPath);
+			}
+
+			UEdGraph* MacroGraph = FindMacroGraphByName(Blueprint, MacroName);
+			if (!MacroGraph)
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("MACRO_NOT_FOUND"),
+					FString::Printf(TEXT("Macro graph '%s' was not found in %s."), *MacroName, *ObjectPath),
+					BlueprintPath);
+			}
+
+			const int32 ReferenceCount = CountMacroInstanceReferences(Blueprint, MacroGraph);
+			if (ReferenceCount > 0 && !bForce)
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("action"), Action);
+				StructuredContent->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+				StructuredContent->SetStringField(TEXT("macroName"), MacroName);
+				StructuredContent->SetNumberField(TEXT("referenceCount"), ReferenceCount);
+				StructuredContent->SetNumberField(TEXT("referencesRemoved"), 0);
+				AttachBlueprintToolError(
+					StructuredContent,
+					TEXT("REFERENCES_PRESENT"),
+					FString::Printf(TEXT("Macro graph '%s' has %d macro instance reference(s). Pass force=true to delete the graph and remove those nodes."), *MacroName, ReferenceCount));
+				return MakeExecutionResult(
+					FString::Printf(TEXT("Macro graph '%s' has %d macro instance reference(s)."), *MacroName, ReferenceCount),
+					StructuredContent,
+					true);
+			}
+
+			const FScopedTransaction Transaction(LOCTEXT("UnrealMcpBpDeleteMacroGraph", "Unreal MCP Delete Blueprint Macro Graph"));
+			Blueprint->Modify();
+			MacroGraph->Modify();
+			FBlueprintEditorUtils::RemoveGraph(Blueprint, MacroGraph, EGraphRemoveFlags::Recompile);
+			Blueprint->MarkPackageDirty();
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeBlueprintEditStructuredContent(Blueprint, nullptr, nullptr, Action);
+			StructuredContent->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+			StructuredContent->SetStringField(TEXT("macroName"), MacroName);
+			StructuredContent->SetNumberField(TEXT("referenceCount"), ReferenceCount);
+			StructuredContent->SetNumberField(TEXT("referencesRemoved"), bForce ? ReferenceCount : 0);
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Deleted Blueprint macro graph %s from %s."), *MacroName, *ObjectPath),
+				StructuredContent,
+				false);
+		}
+
+		FUnrealMcpExecutionResult AddInterfaceTool(const FJsonObject& Arguments)
+		{
+			const FString ToolName = TEXT("unreal.bp_interface_add");
+			const FString Action = TEXT("bp_interface_add");
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			UEditorAssetSubsystem* EditorAssetSubsystem = GetEditorAssetSubsystem();
+			if (!EditorAssetSubsystem)
+			{
+				return MakeExecutionResult(TEXT("EditorAssetSubsystem is unavailable."), nullptr, true);
+			}
+
+			FString BlueprintPath;
+			FString InterfacePath;
+			Arguments.TryGetStringField(TEXT("blueprintPath"), BlueprintPath);
+			Arguments.TryGetStringField(TEXT("interfacePath"), InterfacePath);
+
+			BlueprintPath = BlueprintPath.TrimStartAndEnd();
+			InterfacePath = InterfacePath.TrimStartAndEnd();
+			if (BlueprintPath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'blueprintPath'."), nullptr, true);
+			}
+			if (InterfacePath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'interfacePath'."), nullptr, true);
+			}
+
+			FString ObjectPath;
+			FString FailureReason;
+			UBlueprint* Blueprint = LoadBlueprintAsset(EditorAssetSubsystem, BlueprintPath, ObjectPath, FailureReason);
+			if (!Blueprint)
+			{
+				return MakeBlueprintToolError(Action, TEXT("BLUEPRINT_NOT_FOUND"), FailureReason, BlueprintPath);
+			}
+
+			UClass* InterfaceClass = ResolveClassPath(InterfacePath, EditorAssetSubsystem);
+			if (!InterfaceClass)
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("INTERFACE_NOT_FOUND"),
+					FString::Printf(TEXT("Unable to resolve interface class path '%s'."), *InterfacePath),
+					BlueprintPath);
+			}
+
+			const FString InterfaceName = InterfaceClass->GetName();
+			if (!InterfaceClass->IsChildOf(UInterface::StaticClass())
+				|| !FKismetEditorUtilities::CanBlueprintImplementInterface(Blueprint, InterfaceClass)
+				|| FindImplementedInterfaceDescription(Blueprint, InterfaceClass))
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("INTERFACE_NOT_USABLE"),
+					FString::Printf(TEXT("Interface '%s' cannot be added to %s because it is not Blueprint-implementable or is already implemented."), *InterfaceClass->GetPathName(), *ObjectPath),
+					BlueprintPath);
+			}
+
+			const int32 FunctionCount = CountInterfaceFunctions(InterfaceClass);
+			const FScopedTransaction Transaction(LOCTEXT("UnrealMcpBpInterfaceAdd", "Unreal MCP Add Blueprint Interface"));
+			Blueprint->Modify();
+			const bool bImplemented = FBlueprintEditorUtils::ImplementNewInterface(Blueprint, InterfaceClass->GetClassPathName());
+			if (!bImplemented)
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("INTERFACE_NOT_USABLE"),
+					FString::Printf(TEXT("Interface '%s' could not be implemented by %s."), *InterfaceClass->GetPathName(), *ObjectPath),
+					BlueprintPath);
+			}
+			FBlueprintEditorUtils::ConformImplementedInterfaces(Blueprint);
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			Blueprint->MarkPackageDirty();
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeBlueprintEditStructuredContent(Blueprint, nullptr, nullptr, Action);
+			StructuredContent->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+			StructuredContent->SetStringField(TEXT("interfacePath"), InterfacePath);
+			StructuredContent->SetStringField(TEXT("interfaceName"), InterfaceName);
+			StructuredContent->SetNumberField(TEXT("functionCount"), FunctionCount);
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Added interface %s to %s."), *InterfaceName, *ObjectPath),
+				StructuredContent,
+				false);
+		}
+
+		FUnrealMcpExecutionResult RemoveInterfaceTool(const FJsonObject& Arguments)
+		{
+			const FString ToolName = TEXT("unreal.bp_interface_remove");
+			const FString Action = TEXT("bp_interface_remove");
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			UEditorAssetSubsystem* EditorAssetSubsystem = GetEditorAssetSubsystem();
+			if (!EditorAssetSubsystem)
+			{
+				return MakeExecutionResult(TEXT("EditorAssetSubsystem is unavailable."), nullptr, true);
+			}
+
+			FString BlueprintPath;
+			FString InterfacePath;
+			bool bPreserveFunctions = false;
+			Arguments.TryGetStringField(TEXT("blueprintPath"), BlueprintPath);
+			Arguments.TryGetStringField(TEXT("interfacePath"), InterfacePath);
+			Arguments.TryGetBoolField(TEXT("preserveFunctions"), bPreserveFunctions);
+
+			BlueprintPath = BlueprintPath.TrimStartAndEnd();
+			InterfacePath = InterfacePath.TrimStartAndEnd();
+			if (BlueprintPath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'blueprintPath'."), nullptr, true);
+			}
+			if (InterfacePath.IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'interfacePath'."), nullptr, true);
+			}
+
+			FString ObjectPath;
+			FString FailureReason;
+			UBlueprint* Blueprint = LoadBlueprintAsset(EditorAssetSubsystem, BlueprintPath, ObjectPath, FailureReason);
+			if (!Blueprint)
+			{
+				return MakeBlueprintToolError(Action, TEXT("BLUEPRINT_NOT_FOUND"), FailureReason, BlueprintPath);
+			}
+
+			UClass* InterfaceClass = ResolveClassPath(InterfacePath, EditorAssetSubsystem);
+			if (!InterfaceClass || !InterfaceClass->IsChildOf(UInterface::StaticClass()))
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("INTERFACE_NOT_FOUND"),
+					FString::Printf(TEXT("Interface '%s' is not implemented by %s."), *InterfacePath, *ObjectPath),
+					BlueprintPath);
+			}
+
+			FBPInterfaceDescription* InterfaceDescription = FindImplementedInterfaceDescription(Blueprint, InterfaceClass);
+			if (!InterfaceDescription)
+			{
+				return MakeBlueprintToolError(
+					Action,
+					TEXT("INTERFACE_NOT_FOUND"),
+					FString::Printf(TEXT("Interface '%s' is not implemented by %s."), *InterfaceClass->GetPathName(), *ObjectPath),
+					BlueprintPath);
+			}
+
+			const FString InterfaceName = InterfaceClass->GetName();
+			const int32 InterfaceGraphCount = InterfaceDescription->Graphs.Num();
+			const int32 FunctionsPreserved = bPreserveFunctions ? InterfaceGraphCount : 0;
+			const int32 FunctionsDeleted = bPreserveFunctions ? 0 : InterfaceGraphCount;
+
+			FBlueprintEditorUtils::RemoveInterface(Blueprint, InterfaceClass->GetClassPathName(), bPreserveFunctions);
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			Blueprint->MarkPackageDirty();
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeBlueprintEditStructuredContent(Blueprint, nullptr, nullptr, Action);
+			StructuredContent->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+			StructuredContent->SetStringField(TEXT("interfacePath"), InterfacePath);
+			StructuredContent->SetStringField(TEXT("interfaceName"), InterfaceName);
+			StructuredContent->SetNumberField(TEXT("functionsPreserved"), FunctionsPreserved);
+			StructuredContent->SetNumberField(TEXT("functionsDeleted"), FunctionsDeleted);
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Removed interface %s from %s."), *InterfaceName, *ObjectPath),
 				StructuredContent,
 				false);
 		}
@@ -2543,6 +2980,30 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.bp_add_function"))
 		{
 			OutResult = AddFunctionTool(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.bp_add_macro_graph"))
+		{
+			OutResult = AddMacroGraphTool(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.bp_delete_macro_graph"))
+		{
+			OutResult = DeleteMacroGraphTool(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.bp_interface_add"))
+		{
+			OutResult = AddInterfaceTool(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.bp_interface_remove"))
+		{
+			OutResult = RemoveInterfaceTool(Arguments);
 			return true;
 		}
 

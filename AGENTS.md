@@ -259,9 +259,11 @@ Blueprint tools:
 - create Blueprint class
 - compile one Blueprint or all Blueprints in a path
 - add variables/functions/event/call/branch/foreach nodes
+- add and delete macro graphs with macro-reference checks
 - delete graph nodes
 - delete member variables and user function graphs
 - rename member variables and user function graphs with local reference fixup
+- add and remove Blueprint interface implementations
 - connect pins
 - set pin defaults
 - arrange graph
@@ -359,7 +361,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 128 entries across:
+At the time this file was written, the registry contained 132 entries across:
 
 - actors
 - blueprint
@@ -375,13 +377,16 @@ chunk 1 C++ readback inspectors (`unreal.actor_get_property`,
 `unreal.actor_get_transform`, and `unreal.project_settings_get`), and the five
 v0.15 chunk 2a C++ Blueprint refactor basics (`unreal.bp_delete_node`,
 `unreal.bp_delete_variable`, `unreal.bp_delete_function`,
-`unreal.bp_rename_variable`, and `unreal.bp_rename_function`). Earlier handoff
-text lagged at 119 entries.
+`unreal.bp_rename_variable`, and `unreal.bp_rename_function`), and the four
+v0.15 chunk 2b Blueprint macro/interface tools (`unreal.bp_add_macro_graph`,
+`unreal.bp_delete_macro_graph`, `unreal.bp_interface_add`, and
+`unreal.bp_interface_remove`). Earlier handoff text lagged at 119 entries.
 
-Current project status: v0.15 chunk 2a landed. The previous Lane V
+Current project status: v0.15 chunk 2b landed; Lane Z Blueprint refactor is
+complete. The previous Lane V
 get/inspect-tool gap for actor property, actor transform, and project settings
 readback is done in C++; Blueprint delete + rename basics are done in C++,
-while macro + interface editing remains deferred to chunk 2b.
+and macro + interface editing is now done in C++.
 
 `unreal.configure_fps_settings` and
 `unreal.bp_add_input_axis_event_node` were moved back to scaffold-only status
