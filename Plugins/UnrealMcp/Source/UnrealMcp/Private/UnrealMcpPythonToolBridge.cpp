@@ -297,6 +297,21 @@ namespace UnrealMcpPythonToolBridge
 			return Result;
 		}
 
+		FString MakePythonStringArrayLiteral(const TArray<FString>& Values)
+		{
+			FString Result = TEXT("[");
+			for (int32 Index = 0; Index < Values.Num(); ++Index)
+			{
+				if (Index > 0)
+				{
+					Result += TEXT(", ");
+				}
+				Result += MakePythonStringLiteral(Values[Index]);
+			}
+			Result += TEXT("]");
+			return Result;
+		}
+
 		bool StringContainsDeniedRecursionTool(const FString& Value)
 		{
 			return Value.Contains(TEXT("execute_python"), ESearchCase::IgnoreCase)
@@ -378,24 +393,64 @@ namespace UnrealMcpPythonToolBridge
 			return FModuleManager::LoadModulePtr<IPythonScriptPlugin>(PythonScriptPluginModuleName);
 		}
 
-		FString BuildPythonWrapperCommand(const FString& ParentDirectory, const FString& ArgumentsJson)
+		FString BuildPythonWrapperCommand(const FString& ParentDirectory, const FString& ArgumentsJson, const TArray<FString>& AllowList)
 		{
 			return FString::Printf(
-				TEXT("import importlib, json, sys, traceback\n")
+				TEXT("import builtins, importlib, json, sys, traceback\n")
 				TEXT("_unreal_mcp_parent = %s\n")
 				TEXT("_unreal_mcp_args_json = %s\n")
+				TEXT("_unreal_mcp_user_allow_list = %s\n")
+				TEXT("_unreal_mcp_original_import = builtins.__import__\n")
+				TEXT("_unreal_mcp_original_import_module = importlib.import_module\n")
+				TEXT("_unreal_mcp_stdlib_seed = {\n")
+				TEXT("    'abc', 'argparse', 'array', 'base64', 'binascii', 'bisect', 'codecs', 'collections',\n")
+				TEXT("    'contextlib', 'copy', 'copyreg', 'dataclasses', 'datetime', 'encodings', 'enum',\n")
+				TEXT("    'errno', 'functools', 'gc', 'genericpath', 'hashlib', 'importlib', 'inspect',\n")
+				TEXT("    'io', 'itertools', 'json', 'linecache', 'locale', 'math', 'ntpath', 'operator',\n")
+				TEXT("    'os', 'pathlib', 'platform', 'posixpath', 're', 'reprlib', 'signal', 'site',\n")
+				TEXT("    'stat', 'string', 'sys', 'textwrap', 'threading', 'time', 'token', 'tokenize',\n")
+				TEXT("    'traceback', 'types', 'typing', 'unicodedata', 'warnings', 'weakref',\n")
+				TEXT("    '_collections_abc', '_weakrefset'\n")
+				TEXT("}\n")
+				TEXT("_unreal_mcp_allowed_roots = set(str(_name).split('.', 1)[0] for _name in sys.builtin_module_names)\n")
+				TEXT("_unreal_mcp_stdlib_names = getattr(sys, 'stdlib_module_names', _unreal_mcp_stdlib_seed)\n")
+				TEXT("_unreal_mcp_allowed_roots.update(str(_name).split('.', 1)[0] for _name in _unreal_mcp_stdlib_names)\n")
+				TEXT("_unreal_mcp_allowed_roots.discard('subprocess')\n")
+				TEXT("_unreal_mcp_allowed_roots.add('unreal')\n")
+				TEXT("_unreal_mcp_allowed_roots.update(str(_name).strip().split('.', 1)[0] for _name in _unreal_mcp_user_allow_list if str(_name).strip())\n")
+				TEXT("def _unreal_mcp_import_root(_name):\n")
+				TEXT("    return str(_name or '').split('.', 1)[0]\n")
+				TEXT("def _unreal_mcp_check_import(_name):\n")
+				TEXT("    _root = _unreal_mcp_import_root(_name)\n")
+				TEXT("    if not _root or _root in _unreal_mcp_allowed_roots:\n")
+				TEXT("        return\n")
+				TEXT("    raise ImportError(\"Unreal MCP Python import denied: module '\" + str(_name) + \"' (root '\" + _root + \"') is not in the implicit stdlib/unreal set or pythonImportAllowList. Add '\" + _root + \"' to pythonImportAllowList for this tool if it is required.\")\n")
+				TEXT("def _unreal_mcp_import_hook(_name, _globals=None, _locals=None, _fromlist=(), _level=0):\n")
+				TEXT("    if _level == 0:\n")
+				TEXT("        _unreal_mcp_check_import(_name)\n")
+				TEXT("    return _unreal_mcp_original_import(_name, _globals, _locals, _fromlist, _level)\n")
+				TEXT("def _unreal_mcp_import_module_hook(_name, _package=None):\n")
+				TEXT("    if not str(_name or '').startswith('.'):\n")
+				TEXT("        _unreal_mcp_check_import(_name)\n")
+				TEXT("    return _unreal_mcp_original_import_module(_name, _package)\n")
 				TEXT("if _unreal_mcp_parent not in sys.path:\n")
 				TEXT("    sys.path.insert(0, _unreal_mcp_parent)\n")
+				TEXT("builtins.__import__ = _unreal_mcp_import_hook\n")
+				TEXT("importlib.import_module = _unreal_mcp_import_module_hook\n")
 				TEXT("try:\n")
 				TEXT("    sys.modules.pop('main', None)\n")
-				TEXT("    main = importlib.import_module('main')\n")
+				TEXT("    main = _unreal_mcp_original_import_module('main')\n")
 				TEXT("    _unreal_mcp_args = json.loads(_unreal_mcp_args_json)\n")
 				TEXT("    _unreal_mcp_result = main.execute(_unreal_mcp_args)\n")
 				TEXT("except BaseException as exc:\n")
 				TEXT("    _unreal_mcp_result = {'isError': True, 'error': str(exc), 'traceback': traceback.format_exc()}\n")
+				TEXT("finally:\n")
+				TEXT("    builtins.__import__ = _unreal_mcp_original_import\n")
+				TEXT("    importlib.import_module = _unreal_mcp_original_import_module\n")
 				TEXT("print('%s ' + json.dumps(_unreal_mcp_result, ensure_ascii=False, default=str) + ' %s')\n"),
 				*MakePythonStringLiteral(ParentDirectory),
 				*MakePythonStringLiteral(ArgumentsJson),
+				*MakePythonStringArrayLiteral(AllowList),
 				*ResultBeginSentinel,
 				*ResultEndSentinel);
 		}
@@ -558,7 +613,7 @@ namespace UnrealMcpPythonToolBridge
 		}
 
 		FPythonCommandEx PythonCommand;
-		PythonCommand.Command = BuildPythonWrapperCommand(FPaths::GetPath(AbsoluteHandlerPath), ArgumentsJson);
+		PythonCommand.Command = BuildPythonWrapperCommand(FPaths::GetPath(AbsoluteHandlerPath), ArgumentsJson, HandlerEntry.PythonImportAllowList);
 		PythonCommand.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
 		PythonCommand.FileExecutionScope = EPythonFileExecutionScope::Private;
 		PythonCommand.Flags = EPythonCommandFlags::Unattended;
