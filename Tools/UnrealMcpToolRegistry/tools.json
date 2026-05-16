@@ -3054,6 +3054,487 @@
         }
       },
       "notes": "C++ only. MVP maps common categories to UInputSettings, URendererSettings, and hardcoded config sections, returning KEY_NOT_FOUND for unsupported edge cases."
+    },
+    {
+      "name": "unreal.bp_delete_node",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_delete_node",
+      "title": "Delete Blueprint Node",
+      "description": "Deletes a user-deletable Blueprint graph node by NodeGuid and reports the severed pin links.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEvolve Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "v0.15 chunk 2a C++ Blueprint refactor tool: bounded node deletion by GUID without Python.",
+      "summaryTemplate": "Deleted Blueprint node {args.nodeGuid} from {args.blueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "nodeGuid"
+        ],
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "graphName": {
+            "type": "string",
+            "description": "Graph name containing the node.",
+            "default": "EventGraph"
+          },
+          "nodeGuid": {
+            "type": "string",
+            "description": "NodeGuid as 32 hex digits or hyphenated GUID text."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "graphName",
+          "nodeGuid",
+          "pinDisconnects"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "blueprint": {
+            "type": "string"
+          },
+          "graph": {
+            "type": "string"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "graphName": {
+            "type": "string"
+          },
+          "nodeGuid": {
+            "type": "string"
+          },
+          "pinDisconnects": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "notes": "PIE-blocked. Returns BLUEPRINT_NOT_FOUND, GRAPH_NOT_FOUND, NODE_NOT_FOUND, or NODE_NOT_DELETABLE on structured errors."
+    },
+    {
+      "name": "unreal.bp_delete_variable",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_delete_variable",
+      "title": "Delete Blueprint Variable",
+      "description": "Deletes a Blueprint member variable after checking local reference nodes unless force=true.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEvolve Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "v0.15 chunk 2a C++ Blueprint refactor tool: bounded variable deletion with reference-count guard.",
+      "summaryTemplate": "Deleted Blueprint variable {args.variableName} from {args.blueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "variableName"
+        ],
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "variableName": {
+            "type": "string",
+            "description": "Blueprint member variable name to delete."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Delete even when reference nodes are present.",
+            "default": false
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "variableName",
+          "referenceCount",
+          "referencesRemoved",
+          "pinType"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "blueprint": {
+            "type": "string"
+          },
+          "graph": {
+            "type": "string"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "variableName": {
+            "type": "string"
+          },
+          "referenceCount": {
+            "type": "integer"
+          },
+          "referencesRemoved": {
+            "type": "integer"
+          },
+          "pinType": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "notes": "PIE-blocked. force=false returns REFERENCES_PRESENT with referenceCount instead of mutating when references exist."
+    },
+    {
+      "name": "unreal.bp_delete_function",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_delete_function",
+      "title": "Delete Blueprint Function",
+      "description": "Deletes a user function graph and reports caller nodes found in the same Blueprint.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEvolve Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "v0.15 chunk 2a C++ Blueprint refactor tool: bounded user function graph deletion without Python.",
+      "summaryTemplate": "Deleted Blueprint function {args.functionName} from {args.blueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "functionName"
+        ],
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "functionName": {
+            "type": "string",
+            "description": "User function graph name to delete."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "functionName",
+          "callerCount"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "blueprint": {
+            "type": "string"
+          },
+          "graph": {
+            "type": "string"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "functionName": {
+            "type": "string"
+          },
+          "callerCount": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "notes": "PIE-blocked. Built-in graphs such as EventGraph and UserConstructionScript return FUNCTION_NOT_DELETABLE."
+    },
+    {
+      "name": "unreal.bp_rename_variable",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_rename_variable",
+      "title": "Rename Blueprint Variable",
+      "description": "Renames a Blueprint member variable and rewrites local graph references.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEvolve Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "v0.15 chunk 2a C++ Blueprint refactor tool: variable rename plus local graph reference rewrite without Python.",
+      "summaryTemplate": "Renamed Blueprint variable {args.oldName} to {args.newName} in {args.blueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "oldName",
+          "newName"
+        ],
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "oldName": {
+            "type": "string",
+            "description": "Existing Blueprint member variable name."
+          },
+          "newName": {
+            "type": "string",
+            "description": "New valid Blueprint identifier for the member variable."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "oldName",
+          "newName",
+          "referencesUpdated"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "blueprint": {
+            "type": "string"
+          },
+          "graph": {
+            "type": "string"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "oldName": {
+            "type": "string"
+          },
+          "newName": {
+            "type": "string"
+          },
+          "referencesUpdated": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "notes": "PIE-blocked. Invalid identifiers return INVALID_NAME with reason not-an-identifier or reserved-word; existing variables return RENAME_COLLISION."
+    },
+    {
+      "name": "unreal.bp_rename_function",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_rename_function",
+      "title": "Rename Blueprint Function",
+      "description": "Renames a user function graph and rewrites local caller nodes.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEvolve Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "v0.15 chunk 2a C++ Blueprint refactor tool: function graph rename plus local caller rewrite without Python.",
+      "summaryTemplate": "Renamed Blueprint function {args.oldName} to {args.newName} in {args.blueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "oldName",
+          "newName"
+        ],
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "oldName": {
+            "type": "string",
+            "description": "Existing user function graph name."
+          },
+          "newName": {
+            "type": "string",
+            "description": "New valid Blueprint identifier for the function graph."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blueprintPath",
+          "oldName",
+          "newName",
+          "callerCount"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "blueprint": {
+            "type": "string"
+          },
+          "graph": {
+            "type": "string"
+          },
+          "blueprintPath": {
+            "type": "string"
+          },
+          "oldName": {
+            "type": "string"
+          },
+          "newName": {
+            "type": "string"
+          },
+          "callerCount": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "notes": "PIE-blocked. Built-in graph renames return FUNCTION_NOT_RENAMABLE; name collisions with graphs or functions return RENAME_COLLISION."
     }
   ]
 }

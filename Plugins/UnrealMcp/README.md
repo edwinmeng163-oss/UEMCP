@@ -50,6 +50,11 @@ Editor action tools:
 - `unreal.bp_add_call_function_node`
 - `unreal.bp_add_branch_node`
 - `unreal.bp_add_for_each_node`
+- `unreal.bp_delete_node`
+- `unreal.bp_delete_variable`
+- `unreal.bp_delete_function`
+- `unreal.bp_rename_variable`
+- `unreal.bp_rename_function`
 - `unreal.bp_connect_pins`
 - `unreal.bp_set_pin_default`
 - `unreal.bp_arrange_graph`

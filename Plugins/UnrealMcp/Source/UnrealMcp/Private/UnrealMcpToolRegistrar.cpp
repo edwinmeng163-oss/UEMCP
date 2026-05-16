@@ -200,6 +200,142 @@ namespace UnrealMcp
 					Schema);
 			}
 
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("graphName"), MakeStringProperty(TEXT("Graph name containing the node. Defaults to EventGraph."), TEXT("EventGraph")));
+				Properties->SetObjectField(TEXT("nodeGuid"), MakeStringProperty(TEXT("Node GUID to delete, as 32 hex digits or hyphenated GUID text."), FString()));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("nodeGuid")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_delete_node"),
+					TEXT("Delete Blueprint Node"),
+					TEXT("Deletes a user-deletable Blueprint graph node by NodeGuid and reports the severed pin links."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2a C++ Blueprint refactor tool for bounded node deletion.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("variableName"), MakeStringProperty(TEXT("Blueprint member variable name to delete."), FString()));
+				Properties->SetObjectField(TEXT("force"), MakeBoolProperty(TEXT("Delete even when reference nodes are present."), false));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("variableName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_delete_variable"),
+					TEXT("Delete Blueprint Variable"),
+					TEXT("Deletes a Blueprint member variable after checking local reference nodes unless force=true."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2a C++ Blueprint refactor tool for bounded variable deletion.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("functionName"), MakeStringProperty(TEXT("User function graph name to delete."), FString()));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("functionName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_delete_function"),
+					TEXT("Delete Blueprint Function"),
+					TEXT("Deletes a user function graph and reports caller nodes found in the same Blueprint."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2a C++ Blueprint refactor tool for bounded function deletion.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("oldName"), MakeStringProperty(TEXT("Existing Blueprint member variable name."), FString()));
+				Properties->SetObjectField(TEXT("newName"), MakeStringProperty(TEXT("New valid Blueprint identifier for the member variable."), FString()));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("oldName")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("newName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_rename_variable"),
+					TEXT("Rename Blueprint Variable"),
+					TEXT("Renames a Blueprint member variable and rewrites local graph references."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2a C++ Blueprint refactor tool for variable rename and reference update.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("oldName"), MakeStringProperty(TEXT("Existing user function graph name."), FString()));
+				Properties->SetObjectField(TEXT("newName"), MakeStringProperty(TEXT("New valid Blueprint identifier for the function graph."), FString()));
+				TArray<TSharedPtr<FJsonValue>> Required;
+				Required.Add(MakeShared<FJsonValueString>(TEXT("blueprintPath")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("oldName")));
+				Required.Add(MakeShared<FJsonValueString>(TEXT("newName")));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Schema->SetArrayField(TEXT("required"), Required);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_rename_function"),
+					TEXT("Rename Blueprint Function"),
+					TEXT("Renames a user function graph and rewrites local caller nodes."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.Reason = TEXT("Descriptor: v0.15 chunk 2a C++ Blueprint refactor tool for function rename and caller update.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
 		}
 
 		void RegisterWidgetInspectorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)

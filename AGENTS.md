@@ -259,6 +259,9 @@ Blueprint tools:
 - create Blueprint class
 - compile one Blueprint or all Blueprints in a path
 - add variables/functions/event/call/branch/foreach nodes
+- delete graph nodes
+- delete member variables and user function graphs
+- rename member variables and user function graphs with local reference fixup
 - connect pins
 - set pin defaults
 - arrange graph
@@ -356,7 +359,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 123 entries across:
+At the time this file was written, the registry contained 128 entries across:
 
 - actors
 - blueprint
@@ -367,14 +370,18 @@ At the time this file was written, the registry contained 123 entries across:
 - skills
 - widget
 
-This count includes the v0.14 Python runtime smoke tool plus the three v0.15
-chunk 1 C++ readback inspectors: `unreal.actor_get_property`,
-`unreal.actor_get_transform`, and `unreal.project_settings_get`. Earlier
-handoff text lagged at 119 entries.
+This count includes the v0.14 Python runtime smoke tool, the three v0.15
+chunk 1 C++ readback inspectors (`unreal.actor_get_property`,
+`unreal.actor_get_transform`, and `unreal.project_settings_get`), and the five
+v0.15 chunk 2a C++ Blueprint refactor basics (`unreal.bp_delete_node`,
+`unreal.bp_delete_variable`, `unreal.bp_delete_function`,
+`unreal.bp_rename_variable`, and `unreal.bp_rename_function`). Earlier handoff
+text lagged at 119 entries.
 
-Current project status: v0.15 chunk 1 landed. The previous Lane V
+Current project status: v0.15 chunk 2a landed. The previous Lane V
 get/inspect-tool gap for actor property, actor transform, and project settings
-readback is done in C++.
+readback is done in C++; Blueprint delete + rename basics are done in C++,
+while macro + interface editing remains deferred to chunk 2b.
 
 `unreal.configure_fps_settings` and
 `unreal.bp_add_input_axis_event_node` were moved back to scaffold-only status
