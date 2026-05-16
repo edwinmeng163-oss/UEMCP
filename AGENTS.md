@@ -822,6 +822,124 @@ bounded sandbox.
 Tests can assert structured content fields with
 `expectToolCallStructuredFields`.
 
+## Release Verification SOP (Mac Stage 2 e2e)
+
+Every projectroot zip MUST be e2e-tested before tag-publish. The procedure is
+the "Mac Stage 2 e2e" workflow that locked the v0.14.0-python-track Mac
+release. Replicate exactly:
+
+1. **Fresh test project** at `/tmp/UEvolveMacZipTest` from `TP_Blank` (the
+   Codex-bridge / scaffold-applier tools fail loudly if a stale Saved/ tree
+   is reused, so always start from a clean template).
+2. **Extract zip at project root**, NOT under `Plugins/`. The projectroot
+   overlay creates `Plugins/UnrealMcp/`, `Tools/...`, and `Docs/FIRST_LAUNCH.md`.
+3. **UBT build** the editor module against the local UE 5.7 install:
+   ```bash
+   "/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh" \
+     UEvolveMacZipTestEditor Mac Development \
+     -project="/tmp/UEvolveMacZipTest/UEvolveMacZipTest.uproject" -waitmutex
+   ```
+   Expected: `Result: Succeeded` in ~30s on a warm cache.
+4. **Launch editor headless** with `-nullrhi -unattended`; poll the log for
+   `LogUnrealMcp:` listening + `Engine is initialized`. Confirm port 8765 is
+   bound (`lsof -nP -iTCP:8765 -sTCP:LISTEN`).
+5. **Three smoke curls** (PASS = all three return `isError=false` with the
+   listed payloads):
+
+   - `tools/list`: expect `len(tools) >= 110` AND
+     `unreal.editor.python_runtime_info` present.
+   - `tools/call unreal.editor.python_runtime_info` (no args): expect
+     `isError=false` and the bridge resolved the handler file
+     (`Tools/UnrealMcpPyTools/editor_python_runtime_info/main.py`).
+   - `tools/call unreal.mcp_apply_scaffold` with
+     `{toolName: "unreal.fps.bootstrap", dryRun: true}`: expect
+     `canApply=true`, `scaffolds=2` (= `fps_bootstrap` +
+     `verify_input_drives_pawn` dependency chain), `scaffoldDir` resolving
+     to `Tools/UnrealMcpToolScaffolds/fps_bootstrap`, plus
+     `buildRequirements.includesPlanned` of 3 + `requiredModules` containing
+     `BlueprintGraph`.
+
+6. **Cleanup**: `kill <editor PID>`, wait for port 8765 free, then
+   `rm -rf /tmp/UEvolveMacZipTest /tmp/uezip-editor.log`.
+
+If smoke 3 fails on a missing scaffold file, it is almost always a packager
+gap, not an applier bug — re-read the projectroot overlay invariants below
+before opening a defect against the applier.
+
+### Projectroot zip overlay invariants
+
+Every Mac source-only / Windows full-experience projectroot zip MUST ship
+the following tree (extract-target = `<UserProject>/` next to the
+`.uproject`):
+
+```
+<UserProject>/Plugins/UnrealMcp/                      # plugin source (Mac) or source+Win64 binaries (full)
+<UserProject>/Tools/UnrealMcpToolRegistry/            # tools.json + schema.json (writable)
+<UserProject>/Tools/UnrealMcpPyTools/                 # Python handler scripts
+<UserProject>/Tools/UnrealMcpToolScaffoldStarters/    # pristine templates for unreal.scaffold_mcp_tool
+<UserProject>/Tools/UnrealMcpToolScaffolds/           # pre-staged ready-to-apply scaffolds
+  fps_bootstrap/                                      # canonical recipe (apply unit)
+  verify_input_drives_pawn/                           # canonical recipe (apply unit)
+<UserProject>/Tools/UnrealMcpSkills/                  # SKILL.md tree
+<UserProject>/Tools/UnrealMcpKnowledge/               # Sources/ + Evals/core_rag_eval.json
+<UserProject>/Tools/UnrealMcpTests/                   # Core/ + SelfExtension/ + Knowledge/closed_loop
+<UserProject>/Tools/UnrealMcpCodexBridge/             # bridge source (excludes node_modules + runtime)
+<UserProject>/Docs/FIRST_LAUNCH.md                    # trilingual quickstart
+```
+
+`UnrealMcpToolScaffoldStarters` and `UnrealMcpToolScaffolds` are NOT the
+same. Starters are templates `unreal.scaffold_mcp_tool` clones from when a
+user adds a new tool. Scaffolds are the pre-staged working copies
+`unreal.mcp_apply_scaffold` reads at apply time. Both must coexist; do
+not rename one to the other.
+
+`Tools/package_plugin.sh` and `Tools/package_plugin.ps1` enforce these
+invariants via `[ -f ... ] || die "Staging integrity failure: ..."` (sh) and
+`Assert-PlainFile` (ps1). If you add a new top-level overlay subtree, add
+both the copy step and the matching assertion in both packagers.
+
+### Tool-count discipline
+
+The registry tool count appears in three places that must stay synced:
+
+- `Tools/UnrealMcpToolRegistry/tools.json` length (canonical)
+- `Plugins/UnrealMcp/Resources/ToolRegistry/tools.json` length (mirror; must
+  match canonical byte-for-byte via `cmp -s`)
+- The `"the registry contained N entries"` line in this AGENTS.md
+- The `N registered MCP tools` line in `README.md` (EN + 中文 + 日本語)
+- The "Read-only and context tools" / "Editor action tools" lists in
+  `Plugins/UnrealMcp/README.md`
+
+Cross-check via:
+```bash
+python3 -c 'import json; print(len(json.load(open("Tools/UnrealMcpToolRegistry/tools.json"))["tools"]))'
+grep -nE "registry contained|registered MCP tools" AGENTS.md README.md
+```
+
+Before any commit that adds or removes a tool, bump all three numbers in
+the same commit. The "lagging by one" failure mode (v0.14 left AGENTS.md
+at 119 while the registry was 120) is the canary that a freshness-clause
+audit was skipped.
+
+### Release publish flow
+
+After a tag-moving fix (e.g. Lane P3+P4 packaging fixes on a release tag):
+
+```bash
+git tag -d <tag> && git tag <tag> <newSha>
+git push origin <branch>
+git push --force origin <tag>
+bash Tools/package_plugin.sh --version <ver> --engine-tag ue56-ue57
+gh release delete-asset <tag> <old-asset-name>     --yes --repo <repo>
+gh release delete-asset <tag> <old-asset-name>.sha256 --yes --repo <repo>
+gh release upload <tag> <new-zip> <new-zip>.sha256 --repo <repo>
+gh release edit <tag> --notes-file <updated-body.md> --repo <repo>
+```
+
+Always update both the filename AND the SHA in the release notes' `Verify`
+block; the v0.14 draft was caught with v0.12.0-pilot filenames left over
+because only the body text was edited but not the asset reference.
+
 ## Safety Rules For Future AI
 
 Always do these:
