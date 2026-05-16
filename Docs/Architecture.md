@@ -15,7 +15,7 @@ Core layers:
 - Precision tools: `unreal.preview_change_plan`, `unreal.capture_project_snapshot`, `unreal.diff_project_snapshot`, `unreal.verify_task_outcome`, `unreal.mcp_classify_error`, Blueprint graph inspectors, and Widget tree dumping give Chat a read-back loop before and after edits.
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
-- `Tools/UnrealMcpCodexBridge`: Bun daemon for Plan B Codex Desktop/App Server integration. It spawns `codex app-server` on a platform-selected transport (Unix socket on macOS/Linux, localhost WebSocket on Windows), connects through Codex's App Server WebSocket transport, and exposes a small UE-facing WebSocket protocol on `ws://127.0.0.1:8766/uevolve`.
+- `Tools/UnrealMcpCodexBridge`: Bun daemon for Plan B Codex Desktop/App Server integration. It spawns `codex app-server` on a platform-selected transport (Unix socket on macOS/Linux, stdio child-process pipe on Windows — current Codex builds reject `--listen ws://...`; see issue #2 comment 8), connects through Codex's App Server protocol, and exposes a small UE-facing WebSocket on `ws://127.0.0.1:8766/uevolve`. The UE-facing inbound listener is always WebSocket regardless of which outbound transport speaks to Codex.
 - `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
 - `Schemas/UnrealMcpExtensionManifest.schema.json`: versioned contract for source apply manifests.
 - `Tools/UnrealMcpToolRegistry/schema.json`: versioned contract for explicit tool metadata under `Tools/UnrealMcpToolRegistry/tools.json`.

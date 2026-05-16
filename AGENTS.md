@@ -401,6 +401,10 @@ is now done in C++. Tier 2 path resolution is fixed: example projects can host
 the plugin through `AdditionalPluginDirectories` while Python bridge handlers,
 ToolRegistry reads, and scaffold apply/inspect/validate readers fall back to
 repo-root shared content with per-project drafts taking precedence.
+Issue #2 comment 8 follow-up is upstreamed in the Codex App Server bridge:
+Windows now defaults to stdio outbound transport, prefers user-mode Codex under
+`%LOCALAPPDATA%\OpenAI\Codex\bin\*`, and skips WindowsApps binaries that Bun
+cannot spawn.
 
 `unreal.configure_fps_settings` and
 `unreal.bp_add_input_axis_event_node` were moved back to scaffold-only status
@@ -739,8 +743,11 @@ Tools/UnrealMcpCodexBridge
 
 The daemon is not part of the UE plugin yet. It spawns a fresh
 `codex app-server` subprocess on a platform-selected transport (Unix socket on
-macOS/Linux, localhost WebSocket on Windows), performs App Server
-initialization and `thread/start`, then exposes a small UE-facing WebSocket API:
+macOS/Linux, stdio child-process pipe on Windows — current Codex builds reject
+`--listen ws://...`; see issue #2 comment 8), performs App Server
+initialization and `thread/start`, then exposes a small UE-facing WebSocket API
+(the UE-facing inbound listener is always WebSocket regardless of which
+outbound transport speaks to Codex):
 
 ```text
 ws://127.0.0.1:8766/uevolve

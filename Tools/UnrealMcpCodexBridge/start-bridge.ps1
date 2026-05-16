@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [int]$Port,
-  [ValidateSet("ws", "unix")]
+  [ValidateSet("ws", "unix", "stdio")]
   [string]$Transport,
   [string]$McpUrl,
   [string]$CodexBin
@@ -41,5 +41,14 @@ Write-Host "UEVOLVE_CODEX_APPROVAL_POLICY=$(Get-EnvOrUnset "UEVOLVE_CODEX_APPROV
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $BridgeDir = Join-Path $RepoRoot "Tools\UnrealMcpCodexBridge"
-& bun run --cwd $BridgeDir src\index.ts
+$BundledBun = Join-Path $PSScriptRoot "runtime\bun.exe"
+if ([string]::IsNullOrWhiteSpace($env:UEVOLVE_BUN_BIN) -and (Test-Path -LiteralPath $BundledBun)) {
+  $env:UEVOLVE_BUN_BIN = $BundledBun
+}
+$BunBin = $env:UEVOLVE_BUN_BIN
+if ([string]::IsNullOrWhiteSpace($BunBin)) {
+  $BunBin = "bun"
+}
+Write-Host "UEVOLVE_BUN_BIN=$(Get-EnvOrUnset "UEVOLVE_BUN_BIN")"
+& "$BunBin" run --cwd "$BridgeDir" "src\index.ts"
 exit $LASTEXITCODE

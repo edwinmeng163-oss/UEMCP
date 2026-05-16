@@ -175,8 +175,8 @@ Tools/UnrealMcpCodexBridge
 ```
 
 It starts a fresh `codex app-server` subprocess on a platform-selected transport
-(Unix socket on macOS/Linux, localhost WebSocket on Windows), connects using the
-Codex App Server WebSocket transport, initializes a single thread with daemon
+(Unix socket on macOS/Linux, stdio on Windows), connects using the Codex App
+Server transport, initializes a single thread with daemon
 defaults (`UEVOLVE_CODEX_MODEL`, default `gpt-5.5`, and
 `UEVOLVE_CODEX_EFFORT`, default `xhigh`), then serves the UE-facing
 endpoint:
@@ -185,7 +185,11 @@ endpoint:
 ws://127.0.0.1:8766/uevolve
 ```
 
-Windows note: after installing Bun from `https://bun.sh`, open a new terminal and verify `bun --version` works. If you see `bun: command not found`, add `%USERPROFILE%\.bun\bin` to User PATH (`System Properties → Environment Variables → User PATH`), or install via Scoop with `scoop install bun`, which sets PATH automatically. After changing PATH, close and reopen any terminal / VS Code / Explorer window before retrying `start-bridge.cmd`.
+Windows note: packaged bridge zips use bundled `runtime\bun.exe` automatically
+when present. If you run from source without a bundled runtime, install Bun from
+`https://bun.sh`, open a new terminal, and verify `bun --version` works. The
+bridge prefers user-mode Codex binaries under
+`%LOCALAPPDATA%\OpenAI\Codex\bin\*` over WindowsApps paths.
 
 Start it from the repository root:
 

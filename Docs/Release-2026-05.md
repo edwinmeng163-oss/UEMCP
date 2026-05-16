@@ -38,7 +38,7 @@
 
 #### 3. Codex Desktop Bridge
 
-`Tools/UnrealMcpCodexBridge/` —— Bun TypeScript daemon，把 Codex App Server 协议（WebSocket-over-UDS / WebSocket-over-TCP）桥到一个简单的 `ws://127.0.0.1:8766/uevolve` 接口给 UE plugin 用。
+`Tools/UnrealMcpCodexBridge/` —— Bun TypeScript daemon，把 Codex App Server 协议（POSIX 上 WebSocket-over-UDS、Windows 上 stdio 子进程 pipe —— 当前 Codex builds 拒绝 `--listen ws://...`，见 issue #2 comment 8）桥到一个简单的 `ws://127.0.0.1:8766/uevolve` 接口给 UE plugin 用。UE 侧入站监听始终是 WebSocket，与出站连 Codex 的传输无关。
 
 **关键能力**：
 - Codex 通过此桥能**直接调用 Unreal MCP 工具**（`unreal.spawn_actor` / `unreal.execute_python` / 全部可见工具），不再只是给文字方案
@@ -281,7 +281,7 @@ A Provider/Model selector at the top of the chat panel switches between configur
 
 #### 3. Codex Desktop Bridge
 
-`Tools/UnrealMcpCodexBridge/` is a Bun TypeScript daemon that bridges the Codex App Server protocol (WebSocket-over-UDS on POSIX, WebSocket-over-TCP on Windows) to a simple `ws://127.0.0.1:8766/uevolve` endpoint consumed by the UE plugin.
+`Tools/UnrealMcpCodexBridge/` is a Bun TypeScript daemon that bridges the Codex App Server protocol (WebSocket-over-UDS on POSIX, stdio child-process pipe on Windows — current Codex builds reject `--listen ws://...`; see issue #2 comment 8) to a simple `ws://127.0.0.1:8766/uevolve` endpoint consumed by the UE plugin. The UE-facing inbound listener is always WebSocket regardless of which outbound transport speaks to Codex.
 
 **Capabilities**:
 - Codex can **invoke Unreal MCP tools directly** (`unreal.spawn_actor`, `unreal.execute_python`, the visible tool set) instead of only emitting `/tool ...` text suggestions.
@@ -511,7 +511,7 @@ In the chat panel:
 
 #### 3. Codex Desktop Bridge
 
-`Tools/UnrealMcpCodexBridge/` は Bun の TypeScript daemon で、Codex App Server プロトコル（POSIX では WebSocket-over-UDS、Windows では WebSocket-over-TCP）を UE plugin が消費するシンプルな `ws://127.0.0.1:8766/uevolve` エンドポイントに橋渡しします。
+`Tools/UnrealMcpCodexBridge/` は Bun の TypeScript daemon で、Codex App Server プロトコル（POSIX では WebSocket-over-UDS、Windows では stdio child-process pipe — 現在の Codex ビルドは `--listen ws://...` を拒否します。issue #2 comment 8 参照）を UE plugin が消費するシンプルな `ws://127.0.0.1:8766/uevolve` エンドポイントに橋渡しします。UE 側 inbound listener は外向き transport にかかわらず常に WebSocket です。
 
 **主要機能**：
 - Codex が **Unreal MCP ツール（`unreal.spawn_actor`、`unreal.execute_python` 等、表示される全ツール）を直接呼び出せる**ようになります。これまでのように `/tool ...` 文字列を返すだけ、ではなく実行されます

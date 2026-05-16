@@ -9,7 +9,14 @@ import { approvalResponse, type ApprovalMode } from "./approval-policy";
 export type Logger = (direction: string, payload: any) => void;
 type Pending = { resolve: (value: any) => void; reject: (error: Error) => void };
 export type ConfigOverrides = Record<string, string>;
-export type CodexTransport = "unix" | "ws";
+export type CodexTransport = "unix" | "ws" | "stdio";
+
+export type CodexDiscoveryWarning = {
+  code: string;
+  message: string;
+  candidate?: string;
+  recommendation?: string;
+};
 
 export type McpRegistration = {
   enabled: boolean;
@@ -31,6 +38,7 @@ export type StartedAppServer = {
   shellMode: boolean;
   spawnArgs: string[];
   mcpRegistration: McpRegistration;
+  warnings: CodexDiscoveryWarning[];
 };
 
 type ConnectTarget =
@@ -174,14 +182,128 @@ export class CodexWsClient {
   }
 }
 
+export class CodexStdioClient {
+  private buffer = "";
+  private nextId = 1;
+  private pending = new Map<string, Pending>();
+  private messageHandlers = new Set<(msg: any) => void>();
+  private errorHandlers = new Set<(err: Error) => void>();
+  private closeHandlers = new Set<() => void>();
+
+  constructor(
+    private proc: ChildProcessWithoutNullStreams,
+    private log: Logger = () => {},
+    private mode: ApprovalMode = "reject",
+    private onNotification: (message: any) => void = () => {},
+  ) {
+    this.proc.stdout.on("data", (chunk) => this.handleStdout(chunk));
+    this.proc.stdout.on("error", (error) => this.emitError(error));
+    this.proc.stdin.on("error", (error) => this.emitError(error));
+    this.proc.once("error", (error) => this.emitError(error));
+    this.proc.once("close", () => {
+      this.failAll(new Error("Codex app-server stdio closed"));
+      for (const handler of this.closeHandlers) handler();
+    });
+  }
+
+  async connect(): Promise<void> {
+    if (!this.proc.stdin.writable) throw new Error("Codex app-server stdin is not writable");
+    if (!this.proc.stdout.readable) throw new Error("Codex app-server stdout is not readable");
+  }
+
+  async initialize(): Promise<any> {
+    const result = await this.request("initialize", {
+      clientInfo: { name: "uevolve-codex-bridge", title: "UEvolve Codex Bridge", version: "0.1.0" },
+      capabilities: { experimentalApi: true },
+    });
+    this.notify("initialized", {});
+    return result;
+  }
+
+  request(method: string, params: any = {}): Promise<any> {
+    const id = String(this.nextId++);
+    this.send({ id, method, params });
+    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+  }
+
+  notify(method: string, params: any = {}): void {
+    this.send({ method, params });
+  }
+
+  send(message: object): void {
+    this.log("send", message);
+    this.proc.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+
+  onMessage(handler: (msg: any) => void): void {
+    this.messageHandlers.add(handler);
+  }
+
+  onError(handler: (err: Error) => void): void {
+    this.errorHandlers.add(handler);
+  }
+
+  onClose(handler: () => void): void {
+    this.closeHandlers.add(handler);
+  }
+
+  async close(): Promise<void> {
+    this.proc.stdin.end();
+  }
+
+  private handleStdout(chunk: Buffer | string): void {
+    this.buffer += chunk.toString();
+    for (;;) {
+      const newline = this.buffer.indexOf("\n");
+      if (newline < 0) return;
+      let line = this.buffer.slice(0, newline);
+      this.buffer = this.buffer.slice(newline + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (!line.trim()) continue;
+      try {
+        this.handleJson(JSON.parse(line));
+      } catch (error) {
+        this.emitError(new Error(`Failed to parse Codex stdio JSON: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    }
+  }
+
+  private handleJson(message: any): void {
+    this.log("recv", message);
+    for (const handler of this.messageHandlers) handler(message);
+    if (message.id != null && message.method) {
+      this.send({ id: message.id, result: approvalResponse(message.method, message.params, this.mode) });
+      return;
+    }
+    if (message.id != null) {
+      const waiter = this.pending.get(String(message.id));
+      if (!waiter) return;
+      this.pending.delete(String(message.id));
+      message.error ? waiter.reject(new Error(message.error.message ?? JSON.stringify(message.error))) : waiter.resolve(message.result);
+      return;
+    }
+    if (message.method) this.onNotification(message);
+  }
+
+  private emitError(error: Error): void {
+    for (const handler of this.errorHandlers) handler(error);
+  }
+
+  private failAll(error: Error): void {
+    for (const waiter of this.pending.values()) waiter.reject(error);
+    this.pending.clear();
+  }
+}
+
 export async function startCodexAppServer(
   onExit: (reason: string) => void,
   options: AppServerOptions = {},
 ): Promise<StartedAppServer> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "uevolve-codex-bridge-"));
   const transport = selectedTransport();
-  const endpoint = transport === "ws" ? `ws://127.0.0.1:${await selectedPort()}` : path.join(dir, "codex.sock");
-  const spawnArgs = ["app-server", "--listen", transport === "ws" ? endpoint : `unix://${endpoint}`];
+  const endpoint = transport === "stdio" ? "stdio://" : transport === "ws" ? `ws://127.0.0.1:${await selectedPort()}` : path.join(dir, "codex.sock");
+  const listenEndpoint = transport === "stdio" ? "stdio://" : transport === "ws" ? endpoint : `unix://${endpoint}`;
+  const spawnArgs = ["app-server", "--listen", listenEndpoint];
   const mcpRegistration = mcpRegistrationFromEnv();
   const configOverrides: ConfigOverrides = {};
   if (mcpRegistration.enabled) {
@@ -192,20 +314,22 @@ export async function startCodexAppServer(
   }
   Object.assign(configOverrides, options.configOverrides ?? {});
   for (const [key, value] of Object.entries(configOverrides)) spawnArgs.push("-c", `${key}=${value}`);
-  const codexBin = await resolveCodexBinary();
+  const codexResolution = await resolveCodexBinary();
+  const codexBin = codexResolution.path;
   const shellMode = shouldUseShellForCodex(codexBin);
   let proc: ChildProcessWithoutNullStreams;
   try {
-    proc = spawn(codexBin, spawnArgs, { shell: shellMode, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    proc = spawn(codexBin, spawnArgs, { shell: shellMode, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   } catch (error) {
     throw new Error(failedCodexLaunchMessage(error));
   }
   proc.once("error", (error) => onExit(failedCodexLaunchMessage(error)));
   proc.once("exit", (code, signal) => onExit(`codex app-server exited code=${code} signal=${signal}`));
-  return { proc, endpoint, transport, dir, codexBin, shellMode, spawnArgs, mcpRegistration };
+  return { proc, endpoint, transport, dir, codexBin, shellMode, spawnArgs, mcpRegistration, warnings: codexResolution.warnings };
 }
 
 export async function waitForEndpoint(endpoint: string, transport: CodexTransport): Promise<void> {
+  if (transport === "stdio") return;
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (transport === "unix" && fs.existsSync(endpoint)) return;
@@ -248,28 +372,86 @@ function mcpRegistrationFromEnv(): McpRegistration {
 
 function selectedTransport(): CodexTransport {
   const requested = process.env.UEVOLVE_CODEX_TRANSPORT?.trim().toLowerCase();
-  if (requested === "ws" || requested === "unix") return requested;
+  if (requested === "ws" || requested === "unix" || requested === "stdio") return requested;
   if (requested) throw new Error(`Invalid UEVOLVE_CODEX_TRANSPORT: ${requested}`);
-  return process.platform === "win32" ? "ws" : "unix";
+  return process.platform === "win32" ? "stdio" : "unix";
 }
 
-async function resolveCodexBinary(): Promise<string> {
+async function resolveCodexBinary(): Promise<{ path: string; warnings: CodexDiscoveryWarning[] }> {
+  const warnings: CodexDiscoveryWarning[] = [];
+  const tried: string[] = [];
   const override = process.env.UEVOLVE_CODEX_BIN?.trim();
   if (override) {
+    tried.push(`UEVOLVE_CODEX_BIN=${override}`);
     if (!path.isAbsolute(override)) throw new Error(`UEVOLVE_CODEX_BIN must be an absolute path. Got: ${override}`);
     if (!fs.existsSync(override)) throw new Error(`UEVOLVE_CODEX_BIN does not exist: ${override}`);
-    return override;
+    rejectWindowsAppsCodex(override);
+    return { path: override, warnings };
+  }
+  tried.push("UEVOLVE_CODEX_BIN=<unset>");
+
+  if (process.platform === "win32") {
+    const localCandidates = windowsUserCodexCandidates();
+    tried.push(localCandidates.pattern);
+    const localCandidate = firstUsableCodexCandidate(localCandidates.paths, warnings);
+    if (localCandidate) return { path: localCandidate, warnings };
   }
 
   const resolver = process.platform === "win32" ? "where" : "which";
-  const resolved = await resolveFirstPath(resolver, "codex");
-  if (!resolved) {
-    throw new Error(`Unable to find codex with '${resolver} codex'. Set UEVOLVE_CODEX_BIN to the full path of codex.exe or codex.cmd.`);
-  }
-  return resolved;
+  tried.push(`${resolver} codex`);
+  const resolved = await resolvePaths(resolver, "codex");
+  const resolvedCandidate = firstUsableCodexCandidate(resolved, warnings);
+  if (resolvedCandidate) return { path: resolvedCandidate, warnings };
+
+  const warningText = warnings.length ? ` Warnings: ${warnings.map((warning) => warning.message).join(" ")}` : "";
+  throw new Error(
+    `Unable to find a usable codex binary. Tried: ${tried.join("; ")}.${warningText} Set UEVOLVE_CODEX_BIN to the full path of a user-mode codex.exe or codex.cmd.`,
+  );
 }
 
-async function resolveFirstPath(command: string, name: string): Promise<string> {
+function windowsUserCodexCandidates(): { pattern: string; paths: string[] } {
+  const base = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin") : "";
+  const pattern = "%LOCALAPPDATA%\\OpenAI\\Codex\\bin\\*\\codex.exe";
+  if (!base || !fs.existsSync(base)) return { pattern, paths: [] };
+  const paths = fs
+    .readdirSync(base, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(base, entry.name, "codex.exe"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort((a, b) => a.localeCompare(b));
+  return { pattern, paths };
+}
+
+function firstUsableCodexCandidate(candidates: string[], warnings: CodexDiscoveryWarning[]): string {
+  for (const candidate of candidates) {
+    if (isWindowsAppsCodex(candidate)) {
+      warnings.push({
+        code: "windowsapps-codex-skipped",
+        message: "WindowsApps Codex binary skipped; install user-mode Codex or set UEVOLVE_CODEX_BIN.",
+        candidate,
+        recommendation: "Install the Codex user-mode binary under %LOCALAPPDATA%\\OpenAI\\Codex\\bin or set UEVOLVE_CODEX_BIN.",
+      });
+      continue;
+    }
+    return candidate;
+  }
+  return "";
+}
+
+function rejectWindowsAppsCodex(candidate: string): void {
+  if (!isWindowsAppsCodex(candidate)) return;
+  throw new Error(
+    `UEVOLVE_CODEX_BIN points at the WindowsApps Codex binary, which Bun cannot spawn: ${candidate}. Install user-mode Codex or set UEVOLVE_CODEX_BIN to a user-mode codex.exe/codex.cmd.`,
+  );
+}
+
+function isWindowsAppsCodex(candidate: string): boolean {
+  if (process.platform !== "win32") return false;
+  const normalized = path.resolve(candidate).replace(/\//g, "\\").toLowerCase();
+  return normalized.startsWith("c:\\program files\\windowsapps\\");
+}
+
+async function resolvePaths(command: string, name: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, [name], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
@@ -278,11 +460,11 @@ async function resolveFirstPath(command: string, name: string): Promise<string> 
     proc.stderr.on("data", (chunk) => (stderr += chunk.toString("utf8")));
     proc.once("error", (error) => reject(new Error(`Failed to run '${command} ${name}': ${error.message}`)));
     proc.once("exit", (code) => {
-      const first = stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-      if (code === 0 && first) resolve(first);
+      const paths = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (code === 0 && paths.length) resolve(paths);
       else reject(new Error(`'${command} ${name}' failed with code ${code}${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
     });
-  }).catch(() => "");
+  }).catch(() => []);
 }
 
 function shouldUseShellForCodex(codexBin: string): boolean {
