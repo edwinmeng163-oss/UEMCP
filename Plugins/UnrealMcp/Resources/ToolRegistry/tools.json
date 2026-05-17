@@ -600,6 +600,7 @@
       "name": "unreal.knowledge_index_refresh",
       "category": "self-extension",
       "handlerName": "unreal.knowledge_index_refresh",
+      "description": "Rebuilds the local Saved/UnrealMcp/KnowledgeIndex/ JSONL index from fetched docs plus visible tool metadata for RAG retrieval; call after upstream docs change or after a registry-changing chunk.",
       "exposure": "visible",
       "riskLevel": "low",
       "requiresWrite": true,
@@ -621,6 +622,7 @@
       "name": "unreal.knowledge_search",
       "category": "self-extension",
       "handlerName": "unreal.knowledge_search",
+      "description": "Reads the local KnowledgeCard index and returns compact source-linked cards; use for planning, tool choice, and verification, and call unreal.knowledge_index_refresh first if the index is missing.",
       "exposure": "visible",
       "riskLevel": "read_only",
       "requiresWrite": false,
@@ -642,6 +644,7 @@
       "name": "unreal.tool_recommend",
       "category": "self-extension",
       "handlerName": "unreal.tool_recommend",
+      "description": "Given a task description, returns ranked tool suggestions from the local registry plus knowledge index.",
       "exposure": "visible",
       "riskLevel": "read_only",
       "requiresWrite": false,
@@ -663,6 +666,7 @@
       "name": "unreal.tool_gap_analyze",
       "category": "self-extension",
       "handlerName": "unreal.tool_gap_analyze",
+      "description": "Detects functional gaps in the current tool surface relative to a workflow goal as a read-only audit.",
       "exposure": "visible",
       "riskLevel": "read_only",
       "requiresWrite": false,
@@ -684,6 +688,7 @@
       "name": "unreal.workflow_recommend",
       "category": "self-extension",
       "handlerName": "unreal.workflow_recommend",
+      "description": "Given a goal, returns a step-by-step workflow composed of existing MCP tool calls.",
       "exposure": "visible",
       "riskLevel": "read_only",
       "requiresWrite": false,
@@ -705,6 +710,7 @@
       "name": "unreal.knowledge_eval_run",
       "category": "self-extension",
       "handlerName": "unreal.knowledge_eval_run",
+      "description": "Runs the offline RAG retrieval evaluation suite under Tools/UnrealMcpKnowledge/Evals/ and reports recall plus per-question diagnostics.",
       "exposure": "visible",
       "riskLevel": "read_only",
       "requiresWrite": false,
@@ -1441,6 +1447,7 @@
       "name": "unreal.tools.export_package",
       "category": "self-extension",
       "handlerName": "unreal.tools.export_package",
+      "description": "Exports a scaffold-backed MCP tool to a portable zip package under Saved/UnrealMcp/Packages/; expert flag allowRegistryOnly=true emits a non-portable registry-only package that import refuses by default.",
       "exposure": "visible",
       "riskLevel": "medium",
       "requiresWrite": true,
@@ -1462,6 +1469,7 @@
       "name": "unreal.tools.list_exportable",
       "category": "self-extension",
       "handlerName": "unreal.tools.list_exportable",
+      "description": "Lists registered MCP tools that qualify as scaffold-backed and can be cleanly exported via unreal.tools.export_package.",
       "exposure": "visible",
       "riskLevel": "read_only",
       "requiresWrite": false,
@@ -1483,6 +1491,7 @@
       "name": "unreal.tools.import_package",
       "category": "self-extension",
       "handlerName": "unreal.tools.import_package",
+      "description": "Validates and imports a portable tool package zip into the local registry/scaffold/test tree; registry-only packages are refused unless caller explicitly opts in.",
       "exposure": "visible",
       "riskLevel": "high",
       "requiresWrite": true,
@@ -3057,7 +3066,7 @@
       "category": "editor",
       "handlerName": "unreal.project_settings_get",
       "title": "Get Project Setting",
-      "description": "Reads a single project-settings key from a supported UDeveloperSettings object or config-backed category.",
+      "description": "Reads a project setting; pass `effective=true` to get the current runtime/PIE value when available (else returns the configured default).",
       "exposure": "visible",
       "riskLevel": "low",
       "requiresWrite": false,
@@ -3097,6 +3106,11 @@
           "key": {
             "type": "string",
             "description": "Project settings key or dot-path inside the category, for example DefaultGameMode, DefaultInputAxisMappings, or DefaultRHI."
+          },
+          "effective": {
+            "type": "boolean",
+            "description": "Return the current runtime/PIE value when available; otherwise return the configured default.",
+            "default": false
           }
         }
       },
@@ -3121,6 +3135,20 @@
           },
           "sourceConfig": {
             "type": "string"
+          },
+          "effective": {
+            "type": "boolean"
+          },
+          "runtimeSource": {
+            "type": "string",
+            "enum": [
+              "pie_world_settings",
+              "developer_settings",
+              "ini_section"
+            ]
+          },
+          "defaultValue": {
+            "description": "Configured default value returned by the default read path when effective=true returns a different runtime value."
           },
           "notes": {
             "type": "string"

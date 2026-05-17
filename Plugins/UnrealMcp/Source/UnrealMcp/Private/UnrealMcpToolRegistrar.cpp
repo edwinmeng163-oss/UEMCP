@@ -104,6 +104,7 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
 				Properties->SetObjectField(TEXT("category"), MakeStringProperty(TEXT("Project settings category: engine, editor, game, input, rendering, or physics."), TEXT("engine")));
 				Properties->SetObjectField(TEXT("key"), MakeStringProperty(TEXT("Project settings key or dot-path inside the category, for example DefaultGameMode, DefaultInputAxisMappings, or DefaultRHI."), FString()));
+				Properties->SetObjectField(TEXT("effective"), MakeBoolProperty(TEXT("Return the current runtime/PIE value when available; otherwise return the configured default."), false));
 				TArray<TSharedPtr<FJsonValue>> Required;
 				Required.Add(MakeShared<FJsonValueString>(TEXT("category")));
 				Required.Add(MakeShared<FJsonValueString>(TEXT("key")));
@@ -114,7 +115,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.project_settings_get"),
 					TEXT("Get Project Setting"),
-					TEXT("Reads a single project-settings key from a supported UDeveloperSettings object or config-backed category."),
+					TEXT("Reads a project setting; pass effective=true to get the current runtime/PIE value when available (else returns the configured default)."),
 					TEXT("editor"),
 					TEXT("UnrealMcpEditorTools.cpp"),
 					EUnrealMcpToolRisk::Low);
@@ -693,7 +694,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.tools.export_package"),
 					TEXT("Export Tool Package"),
-					TEXT("Exports a scaffold-backed MCP tool into a portable zip package with a hashed manifest. Expert mode allowRegistryOnly=true emits a registry-only package that is not portable and is refused by import unless explicitly accepted."),
+					TEXT("Exports a scaffold-backed MCP tool to a portable zip package under Saved/UnrealMcp/Packages/; expert flag allowRegistryOnly=true emits a non-portable registry-only package that import refuses by default."),
 					TEXT("self-extension"),
 					TEXT("UnrealMcpToolPackager.cpp"),
 					EUnrealMcpToolRisk::Medium);
@@ -714,7 +715,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.tools.list_exportable"),
 					TEXT("List Exportable Tools"),
-					TEXT("Lists scaffold-backed MCP tools under Tools/UnrealMcpToolScaffolds and Saved/UnrealMcp/TestScaffolds that can be exported as portable tool packages."),
+					TEXT("Lists registered MCP tools that qualify as scaffold-backed and can be cleanly exported via unreal.tools.export_package."),
 					TEXT("self-extension"),
 					TEXT("UnrealMcpToolPackager.cpp"),
 					EUnrealMcpToolRisk::ReadOnly);
@@ -740,7 +741,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.tools.import_package"),
 					TEXT("Import Tool Package"),
-					TEXT("Validates a tool package manifest and imports scaffold/test files plus a deduplicated ToolRegistry entry after dry-run review."),
+					TEXT("Validates and imports a portable tool package zip into the local registry/scaffold/test tree; registry-only packages are refused unless caller explicitly opts in."),
 					TEXT("self-extension"),
 					TEXT("UnrealMcpToolPackager.cpp"),
 					EUnrealMcpToolRisk::High);
@@ -853,7 +854,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.knowledge_index_refresh"),
 					TEXT("Refresh Knowledge Index"),
-					TEXT("Builds a local KnowledgeCard JSONL index from fetched official docs, versioned docs, and visible ToolRegistry entries."),
+					TEXT("Rebuilds the local Saved/UnrealMcp/KnowledgeIndex/ JSONL index from fetched docs plus visible tool metadata for RAG retrieval; call after upstream docs change or after a registry-changing chunk."),
 					TEXT("self-extension"),
 					TEXT("UnrealMcpKnowledgeTools.cpp"),
 					EUnrealMcpToolRisk::Low);
@@ -880,7 +881,7 @@ namespace UnrealMcp
 					MakeDescriptor(
 						TEXT("unreal.knowledge_search"),
 						TEXT("Search Knowledge Index"),
-						TEXT("Searches the local KnowledgeCard index and returns compact source-linked cards for planning, tool choice, and verification."),
+						TEXT("Reads the local KnowledgeCard index and returns compact source-linked cards; use for planning, tool choice, and verification, and call unreal.knowledge_index_refresh first if the index is missing."),
 						TEXT("self-extension"),
 						TEXT("UnrealMcpKnowledgeTools.cpp"),
 						EUnrealMcpToolRisk::ReadOnly),
@@ -900,7 +901,7 @@ namespace UnrealMcp
 					MakeDescriptor(
 						TEXT("unreal.tool_recommend"),
 						TEXT("Recommend MCP Tools"),
-						TEXT("Recommends existing MCP tools and a safe workflow draft for a task using ToolRegistry policy plus optional local KnowledgeCards."),
+						TEXT("Given a task description, returns ranked tool suggestions from the local registry plus knowledge index."),
 						TEXT("self-extension"),
 						TEXT("UnrealMcpKnowledgeTools.cpp"),
 						EUnrealMcpToolRisk::ReadOnly),
@@ -918,7 +919,7 @@ namespace UnrealMcp
 					MakeDescriptor(
 						TEXT("unreal.tool_gap_analyze"),
 						TEXT("Analyze MCP Tool Gap"),
-						TEXT("Decides whether a task should use existing tools, compose a workflow, or scaffold a new descriptor-first MCP tool, with schema/test/pipeline hints."),
+						TEXT("Detects functional gaps in the current tool surface relative to a workflow goal as a read-only audit."),
 						TEXT("self-extension"),
 						TEXT("UnrealMcpKnowledgeTools.cpp"),
 						EUnrealMcpToolRisk::ReadOnly),
@@ -938,7 +939,7 @@ namespace UnrealMcp
 					MakeDescriptor(
 						TEXT("unreal.workflow_recommend"),
 						TEXT("Recommend MCP Workflow"),
-						TEXT("Generates a safe workflow_run draft from a task using KnowledgeCards, ToolRegistry policy, gap analysis, snapshot gates, skipped placeholder tool steps, and final verification."),
+						TEXT("Given a goal, returns a step-by-step workflow composed of existing MCP tool calls."),
 						TEXT("self-extension"),
 						TEXT("UnrealMcpKnowledgeTools.cpp"),
 						EUnrealMcpToolRisk::ReadOnly),
@@ -957,7 +958,7 @@ namespace UnrealMcp
 					MakeDescriptor(
 						TEXT("unreal.knowledge_eval_run"),
 						TEXT("Run Knowledge Evals"),
-						TEXT("Runs versioned local RAG eval cases against knowledge_search, tool_recommend, tool_gap_analyze, and workflow_recommend, returning pass rate and failure evidence."),
+						TEXT("Runs the offline RAG retrieval evaluation suite under Tools/UnrealMcpKnowledge/Evals/ and reports recall plus per-question diagnostics."),
 						TEXT("self-extension"),
 						TEXT("UnrealMcpKnowledgeTools.cpp"),
 						EUnrealMcpToolRisk::ReadOnly),

@@ -110,6 +110,31 @@ namespace UnrealMcp
 		return GraphObject;
 	}
 
+	FString NormalizeBlueprintAssetPath(const FString& InputPath)
+	{
+		FString Path = InputPath.TrimStartAndEnd();
+		Path.ReplaceInline(TEXT("\\"), TEXT("/"));
+		if (Path.IsEmpty() || Path.Contains(TEXT(".")) || !Path.StartsWith(TEXT("/"), ESearchCase::CaseSensitive))
+		{
+			return Path;
+		}
+
+		int32 LastSlashIndex = INDEX_NONE;
+		Path.FindLastChar(TEXT('/'), LastSlashIndex);
+		if (LastSlashIndex == INDEX_NONE || LastSlashIndex >= Path.Len() - 1)
+		{
+			return Path;
+		}
+
+		const FString LastSegment = Path.Mid(LastSlashIndex + 1);
+		if (LastSegment.IsEmpty() || LastSegment.Contains(TEXT(".")))
+		{
+			return Path;
+		}
+
+		return FString::Printf(TEXT("%s.%s"), *Path, *LastSegment);
+	}
+
 	UObject* LoadAssetFromAnyPath(
 		UEditorAssetSubsystem* EditorAssetSubsystem,
 		const FString& AnyAssetPath,
@@ -120,6 +145,22 @@ namespace UnrealMcp
 		{
 			OutFailureReason = TEXT("EditorAssetSubsystem is unavailable.");
 			return nullptr;
+		}
+
+		const FString NormalizedCandidate = NormalizeBlueprintAssetPath(AnyAssetPath);
+		if (!NormalizedCandidate.Equals(AnyAssetPath, ESearchCase::CaseSensitive))
+		{
+			FString CandidateFailureReason;
+			FString CandidateObjectPath = EditorScriptingHelpers::ConvertAnyPathToObjectPath(NormalizedCandidate, CandidateFailureReason);
+			if (!CandidateObjectPath.IsEmpty())
+			{
+				if (UObject* LoadedAsset = EditorAssetSubsystem->LoadAsset(CandidateObjectPath))
+				{
+					OutObjectPath = CandidateObjectPath;
+					OutFailureReason.Reset();
+					return LoadedAsset;
+				}
+			}
 		}
 
 		OutObjectPath = EditorScriptingHelpers::ConvertAnyPathToObjectPath(AnyAssetPath, OutFailureReason);

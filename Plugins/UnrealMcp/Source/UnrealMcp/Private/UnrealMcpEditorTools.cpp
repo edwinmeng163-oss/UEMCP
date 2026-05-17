@@ -12,8 +12,11 @@
 #include "Engine/RendererSettings.h"
 #include "Engine/World.h"
 #include "FileHelpers.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/WorldSettings.h"
 #include "GameFramework/InputSettings.h"
 #include "GenericPlatform/GenericPlatformOutputDevices.h"
+#include "HAL/FileManager.h"
 #include "IContentBrowserSingleton.h"
 #include "IAssetTools.h"
 #include "IPythonScriptPlugin.h"
@@ -39,6 +42,7 @@
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSettings.h"
 #include "UObject/ObjectRedirector.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
 
 namespace UnrealMcp
@@ -78,6 +82,12 @@ namespace UnrealMcp
 			FString ObjectPath;
 			FString PackagePath;
 			FString AssetName;
+		};
+
+		struct FEditorDirtyPackageRecord
+		{
+			FString Path;
+			UPackage* Package = nullptr;
 		};
 
 		void EditorToolAttachError(TSharedPtr<FJsonObject> StructuredContent, const FString& Code, const FString& Message)
@@ -211,6 +221,40 @@ namespace UnrealMcp
 			return false;
 		}
 
+		bool IsGameModeRuntimeSettingKey(const FString& Category, const FString& LookupKey)
+		{
+			return (Category == TEXT("game") || Category == TEXT("engine"))
+				&& LookupKey.Contains(TEXT("GameMode"), ESearchCase::IgnoreCase);
+		}
+
+		bool TryReadPieWorldDefaultGameMode(FString& OutRuntimeValue)
+		{
+			OutRuntimeValue.Reset();
+
+			UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
+			if (!PlayWorld)
+			{
+				return false;
+			}
+
+			AWorldSettings* WorldSettings = PlayWorld->GetWorldSettings();
+			UClass* RuntimeGameModeClass = WorldSettings ? WorldSettings->DefaultGameMode.Get() : nullptr;
+			if (!RuntimeGameModeClass)
+			{
+				return false;
+			}
+
+			OutRuntimeValue = RuntimeGameModeClass->GetPathName();
+			return !OutRuntimeValue.IsEmpty();
+		}
+
+		bool DoesJsonValueEqualString(const TSharedPtr<FJsonValue>& Value, const FString& StringValue)
+		{
+			return Value.IsValid()
+				&& Value->Type == EJson::String
+				&& Value->AsString().Equals(StringValue, ESearchCase::CaseSensitive);
+		}
+
 		bool EditorToolTryNormalizeAssetPath(const FString& RawPath, FEditorToolAssetPath& OutPath, FString& OutFailureReason)
 		{
 			OutPath = FEditorToolAssetPath();
@@ -339,6 +383,142 @@ namespace UnrealMcp
 				UE::AssetRegistry::EDependencyCategory::Package,
 				UE::AssetRegistry::FDependencyQuery());
 			return Referencers;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> MakeEditorToolStringArray(const TArray<FString>& Values)
+		{
+			TArray<TSharedPtr<FJsonValue>> JsonValues;
+			for (const FString& Value : Values)
+			{
+				JsonValues.Add(MakeShared<FJsonValueString>(Value));
+			}
+			return JsonValues;
+		}
+
+		FString TryResolvePackageFilename(const UPackage* Package)
+		{
+			if (!Package)
+			{
+				return FString();
+			}
+
+			const FString PackageName = Package->GetName();
+			FText InvalidPackageReason;
+			if (!FPackageName::IsValidLongPackageName(PackageName, false, &InvalidPackageReason))
+			{
+				return FString();
+			}
+
+			TArray<FString> CandidatePaths;
+			if (Package->ContainsMap())
+			{
+				CandidatePaths.Add(FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetMapPackageExtension()));
+			}
+			CandidatePaths.Add(FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension()));
+
+			for (FString CandidatePath : CandidatePaths)
+			{
+				FPaths::NormalizeFilename(CandidatePath);
+				if (FPaths::FileExists(CandidatePath))
+				{
+					return CandidatePath;
+				}
+			}
+
+			return CandidatePaths.Num() > 0 ? CandidatePaths[0] : FString();
+		}
+
+		FString ClassifyDirtyPackageSkipReason(const FEditorDirtyPackageRecord& Record)
+		{
+			const UPackage* Package = Record.Package;
+			const FString& PackagePath = Record.Path;
+			if (PackagePath.StartsWith(TEXT("/Temp/"), ESearchCase::CaseSensitive)
+				|| (Package && Package->HasAnyPackageFlags(PKG_NewlyCreated)))
+			{
+				return TEXT("TEMP_OR_UNSAVED_MAP");
+			}
+
+			const FString PackageFilename = TryResolvePackageFilename(Package);
+			if (PackageFilename.IsEmpty() || !FPaths::FileExists(PackageFilename))
+			{
+				return TEXT("TEMP_OR_UNSAVED_MAP");
+			}
+
+			const FFileStatData StatData = IFileManager::Get().GetStatData(*PackageFilename);
+			if (StatData.bIsValid && StatData.bIsReadOnly)
+			{
+				return TEXT("READONLY");
+			}
+
+			return TEXT("UNKNOWN");
+		}
+
+		TArray<FEditorDirtyPackageRecord> GetDirtyPackageRecords()
+		{
+			TArray<FEditorDirtyPackageRecord> Records;
+			for (TObjectIterator<UPackage> PackageIt; PackageIt; ++PackageIt)
+			{
+				UPackage* Package = *PackageIt;
+				if (!Package || !Package->IsDirty())
+				{
+					continue;
+				}
+
+				FEditorDirtyPackageRecord Record;
+				Record.Path = Package->GetName();
+				Record.Package = Package;
+				if (!Record.Path.IsEmpty())
+				{
+					Records.Add(Record);
+				}
+			}
+
+			Records.Sort([](const FEditorDirtyPackageRecord& Left, const FEditorDirtyPackageRecord& Right)
+			{
+				return Left.Path < Right.Path;
+			});
+			return Records;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> MakeDirtyPackageBeforeArray(const TArray<FEditorDirtyPackageRecord>& Records)
+		{
+			TArray<TSharedPtr<FJsonValue>> Values;
+			for (const FEditorDirtyPackageRecord& Record : Records)
+			{
+				TSharedPtr<FJsonObject> PackageObject = MakeShared<FJsonObject>();
+				PackageObject->SetStringField(TEXT("path"), Record.Path);
+				PackageObject->SetField(TEXT("reason"), MakeShared<FJsonValueNull>());
+				Values.Add(MakeShared<FJsonValueObject>(PackageObject));
+			}
+			return Values;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> MakeSkippedPackageArray(const TArray<FEditorDirtyPackageRecord>& Records, FString& OutMostCommonReason)
+		{
+			TArray<TSharedPtr<FJsonValue>> Values;
+			TMap<FString, int32> ReasonCounts;
+			for (const FEditorDirtyPackageRecord& Record : Records)
+			{
+				const FString Reason = ClassifyDirtyPackageSkipReason(Record);
+				TSharedPtr<FJsonObject> PackageObject = MakeShared<FJsonObject>();
+				PackageObject->SetStringField(TEXT("path"), Record.Path);
+				PackageObject->SetStringField(TEXT("reason"), Reason);
+				Values.Add(MakeShared<FJsonValueObject>(PackageObject));
+				ReasonCounts.FindOrAdd(Reason)++;
+			}
+
+			int32 BestCount = 0;
+			OutMostCommonReason.Reset();
+			for (const TPair<FString, int32>& Pair : ReasonCounts)
+			{
+				if (Pair.Value > BestCount || (Pair.Value == BestCount && (OutMostCommonReason.IsEmpty() || Pair.Key < OutMostCommonReason)))
+				{
+					OutMostCommonReason = Pair.Key;
+					BestCount = Pair.Value;
+				}
+			}
+
+			return Values;
 		}
 
 		UObjectRedirector* EditorToolLoadRedirectorAtPath(IAssetRegistry& AssetRegistry, const FString& ObjectPath)
@@ -543,6 +723,8 @@ namespace UnrealMcp
 			FString Key;
 			Arguments.TryGetStringField(TEXT("category"), Category);
 			Arguments.TryGetStringField(TEXT("key"), Key);
+			bool bEffective = false;
+			Arguments.TryGetBoolField(TEXT("effective"), bEffective);
 			Category = Category.TrimStartAndEnd().ToLower();
 			Key = Key.TrimStartAndEnd();
 
@@ -636,6 +818,8 @@ namespace UnrealMcp
 					StructuredContent->SetStringField(TEXT("key"), Key);
 					StructuredContent->SetField(TEXT("value"), JsonValue);
 					StructuredContent->SetStringField(TEXT("sourceConfig"), SourceConfig);
+					StructuredContent->SetBoolField(TEXT("effective"), bEffective);
+					StructuredContent->SetStringField(TEXT("runtimeSource"), TEXT("developer_settings"));
 					if (!Notes.IsEmpty())
 					{
 						StructuredContent->SetStringField(TEXT("notes"), Notes);
@@ -656,11 +840,26 @@ namespace UnrealMcp
 			FString SourceSection;
 			if (TryReadConfigSetting(ConfigFilename, ConfigSections, LookupKey, ConfigValue, SourceSection) && ConfigValue.IsValid())
 			{
+				TSharedPtr<FJsonValue> Value = ConfigValue;
+				FString RuntimeSource = TEXT("ini_section");
+				FString RuntimeValue;
+				if (bEffective && IsGameModeRuntimeSettingKey(Category, LookupKey) && TryReadPieWorldDefaultGameMode(RuntimeValue))
+				{
+					Value = MakeShared<FJsonValueString>(RuntimeValue);
+					RuntimeSource = TEXT("pie_world_settings");
+				}
+
 				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 				StructuredContent->SetStringField(TEXT("category"), Category);
 				StructuredContent->SetStringField(TEXT("key"), Key);
-				StructuredContent->SetField(TEXT("value"), ConfigValue);
+				StructuredContent->SetField(TEXT("value"), Value);
 				StructuredContent->SetStringField(TEXT("sourceConfig"), SourceConfig);
+				StructuredContent->SetBoolField(TEXT("effective"), bEffective);
+				StructuredContent->SetStringField(TEXT("runtimeSource"), RuntimeSource);
+				if (RuntimeSource == TEXT("pie_world_settings") && !DoesJsonValueEqualString(ConfigValue, RuntimeValue))
+				{
+					StructuredContent->SetField(TEXT("defaultValue"), ConfigValue);
+				}
 				FString ConfigNotes = FString::Printf(TEXT("Read config key '%s' from section '%s'."), *LookupKey, *SourceSection);
 				if (!Notes.IsEmpty())
 				{
@@ -670,6 +869,29 @@ namespace UnrealMcp
 
 				return MakeExecutionResult(
 					FString::Printf(TEXT("Read project setting %s.%s from %s."), *Category, *Key, *SourceConfig),
+					StructuredContent,
+					false);
+			}
+
+			FString RuntimeValue;
+			if (bEffective && IsGameModeRuntimeSettingKey(Category, LookupKey) && TryReadPieWorldDefaultGameMode(RuntimeValue))
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("category"), Category);
+				StructuredContent->SetStringField(TEXT("key"), Key);
+				StructuredContent->SetField(TEXT("value"), MakeShared<FJsonValueString>(RuntimeValue));
+				StructuredContent->SetStringField(TEXT("sourceConfig"), SourceConfig);
+				StructuredContent->SetBoolField(TEXT("effective"), bEffective);
+				StructuredContent->SetStringField(TEXT("runtimeSource"), TEXT("pie_world_settings"));
+				FString RuntimeNotes = TEXT("Read current PIE world settings DefaultGameMode because effective=true was requested.");
+				if (!Notes.IsEmpty())
+				{
+					RuntimeNotes = Notes + TEXT(" ") + RuntimeNotes;
+				}
+				StructuredContent->SetStringField(TEXT("notes"), RuntimeNotes);
+
+				return MakeExecutionResult(
+					FString::Printf(TEXT("Read effective project setting %s.%s from PIE world settings."), *Category, *Key),
 					StructuredContent,
 					false);
 			}
@@ -1222,10 +1444,58 @@ namespace UnrealMcp
 			const FString RawEditorLogPath = FGenericPlatformOutputDevices::GetAbsoluteLogFilename();
 			FString EditorLogPath = FPaths::ConvertRelativePathToFull(RawEditorLogPath);
 			FPaths::NormalizeFilename(EditorLogPath);
-			FString FullLogText;
-			if (!FFileHelper::LoadFileToString(FullLogText, *EditorLogPath))
+			FString ProjectLogPath = FPaths::Combine(FPaths::ProjectLogDir(), FString::Printf(TEXT("%s.log"), FApp::GetProjectName()));
+			FPaths::NormalizeFilename(ProjectLogPath);
+
+			TArray<FString> LogCandidates;
+			auto AddLogCandidate = [&LogCandidates](const FString& Candidate)
 			{
-				return MakeExecutionResult(FString::Printf(TEXT("Failed to read editor log '%s' (raw path: '%s')."), *EditorLogPath, *RawEditorLogPath), nullptr, true);
+				if (!Candidate.IsEmpty() && !LogCandidates.Contains(Candidate))
+				{
+					LogCandidates.Add(Candidate);
+				}
+			};
+			AddLogCandidate(RawEditorLogPath);
+			AddLogCandidate(EditorLogPath);
+			AddLogCandidate(ProjectLogPath);
+
+			TArray<FString> ProjectLogNames;
+			IFileManager::Get().FindFiles(ProjectLogNames, *FPaths::Combine(FPaths::ProjectLogDir(), TEXT("*.log")), true, false);
+			TArray<FString> ProjectLogFiles;
+			for (const FString& LogName : ProjectLogNames)
+			{
+				FString CandidatePath = FPaths::Combine(FPaths::ProjectLogDir(), LogName);
+				FPaths::NormalizeFilename(CandidatePath);
+				ProjectLogFiles.Add(CandidatePath);
+			}
+			ProjectLogFiles.Sort([](const FString& Left, const FString& Right)
+			{
+				return IFileManager::Get().GetTimeStamp(*Left) > IFileManager::Get().GetTimeStamp(*Right);
+			});
+			if (ProjectLogFiles.Num() > 0)
+			{
+				AddLogCandidate(ProjectLogFiles[0]);
+			}
+
+			TArray<FString> AttemptedLogPaths;
+			FString FullLogText;
+			FString SelectedLogPath;
+			for (const FString& CandidatePath : LogCandidates)
+			{
+				AttemptedLogPaths.Add(CandidatePath);
+				if (FFileHelper::LoadFileToString(FullLogText, *CandidatePath))
+				{
+					SelectedLogPath = CandidatePath;
+					break;
+				}
+			}
+
+			if (SelectedLogPath.IsEmpty())
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("rawLogPath"), RawEditorLogPath);
+				StructuredContent->SetArrayField(TEXT("attemptedLogPaths"), MakeEditorToolStringArray(AttemptedLogPaths));
+				return MakeExecutionResult(FString::Printf(TEXT("Failed to read editor log '%s' (raw path: '%s')."), *EditorLogPath, *RawEditorLogPath), StructuredContent, true);
 			}
 
 			TArray<FString> AllLines;
@@ -1262,8 +1532,10 @@ namespace UnrealMcp
 					: FString::Printf(TEXT("No log lines matched '%s'."), *ContainsFilter));
 
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-			StructuredContent->SetStringField(TEXT("logPath"), EditorLogPath);
+			StructuredContent->SetStringField(TEXT("logPath"), SelectedLogPath);
 			StructuredContent->SetStringField(TEXT("rawLogPath"), RawEditorLogPath);
+			StructuredContent->SetArrayField(TEXT("attemptedLogPaths"), MakeEditorToolStringArray(AttemptedLogPaths));
+			StructuredContent->SetStringField(TEXT("selectedLogPath"), SelectedLogPath);
 			StructuredContent->SetNumberField(TEXT("requestedLines"), RequestedLines);
 			StructuredContent->SetNumberField(TEXT("matchedLineCount"), MatchingLines.Num());
 			StructuredContent->SetNumberField(TEXT("returnedLineCount"), ReturnedLines.Num());
@@ -1969,18 +2241,48 @@ namespace UnrealMcp
 			Arguments.TryGetBoolField(TEXT("saveMaps"), bSaveMaps);
 			Arguments.TryGetBoolField(TEXT("saveAssets"), bSaveAssets);
 
+			const TArray<FEditorDirtyPackageRecord> DirtyPackagesBefore = GetDirtyPackageRecords();
 			const bool bSaved = UEditorLoadingAndSavingUtils::SaveDirtyPackages(bSaveMaps, bSaveAssets);
+			const TArray<FEditorDirtyPackageRecord> DirtyPackagesAfter = GetDirtyPackageRecords();
+
+			TSet<FString> DirtyAfterPaths;
+			for (const FEditorDirtyPackageRecord& Record : DirtyPackagesAfter)
+			{
+				DirtyAfterPaths.Add(Record.Path);
+			}
+
+			int32 SavedPackageCount = 0;
+			for (const FEditorDirtyPackageRecord& Record : DirtyPackagesBefore)
+			{
+				if (!DirtyAfterPaths.Contains(Record.Path))
+				{
+					++SavedPackageCount;
+				}
+			}
+
+			FString MostCommonSkipReason;
+			TArray<TSharedPtr<FJsonValue>> SkippedPackages = MakeSkippedPackageArray(DirtyPackagesAfter, MostCommonSkipReason);
 
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 			StructuredContent->SetBoolField(TEXT("saved"), bSaved);
 			StructuredContent->SetBoolField(TEXT("saveMaps"), bSaveMaps);
 			StructuredContent->SetBoolField(TEXT("saveAssets"), bSaveAssets);
+			StructuredContent->SetArrayField(TEXT("dirtyPackagesBefore"), MakeDirtyPackageBeforeArray(DirtyPackagesBefore));
+			StructuredContent->SetArrayField(TEXT("skippedPackages"), SkippedPackages);
+			StructuredContent->SetNumberField(TEXT("savedPackages"), SavedPackageCount);
 
-			const FString Text = FString::Printf(
-				TEXT("SaveDirtyPackages completed. saved=%s saveMaps=%s saveAssets=%s"),
-				bSaved ? TEXT("true") : TEXT("false"),
-				bSaveMaps ? TEXT("true") : TEXT("false"),
-				bSaveAssets ? TEXT("true") : TEXT("false"));
+			const FString Text = (!bSaved && DirtyPackagesAfter.Num() > 0 && !MostCommonSkipReason.IsEmpty())
+				? FString::Printf(
+					TEXT("Save returned false because %d dirty package(s) were skipped (%s). See skippedPackages."),
+					DirtyPackagesAfter.Num(),
+					*MostCommonSkipReason)
+				: FString::Printf(
+					TEXT("SaveDirtyPackages completed. saved=%s saveMaps=%s saveAssets=%s savedPackages=%d skippedPackages=%d"),
+					bSaved ? TEXT("true") : TEXT("false"),
+					bSaveMaps ? TEXT("true") : TEXT("false"),
+					bSaveAssets ? TEXT("true") : TEXT("false"),
+					SavedPackageCount,
+					DirtyPackagesAfter.Num());
 
 			return MakeExecutionResult(Text, StructuredContent, false);
 		}
