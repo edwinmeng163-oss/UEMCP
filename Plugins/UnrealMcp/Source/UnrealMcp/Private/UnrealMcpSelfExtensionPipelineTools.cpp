@@ -181,11 +181,12 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	FString ResolvedScaffoldDir;
 	FString ResolvedToolName;
 	FString ResolveFailure;
+	UnrealMcp::FToolsReadResolution ScaffoldResolution;
 	TSharedPtr<FJsonObject> ResolveArguments = MakeShared<FJsonObject>();
 	ResolveArguments->SetStringField(TEXT("toolName"), ToolName);
 	ResolveArguments->SetStringField(TEXT("scaffoldDir"), ScaffoldDir);
 	ResolveArguments->SetStringField(TEXT("outputRoot"), OutputRoot);
-	if (!UnrealMcp::ResolveMcpScaffoldDirectory(*ResolveArguments, ResolvedScaffoldDir, ResolvedToolName, ResolveFailure))
+	if (!UnrealMcp::ResolveMcpScaffoldDirectory(*ResolveArguments, ResolvedScaffoldDir, ResolvedToolName, ResolveFailure, &ScaffoldResolution))
 	{
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(TEXT("resolve_scaffold"), TEXT("failed"), ResolveFailure)));
 		StructuredContent->SetBoolField(TEXT("succeeded"), false);
@@ -211,6 +212,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	StructuredContent->SetStringField(TEXT("toolName"), ToolName);
 	StructuredContent->SetStringField(TEXT("task"), Task);
 	StructuredContent->SetStringField(TEXT("scaffoldDir"), ResolvedScaffoldDir);
+	StructuredContent->SetBoolField(TEXT("scaffoldFound"), ScaffoldResolution.bFound);
+	StructuredContent->SetStringField(TEXT("scaffoldSourceKind"), UnrealMcp::LexToString(ScaffoldResolution.SourceKind));
+	StructuredContent->SetArrayField(TEXT("scaffoldCandidates"), UnrealMcp::MakeToolsReadCandidateValues(ScaffoldResolution));
+	if (!ScaffoldResolution.Warning.IsEmpty())
+	{
+		StructuredContent->SetStringField(TEXT("scaffoldResolutionWarning"), ScaffoldResolution.Warning);
+	}
 	StructuredContent->SetStringField(TEXT("testRequestPath"), TestRequestPath);
 	StructuredContent->SetStringField(TEXT("testsDir"), TestsDir);
 	Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
@@ -671,23 +679,25 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunMcpExtensionPipeline(const FJsonO
 	if (!bSucceeded && bAppliedSourceChanges)
 	{
 		TSharedPtr<FJsonObject> RollbackArguments = MakeShared<FJsonObject>();
-		RollbackArguments->SetBoolField(TEXT("dryRun"), true);
+		RollbackArguments->SetBoolField(TEXT("dryRun"), false);
 		RollbackArguments->SetBoolField(TEXT("createPreRollbackBackup"), false);
-		const FUnrealMcpExecutionResult RollbackPreviewResult = UnrealMcp::RollbackToManifest(*RollbackArguments);
+		const FUnrealMcpExecutionResult RollbackResult = UnrealMcp::RollbackToManifest(*RollbackArguments);
+		PipelineEvidenceText += TEXT("\n[rollback] ") + RollbackResult.Text;
 		Steps.Add(MakeShared<FJsonValueObject>(UnrealMcp::MakePipelineStepObject(
-			TEXT("rollback_preview"),
-			RollbackPreviewResult.bIsError ? TEXT("failed") : TEXT("completed"),
-			RollbackPreviewResult.Text,
-			&RollbackPreviewResult)));
-		TSharedPtr<FJsonObject> RollbackPlan = MakeShared<FJsonObject>();
-		RollbackPlan->SetStringField(TEXT("recommendedTool"), TEXT("unreal.mcp_rollback_to_manifest"));
-		RollbackPlan->SetBoolField(TEXT("dryRunRecommendedFirst"), true);
-		RollbackPlan->SetStringField(TEXT("reason"), TEXT("Pipeline failed after source changes were applied."));
-		if (RollbackPreviewResult.StructuredContent.IsValid())
+			TEXT("rollback"),
+			RollbackResult.bIsError ? TEXT("failed") : TEXT("completed"),
+			RollbackResult.Text,
+			&RollbackResult)));
+		StructuredContent->SetBoolField(TEXT("rollbackAttemptedAfterFailure"), true);
+		StructuredContent->SetBoolField(TEXT("rollbackSucceededAfterFailure"), !RollbackResult.bIsError);
+		if (RollbackResult.StructuredContent.IsValid())
 		{
-			RollbackPlan->SetObjectField(TEXT("dryRunPreview"), RollbackPreviewResult.StructuredContent);
+			StructuredContent->SetObjectField(TEXT("rollbackAfterFailure"), RollbackResult.StructuredContent);
 		}
-		StructuredContent->SetObjectField(TEXT("rollbackPlan"), RollbackPlan);
+		if (RollbackResult.bIsError)
+		{
+			AddFailureAnalysis(TEXT("rollback"), RollbackResult);
+		}
 	}
 
 	StructuredContent->SetBoolField(TEXT("succeeded"), bSucceeded);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalModeFromEnv } from "./approval-policy";
 import { ensureUnrealMcpServerRegistered } from "./codex-config";
-import { CodexWsClient, startCodexAppServer, waitForEndpoint } from "./codex-protocol";
+import { CodexStdioClient, CodexWsClient, startCodexAppServer, waitForEndpoint } from "./codex-protocol";
 import { createBridgeServer, send, type HealthState } from "./server";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -20,7 +20,7 @@ const approvalMode = approvalModeFromEnv();
 const logPath = path.join(os.tmpdir(), `uevolve-codex-bridge-${process.pid}.log`);
 let health: { state: HealthState; reason?: string } = { state: "starting" };
 let threadId = "";
-let codex: CodexWsClient;
+let codex: CodexStdioClient | CodexWsClient;
 const active = new Map<string, { requestId: string; ws: any; turnId: string; fullText: string }>();
 
 function log(direction: string, payload: any): void {
@@ -34,9 +34,10 @@ const child = await startCodexAppServer((reason) => {
   health = { state: "failed", reason };
   console.error(reason);
 });
-child.proc.stdout.on("data", (chunk) => process.stdout.write(`[codex] ${chunk}`));
+if (child.transport !== "stdio") child.proc.stdout.on("data", (chunk) => process.stdout.write(`[codex] ${chunk}`));
 child.proc.stderr.on("data", (chunk) => process.stderr.write(`[codex] ${chunk}`));
 console.log(`Codex binary: ${child.codexBin}${child.shellMode ? " (shell mode for Windows shim)" : ""}`);
+for (const warning of child.warnings) console.warn(`Codex discovery warning: ${JSON.stringify(warning)}`);
 
 function onNotification(message: any): void {
   const params = message.params ?? {};
@@ -61,7 +62,13 @@ function onNotification(message: any): void {
 }
 
 await waitForEndpoint(child.endpoint, child.transport);
-codex = new CodexWsClient(child.endpoint, log, approvalMode, onNotification);
+codex = child.transport === "stdio" ? new CodexStdioClient(child.proc, log, approvalMode, onNotification) : new CodexWsClient(child.endpoint, log, approvalMode, onNotification);
+if (codex instanceof CodexStdioClient) {
+  codex.onError((error) => {
+    health = { state: "failed", reason: error.message };
+    console.error(error.message);
+  });
+}
 await codex.connect();
 await codex.initialize();
 const started = await codex.request("thread/start", {
@@ -129,7 +136,7 @@ console.log(`Codex defaults model=${defaultModel} effort=${defaultEffort} approv
 async function shutdown(): Promise<void> {
   for (const record of active.values()) await codex.request("turn/interrupt", { threadId, turnId: record.turnId }).catch(() => {});
   bridge.close();
-  codex.close();
+  await codex.close();
   child.proc.kill("SIGTERM");
   process.exit(0);
 }

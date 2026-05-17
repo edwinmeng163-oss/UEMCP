@@ -14,6 +14,9 @@ Read-only and context tools:
 - `unreal.list_selected_assets`
 - `unreal.list_level_actors`
 - `unreal.list_selected_actors`
+- `unreal.actor_get_property`
+- `unreal.actor_get_transform`
+- `unreal.project_settings_get`
 
 Editor action tools:
 
@@ -33,6 +36,10 @@ Editor action tools:
 - `unreal.open_map`
 - `unreal.open_asset`
 - `unreal.sync_content_browser`
+- `unreal.asset_move`
+- `unreal.redirector_fixup`
+- `unreal.dependency_remap`
+- `unreal.project_version_migration`
 - `unreal.spawn_actor_basic`
 - `unreal.spawn_actor_batch_basic`
 - `unreal.spawn_static_mesh_actor`
@@ -43,10 +50,19 @@ Editor action tools:
 - `unreal.create_blueprint_class`
 - `unreal.bp_add_variable`
 - `unreal.bp_add_function`
+- `unreal.bp_add_macro_graph`
+- `unreal.bp_delete_macro_graph`
+- `unreal.bp_interface_add`
+- `unreal.bp_interface_remove`
 - `unreal.bp_add_event_node`
 - `unreal.bp_add_call_function_node`
 - `unreal.bp_add_branch_node`
 - `unreal.bp_add_for_each_node`
+- `unreal.bp_delete_node`
+- `unreal.bp_delete_variable`
+- `unreal.bp_delete_function`
+- `unreal.bp_rename_variable`
+- `unreal.bp_rename_function`
 - `unreal.bp_connect_pins`
 - `unreal.bp_set_pin_default`
 - `unreal.bp_arrange_graph`
@@ -80,6 +96,10 @@ Editor action tools:
 - `unreal.mcp_supervisor_install`
 - `unreal.mcp_generate_tests`
 - `unreal.mcp_build_editor`
+- `unreal.mcp_build_game`
+- `unreal.mcp_build_server`
+- `unreal.mcp_build_client`
+- `unreal.mcp_build_packaged`
 - `unreal.mcp_run_tool_test`
 - `unreal.mcp_run_test_suite`
 - `unreal.mcp_extension_pipeline`
@@ -372,6 +392,22 @@ High-level bounded recipe examples:
 /tool unreal.scaffold_recipe {"recipeName":"mcp_self_extension_pipeline","writeMemory":true}
 ```
 
+```text
+/tool unreal.scaffold_recipe {"recipeName":"rts_camera","rootPath":"/Game/MCPDemo","writeMemory":true}
+```
+
+```text
+/tool unreal.scaffold_recipe {"recipeName":"top_down_input","rootPath":"/Game/MCPDemo","writeMemory":true}
+```
+
+```text
+/tool unreal.scaffold_recipe {"recipeName":"hud_dashboard","rootPath":"/Game/MCPDemo","writeMemory":true}
+```
+
+```text
+/tool unreal.scaffold_recipe {"recipeName":"asset_naming_audit","rootPath":"/Game/MCPDemo","writeMemory":true}
+```
+
 Generic workflow composition example:
 
 ```text
@@ -474,7 +510,7 @@ Build the editor after applying patches:
 /tool unreal.mcp_build_editor {"toolName":"unreal.my_custom_tool","scaffoldDir":"Tools/UnrealMcpToolScaffolds/my_custom_tool","writeProjectMemory":true}
 ```
 
-`unreal.mcp_build_editor` captures UBT output under `Saved/UnrealMcp/BuildLogs`, parses success/failure plus key error lines, and writes a restart handoff memory entry. Since this command runs from an already-open editor, newly built plugin code still requires an Unreal Editor restart before fresh tools appear in `tools/list`.
+`unreal.mcp_build_editor`, `unreal.mcp_build_game`, `unreal.mcp_build_server`, and `unreal.mcp_build_client` capture UBT output under `Saved/UnrealMcp/BuildLogs`, parse success/failure plus key error lines, and write build status memory entries. `unreal.mcp_build_packaged` runs RunUAT BuildCookRun and writes packaged output under `Saved/StagedBuilds/<Platform>` or a project-local archive directory. Since the editor build command runs from an already-open editor, newly built plugin code still requires an Unreal Editor restart before fresh tools appear in `tools/list`.
 
 If the build fails, generate a fix plan:
 

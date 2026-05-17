@@ -4,6 +4,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -17,6 +18,110 @@ namespace UnrealMcp
 			Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath);
 			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
 			Arguments.TryGetBoolField(TEXT("force"), bForce);
+
+			auto ReadAndHashFile = [](const FString& FilePath, FString& OutText, FString& OutHash) -> bool
+			{
+				OutText.Empty();
+				OutHash.Empty();
+				if (!FFileHelper::LoadFileToString(OutText, *FilePath))
+				{
+					return false;
+				}
+				OutHash = HashTextForManifest(OutText);
+				return true;
+			};
+
+			auto WriteRestoreTextAtomically = [&ReadAndHashFile](
+				const FString& SourcePath,
+				const FString& RestoreText,
+				const FString& ExpectedRestoredHash,
+				const TSharedPtr<FJsonObject>& FileResult,
+				FString& OutFailureReason) -> bool
+			{
+				OutFailureReason.Empty();
+				const FString TempPath = FPaths::Combine(
+					FPaths::GetPath(SourcePath),
+					FString::Printf(TEXT(".%s.rollback.%s.unrealmcp.tmp"),
+						*FPaths::GetCleanFilename(SourcePath),
+						*FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+
+				auto RecordFailure = [&FileResult](const FString& Stage, const FString& Reason)
+				{
+					if (FileResult.IsValid())
+					{
+						FileResult->SetStringField(TEXT("restoreStatus"), TEXT("failed"));
+						FileResult->SetStringField(TEXT("restoreFailureStage"), Stage);
+						FileResult->SetStringField(TEXT("restoreFailure"), Reason);
+						FileResult->SetBoolField(TEXT("restoredVerified"), false);
+					}
+				};
+
+				if (FileResult.IsValid())
+				{
+					FileResult->SetStringField(TEXT("restoreMethod"), TEXT("temp_move_file"));
+					FileResult->SetStringField(TEXT("restoreTempPath"), TempPath);
+					FileResult->SetStringField(TEXT("expectedRestoredHash"), ExpectedRestoredHash);
+					FileResult->SetBoolField(TEXT("restoredVerified"), false);
+				}
+
+				if (!IFileManager::Get().MakeDirectory(*FPaths::GetPath(TempPath), true))
+				{
+					OutFailureReason = FString::Printf(TEXT("Failed to create rollback temp directory for '%s'."), *SourcePath);
+					RecordFailure(TEXT("create_temp_directory"), OutFailureReason);
+					return false;
+				}
+
+				if (!FFileHelper::SaveStringToFile(RestoreText, *TempPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+				{
+					OutFailureReason = FString::Printf(TEXT("Failed to write rollback temp file '%s'."), *TempPath);
+					RecordFailure(TEXT("write_temp_restore"), OutFailureReason);
+					return false;
+				}
+
+				FString TempText;
+				FString TempHash;
+				const bool bTempReadable = ReadAndHashFile(TempPath, TempText, TempHash);
+				const bool bTempVerified = bTempReadable && (ExpectedRestoredHash.IsEmpty() || TempHash == ExpectedRestoredHash);
+				if (FileResult.IsValid())
+				{
+					FileResult->SetStringField(TEXT("restoreTempHash"), TempHash);
+					FileResult->SetBoolField(TEXT("restoreTempVerified"), bTempVerified);
+				}
+				if (!bTempVerified)
+				{
+					OutFailureReason = FString::Printf(TEXT("Rollback temp hash verification failed for '%s'."), *SourcePath);
+					RecordFailure(TEXT("verify_temp_restore"), OutFailureReason);
+					IFileManager::Get().Delete(*TempPath, false, true);
+					return false;
+				}
+
+				if (!FPlatformFileManager::Get().GetPlatformFile().MoveFile(*SourcePath, *TempPath))
+				{
+					OutFailureReason = FString::Printf(TEXT("Failed to atomically replace source file '%s' from rollback temp '%s'."), *SourcePath, *TempPath);
+					RecordFailure(TEXT("replace_target"), OutFailureReason);
+					return false;
+				}
+
+				FString RestoredText;
+				FString RestoredHash;
+				const bool bRestoredReadable = ReadAndHashFile(SourcePath, RestoredText, RestoredHash);
+				const bool bRestoredVerified = bRestoredReadable && (ExpectedRestoredHash.IsEmpty() || RestoredHash == ExpectedRestoredHash);
+				if (FileResult.IsValid())
+				{
+					FileResult->SetStringField(TEXT("restoredHash"), RestoredHash);
+					FileResult->SetBoolField(TEXT("restoredReadable"), bRestoredReadable);
+					FileResult->SetBoolField(TEXT("restoredVerified"), bRestoredVerified);
+					FileResult->SetStringField(TEXT("restoreStatus"), bRestoredVerified ? TEXT("verified") : TEXT("failed"));
+				}
+				if (!bRestoredVerified)
+				{
+					OutFailureReason = FString::Printf(TEXT("Restored source hash verification failed for '%s'."), *SourcePath);
+					RecordFailure(TEXT("verify_restored_source"), OutFailureReason);
+					return false;
+				}
+
+				return true;
+			};
 
 			FString ResolvedManifestPath;
 			FString FailureReason;
@@ -45,6 +150,7 @@ namespace UnrealMcp
 
 				TArray<TSharedPtr<FJsonValue>> FileResults;
 				bool bAllHashesMatch = true;
+				FString FirstDriftDetails;
 				FString FileFailureReason;
 				for (const TSharedPtr<FJsonValue>& FileValue : *ManifestFiles)
 				{
@@ -57,41 +163,62 @@ namespace UnrealMcp
 					FString SourcePath;
 					FString BackupPath;
 					FString ExpectedAfterHash;
+					FString ExpectedBeforeHash;
 					FileObject->TryGetStringField(TEXT("sourcePath"), SourcePath);
 					FileObject->TryGetStringField(TEXT("backupPath"), BackupPath);
 					FileObject->TryGetStringField(TEXT("hashAfter"), ExpectedAfterHash);
-
-					FString ResolvedSourcePath;
-					FString ResolvedBackupPath;
-					if (!ResolveProjectPathInsideProject(SourcePath, ResolvedSourcePath, FileFailureReason)
-						|| !ResolveProjectPathInsideProject(BackupPath, ResolvedBackupPath, FileFailureReason))
+					FileObject->TryGetStringField(TEXT("hashBefore"), ExpectedBeforeHash);
+					if (SourcePath.IsEmpty() || BackupPath.IsEmpty())
 					{
-						return MakeExecutionResult(FileFailureReason, nullptr, true);
+						return MakeExecutionResult(TEXT("Manifest file entry is missing sourcePath or backupPath."), nullptr, true);
+						}
+
+						FString ResolvedSourcePath;
+						FString ResolvedBackupPath;
+						FToolsReadResolution::ESource SourceKind = FToolsReadResolution::ESource::Unresolved;
+						if (!ResolvePathInsideTrustedSourceDomains(SourcePath, ResolvedSourcePath, SourceKind, FileFailureReason)
+							|| !ResolveProjectPathInsideProject(BackupPath, ResolvedBackupPath, FileFailureReason))
+						{
+							return MakeExecutionResult(FileFailureReason, nullptr, true);
 					}
 
 					FString CurrentSourceText;
 					FString BackupSourceText;
-					if (!FFileHelper::LoadFileToString(CurrentSourceText, *ResolvedSourcePath))
-					{
-						return MakeExecutionResult(FString::Printf(TEXT("Failed to read current source '%s'."), *ResolvedSourcePath), nullptr, true);
-					}
-					if (!FFileHelper::LoadFileToString(BackupSourceText, *ResolvedBackupPath))
+					FString CurrentHash;
+					FString BackupHash;
+					const bool bCurrentReadable = ReadAndHashFile(ResolvedSourcePath, CurrentSourceText, CurrentHash);
+					const bool bBackupReadable = ReadAndHashFile(ResolvedBackupPath, BackupSourceText, BackupHash);
+					if (!bBackupReadable)
 					{
 						return MakeExecutionResult(FString::Printf(TEXT("Failed to read backup source '%s'."), *ResolvedBackupPath), nullptr, true);
 					}
 
-					const FString CurrentHash = HashTextForManifest(CurrentSourceText);
-					const FString BackupHash = HashTextForManifest(BackupSourceText);
-					const bool bHashMatches = ExpectedAfterHash.IsEmpty() || CurrentHash == ExpectedAfterHash;
+					const bool bHashMatches = ExpectedAfterHash.IsEmpty() || (bCurrentReadable && CurrentHash == ExpectedAfterHash);
+					const bool bBackupMatchesExpectedBefore = ExpectedBeforeHash.IsEmpty() || BackupHash == ExpectedBeforeHash;
+					const FString ExpectedRestoredHash = ExpectedBeforeHash.IsEmpty() ? BackupHash : ExpectedBeforeHash;
 					bAllHashesMatch &= bHashMatches;
+					if (!bHashMatches && FirstDriftDetails.IsEmpty())
+					{
+						FirstDriftDetails = FString::Printf(
+							TEXT("manifest drift detected before rollback: currentHash=%s expectedHash=%s sourcePath=%s"),
+							CurrentHash.IsEmpty() ? TEXT("<unreadable>") : *CurrentHash,
+							ExpectedAfterHash.IsEmpty() ? TEXT("<missing>") : *ExpectedAfterHash,
+							*ResolvedSourcePath);
+					}
 
-					TSharedPtr<FJsonObject> FileResult = MakeShared<FJsonObject>();
-					FileResult->SetStringField(TEXT("sourcePath"), ResolvedSourcePath);
-					FileResult->SetStringField(TEXT("backupPath"), ResolvedBackupPath);
+						TSharedPtr<FJsonObject> FileResult = MakeShared<FJsonObject>();
+						FileResult->SetStringField(TEXT("sourcePath"), ResolvedSourcePath);
+						FileResult->SetStringField(TEXT("sourcePathKind"), LexToString(SourceKind));
+						FileResult->SetStringField(TEXT("backupPath"), ResolvedBackupPath);
+					FileResult->SetBoolField(TEXT("currentReadable"), bCurrentReadable);
 					FileResult->SetStringField(TEXT("currentHash"), CurrentHash);
 					FileResult->SetStringField(TEXT("expectedAfterHash"), ExpectedAfterHash);
+					FileResult->SetStringField(TEXT("expectedBeforeHash"), ExpectedBeforeHash);
+					FileResult->SetStringField(TEXT("expectedRestoredHash"), ExpectedRestoredHash);
 					FileResult->SetStringField(TEXT("backupHash"), BackupHash);
 					FileResult->SetBoolField(TEXT("hashMatchesExpectedAfter"), bHashMatches);
+					FileResult->SetBoolField(TEXT("backupHashMatchesExpectedBefore"), bBackupMatchesExpectedBefore);
+					FileResult->SetBoolField(TEXT("manifestDrift"), !bHashMatches);
 					FileResults.Add(MakeShared<FJsonValueObject>(FileResult));
 				}
 
@@ -103,12 +230,13 @@ namespace UnrealMcp
 				StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 				StructuredContent->SetBoolField(TEXT("force"), bForce);
 				StructuredContent->SetBoolField(TEXT("hashMatchesExpectedAfter"), bAllHashesMatch);
+				StructuredContent->SetBoolField(TEXT("manifestDriftDetected"), !bAllHashesMatch);
 				StructuredContent->SetArrayField(TEXT("files"), FileResults);
 
 				if (!bAllHashesMatch && !bForce)
 				{
 					return MakeExecutionResult(
-						TEXT("Rollback refused because one or more current source hashes differ from the applied manifest. Pass force=true to override."),
+						FString::Printf(TEXT("%s. Pass force=true to restore anyway."), *FirstDriftDetails),
 						StructuredContent,
 						true);
 				}
@@ -121,6 +249,7 @@ namespace UnrealMcp
 						false);
 				}
 
+				bool bAllRestoredVerified = true;
 				for (const TSharedPtr<FJsonValue>& FileValue : FileResults)
 				{
 					TSharedPtr<FJsonObject> FileObject = FileValue.IsValid() ? FileValue->AsObject() : nullptr;
@@ -131,13 +260,25 @@ namespace UnrealMcp
 
 					FString SourcePath;
 					FString BackupPath;
+					FString ExpectedRestoredHash;
 					FileObject->TryGetStringField(TEXT("sourcePath"), SourcePath);
 					FileObject->TryGetStringField(TEXT("backupPath"), BackupPath);
+					FileObject->TryGetStringField(TEXT("expectedRestoredHash"), ExpectedRestoredHash);
 					FString BackupSourceText;
-					if (!FFileHelper::LoadFileToString(BackupSourceText, *BackupPath)
-						|| !FFileHelper::SaveStringToFile(BackupSourceText, *SourcePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+					if (!FFileHelper::LoadFileToString(BackupSourceText, *BackupPath))
 					{
-						return MakeExecutionResult(FString::Printf(TEXT("Failed to restore source file '%s'."), *SourcePath), StructuredContent, true);
+						FileObject->SetStringField(TEXT("restoreStatus"), TEXT("failed"));
+						FileObject->SetStringField(TEXT("restoreFailureStage"), TEXT("read_backup"));
+						FileObject->SetBoolField(TEXT("restoredVerified"), false);
+						return MakeExecutionResult(FString::Printf(TEXT("Failed to read backup source '%s'."), *BackupPath), StructuredContent, true);
+					}
+
+					FString RestoreFailureReason;
+					if (!WriteRestoreTextAtomically(SourcePath, BackupSourceText, ExpectedRestoredHash, FileObject, RestoreFailureReason))
+					{
+						bAllRestoredVerified = false;
+						StructuredContent->SetBoolField(TEXT("allRestoredVerified"), false);
+						return MakeExecutionResult(RestoreFailureReason, StructuredContent, true);
 					}
 				}
 
@@ -148,6 +289,7 @@ namespace UnrealMcp
 				SaveJsonObjectToFile(ManifestObject, GetLatestMcpExtensionManifestPath(), ManifestFailure);
 
 				StructuredContent->SetBoolField(TEXT("rolledBack"), true);
+				StructuredContent->SetBoolField(TEXT("allRestoredVerified"), bAllRestoredVerified);
 				return MakeExecutionResult(
 					FString::Printf(TEXT("Rolled back descriptor-first MCP extension for %s."), ToolName.IsEmpty() ? TEXT("<unknown>") : *ToolName),
 					StructuredContent,
@@ -158,56 +300,69 @@ namespace UnrealMcp
 			FString SourcePath;
 			FString BackupSourcePath;
 			FString ExpectedAfterHash;
+			FString ExpectedBeforeHash;
 			ManifestObject->TryGetStringField(TEXT("toolName"), ToolName);
 			ManifestObject->TryGetStringField(TEXT("sourcePath"), SourcePath);
 			ManifestObject->TryGetStringField(TEXT("backupSourcePath"), BackupSourcePath);
 			ManifestObject->TryGetStringField(TEXT("sourceHashAfter"), ExpectedAfterHash);
+			ManifestObject->TryGetStringField(TEXT("sourceHashBefore"), ExpectedBeforeHash);
 
 			if (SourcePath.IsEmpty() || BackupSourcePath.IsEmpty())
 			{
 				return MakeExecutionResult(TEXT("Manifest is missing sourcePath or backupSourcePath."), nullptr, true);
 			}
 
-			FString ResolvedSourcePath;
-			FString ResolvedBackupPath;
-			if (!ResolveProjectPathInsideProject(SourcePath, ResolvedSourcePath, FailureReason)
-				|| !ResolveProjectPathInsideProject(BackupSourcePath, ResolvedBackupPath, FailureReason))
-			{
-				return MakeExecutionResult(FailureReason, nullptr, true);
+				FString ResolvedSourcePath;
+				FString ResolvedBackupPath;
+				FToolsReadResolution::ESource SourceKind = FToolsReadResolution::ESource::Unresolved;
+				if (!ResolvePathInsideTrustedSourceDomains(SourcePath, ResolvedSourcePath, SourceKind, FailureReason)
+					|| !ResolveProjectPathInsideProject(BackupSourcePath, ResolvedBackupPath, FailureReason))
+				{
+					return MakeExecutionResult(FailureReason, nullptr, true);
 			}
 
 			FString CurrentSourceText;
 			FString BackupSourceText;
-			if (!FFileHelper::LoadFileToString(CurrentSourceText, *ResolvedSourcePath))
-			{
-				return MakeExecutionResult(FString::Printf(TEXT("Failed to read current source '%s'."), *ResolvedSourcePath), nullptr, true);
-			}
-			if (!FFileHelper::LoadFileToString(BackupSourceText, *ResolvedBackupPath))
+			FString CurrentHash;
+			FString BackupHash;
+			const bool bCurrentReadable = ReadAndHashFile(ResolvedSourcePath, CurrentSourceText, CurrentHash);
+			const bool bBackupReadable = ReadAndHashFile(ResolvedBackupPath, BackupSourceText, BackupHash);
+			if (!bBackupReadable)
 			{
 				return MakeExecutionResult(FString::Printf(TEXT("Failed to read backup source '%s'."), *ResolvedBackupPath), nullptr, true);
 			}
 
-			const FString CurrentHash = HashTextForManifest(CurrentSourceText);
-			const FString BackupHash = HashTextForManifest(BackupSourceText);
-			const bool bHashMatches = ExpectedAfterHash.IsEmpty() || CurrentHash == ExpectedAfterHash;
+			const bool bHashMatches = ExpectedAfterHash.IsEmpty() || (bCurrentReadable && CurrentHash == ExpectedAfterHash);
+			const bool bBackupMatchesExpectedBefore = ExpectedBeforeHash.IsEmpty() || BackupHash == ExpectedBeforeHash;
+			const FString ExpectedRestoredHash = ExpectedBeforeHash.IsEmpty() ? BackupHash : ExpectedBeforeHash;
 
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_rollback_last_extension"));
 			StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-			StructuredContent->SetStringField(TEXT("manifestPath"), ResolvedManifestPath);
-			StructuredContent->SetStringField(TEXT("sourcePath"), ResolvedSourcePath);
-			StructuredContent->SetStringField(TEXT("backupSourcePath"), ResolvedBackupPath);
+				StructuredContent->SetStringField(TEXT("manifestPath"), ResolvedManifestPath);
+				StructuredContent->SetStringField(TEXT("sourcePath"), ResolvedSourcePath);
+				StructuredContent->SetStringField(TEXT("sourcePathKind"), LexToString(SourceKind));
+				StructuredContent->SetStringField(TEXT("backupSourcePath"), ResolvedBackupPath);
+			StructuredContent->SetBoolField(TEXT("currentReadable"), bCurrentReadable);
 			StructuredContent->SetStringField(TEXT("currentHash"), CurrentHash);
 			StructuredContent->SetStringField(TEXT("expectedAfterHash"), ExpectedAfterHash);
+			StructuredContent->SetStringField(TEXT("expectedBeforeHash"), ExpectedBeforeHash);
+			StructuredContent->SetStringField(TEXT("expectedRestoredHash"), ExpectedRestoredHash);
 			StructuredContent->SetStringField(TEXT("backupHash"), BackupHash);
+			StructuredContent->SetBoolField(TEXT("backupHashMatchesExpectedBefore"), bBackupMatchesExpectedBefore);
 			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 			StructuredContent->SetBoolField(TEXT("force"), bForce);
 			StructuredContent->SetBoolField(TEXT("hashMatchesExpectedAfter"), bHashMatches);
+			StructuredContent->SetBoolField(TEXT("manifestDriftDetected"), !bHashMatches);
 
 			if (!bHashMatches && !bForce)
 			{
 				return MakeExecutionResult(
-					TEXT("Rollback refused because current source hash differs from the applied manifest. Pass force=true to override."),
+					FString::Printf(
+						TEXT("manifest drift detected before rollback: currentHash=%s expectedHash=%s sourcePath=%s. Pass force=true to restore anyway."),
+						CurrentHash.IsEmpty() ? TEXT("<unreadable>") : *CurrentHash,
+						ExpectedAfterHash.IsEmpty() ? TEXT("<missing>") : *ExpectedAfterHash,
+						*ResolvedSourcePath),
 					StructuredContent,
 					true);
 			}
@@ -220,9 +375,11 @@ namespace UnrealMcp
 					false);
 			}
 
-			if (!FFileHelper::SaveStringToFile(BackupSourceText, *ResolvedSourcePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+			FString RestoreFailureReason;
+			if (!WriteRestoreTextAtomically(ResolvedSourcePath, BackupSourceText, ExpectedRestoredHash, StructuredContent, RestoreFailureReason))
 			{
-				return MakeExecutionResult(FString::Printf(TEXT("Failed to restore source file '%s'."), *ResolvedSourcePath), StructuredContent, true);
+				StructuredContent->SetBoolField(TEXT("allRestoredVerified"), false);
+				return MakeExecutionResult(RestoreFailureReason, StructuredContent, true);
 			}
 
 			ManifestObject->SetStringField(TEXT("rolledBackAtUtc"), FDateTime::UtcNow().ToIso8601());
@@ -232,7 +389,7 @@ namespace UnrealMcp
 			SaveJsonObjectToFile(ManifestObject, GetLatestMcpExtensionManifestPath(), ManifestFailure);
 
 			StructuredContent->SetBoolField(TEXT("rolledBack"), true);
-			StructuredContent->SetStringField(TEXT("restoredHash"), BackupHash);
+			StructuredContent->SetBoolField(TEXT("allRestoredVerified"), true);
 			return MakeExecutionResult(
 				FString::Printf(TEXT("Rolled back MCP extension for %s."), ToolName.IsEmpty() ? TEXT("<unknown>") : *ToolName),
 				StructuredContent,
@@ -247,17 +404,73 @@ namespace UnrealMcp
 			return NormalizedPath;
 		}
 
-		bool IsPathInsideDirectory(const FString& Path, const FString& Directory)
-		{
-			const FString NormalizedPath = NormalizeFullPathForCompare(Path);
-			FString NormalizedDirectory = NormalizeFullPathForCompare(Directory);
-			NormalizedDirectory.RemoveFromEnd(TEXT("/"));
-			const FString DirectoryPrefix = NormalizedDirectory + TEXT("/");
-			return NormalizedPath.Equals(NormalizedDirectory, ESearchCase::IgnoreCase)
-				|| NormalizedPath.StartsWith(DirectoryPrefix, ESearchCase::IgnoreCase);
-		}
+			bool IsPathInsideDirectory(const FString& Path, const FString& Directory)
+			{
+				const FString NormalizedPath = NormalizeFullPathForCompare(Path);
+				FString NormalizedDirectory = NormalizeFullPathForCompare(Directory);
+				NormalizedDirectory.RemoveFromEnd(TEXT("/"));
+				const FString DirectoryPrefix = NormalizedDirectory + TEXT("/");
+				return NormalizedPath.Equals(NormalizedDirectory, ESearchCase::IgnoreCase)
+					|| NormalizedPath.StartsWith(DirectoryPrefix, ESearchCase::IgnoreCase);
+			}
 
-		FString FileTimeToIsoString(const FDateTime& Time)
+			bool ResolvePathInsideTrustedSourceDomains(
+				const FString& RequestedPath,
+				FString& OutPath,
+				FToolsReadResolution::ESource& OutSourceKind,
+				FString& OutFailureReason)
+			{
+				OutPath.Reset();
+				OutSourceKind = FToolsReadResolution::ESource::Unresolved;
+				OutFailureReason.Reset();
+
+				const FString TrimmedPath = RequestedPath.TrimStartAndEnd();
+				if (TrimmedPath.IsEmpty())
+				{
+					OutFailureReason = TEXT("Path must not be empty.");
+					return false;
+				}
+
+				FString ResolvedPath = FPaths::IsRelative(TrimmedPath)
+					? FPaths::Combine(FPaths::ProjectDir(), TrimmedPath)
+					: TrimmedPath;
+				ResolvedPath = NormalizeFullPathForCompare(ResolvedPath);
+
+				const FToolsReadResolution PluginBaseDir = ResolvePluginBaseDir();
+				if (!PluginBaseDir.Path.IsEmpty() && IsPathInsideDirectory(ResolvedPath, PluginBaseDir.Path))
+				{
+					OutPath = ResolvedPath;
+					OutSourceKind = FToolsReadResolution::ESource::PluginResources;
+					return true;
+				}
+
+				const FToolsReadResolution ToolsRoot = ResolveToolsReadSubpath(FString(), TArray<FString>());
+				for (int32 CandidateIndex = 0; CandidateIndex < ToolsRoot.Candidates.Num(); ++CandidateIndex)
+				{
+					if (IsPathInsideDirectory(ResolvedPath, ToolsRoot.Candidates[CandidateIndex]))
+					{
+						OutPath = ResolvedPath;
+						OutSourceKind = CandidateIndex == 0
+							? FToolsReadResolution::ESource::ProjectLocal
+							: FToolsReadResolution::ESource::SharedRepoRoot;
+						return true;
+					}
+				}
+
+				if (IsPathInsideDirectory(ResolvedPath, FPaths::ProjectDir()))
+				{
+					OutPath = ResolvedPath;
+					OutSourceKind = FToolsReadResolution::ESource::ProjectLocal;
+					return true;
+				}
+
+				OutFailureReason = FString::Printf(
+					TEXT("Path '%s' resolves outside trusted rollback source domains (plugin base, shared Tools roots, or project directory)."),
+					*ResolvedPath);
+				return false;
+			}
+
+			FString FileTimeToIsoString(const FDateTime& Time)
 		{
 			return Time.GetTicks() > 0 ? Time.ToIso8601() : FString();
 		}
@@ -844,6 +1057,17 @@ namespace UnrealMcp
 
 			if (!bDryRun && bCreatePreRollbackBackup)
 			{
+				TSharedPtr<FJsonObject> PreflightArguments = MakeShared<FJsonObject>();
+				PreflightArguments->SetStringField(TEXT("manifestPath"), SelectedManifestPath);
+				PreflightArguments->SetBoolField(TEXT("dryRun"), true);
+				PreflightArguments->SetBoolField(TEXT("force"), bForce);
+				const FUnrealMcpExecutionResult PreflightResult = RollbackLastMcpExtension(*PreflightArguments);
+				StructuredContent->SetObjectField(TEXT("rollbackPreflight"), PreflightResult.StructuredContent.IsValid() ? PreflightResult.StructuredContent : MakeShared<FJsonObject>());
+				if (PreflightResult.bIsError)
+				{
+					return MakeExecutionResult(PreflightResult.Text, StructuredContent, true);
+				}
+
 				TSharedPtr<FJsonObject> BackupArguments = MakeShared<FJsonObject>();
 				BackupArguments->SetStringField(TEXT("label"), TEXT("pre_rollback"));
 				BackupArguments->SetStringField(TEXT("reason"), FString::Printf(TEXT("Pre-rollback snapshot before restoring manifest %s."), *SelectedManifestPath));

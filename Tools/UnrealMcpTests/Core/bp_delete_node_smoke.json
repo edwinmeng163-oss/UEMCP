@@ -1,0 +1,21 @@
+{
+  "name": "bp_delete_node_smoke",
+  "description": "List-only smoke for deleting a Blueprint graph node by GUID. The destructive call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 133,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_delete_node",
+      "arguments": {
+        "blueprintPath": "/Game/__UEvolveMcpTest_chunk2a/BP_RefactorSmoke",
+        "graphName": "EventGraph",
+        "nodeGuid": "00000000000000000000000000000000"
+      }
+    }
+  }
+}

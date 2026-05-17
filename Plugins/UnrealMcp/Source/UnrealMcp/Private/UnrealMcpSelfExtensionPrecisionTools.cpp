@@ -8,6 +8,7 @@
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -411,28 +412,48 @@ namespace UnrealMcp
 		void AddActorSnapshotArray(TSharedPtr<FJsonObject>& Snapshot, int32 Limit, bool bIncludeActors)
 		{
 			TArray<TSharedPtr<FJsonValue>> Actors;
+			UEditorActorSubsystem* ActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
+			UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			const bool bActorCaptureAvailable = ActorSubsystem != nullptr;
+			FString ActorCaptureStatus = bActorCaptureAvailable ? TEXT("empty_world") : TEXT("subsystem_unavailable");
+			int32 LevelActorScanCount = 0;
+
 			if (bIncludeActors)
 			{
-				UEditorActorSubsystem* ActorSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorActorSubsystem>() : nullptr;
+				TArray<AActor*> LevelActors;
 				if (ActorSubsystem)
 				{
-					TArray<AActor*> LevelActors = ActorSubsystem->GetAllLevelActors();
-					LevelActors.Sort([](const AActor& Left, const AActor& Right)
-					{
-						return Left.GetPathName() < Right.GetPathName();
-					});
-
-					const int32 SafeLimit = FMath::Max(1, Limit);
-					for (const AActor* Actor : LevelActors)
-					{
-						if (Actor && Actors.Num() < SafeLimit)
-						{
-							Actors.Add(MakeShared<FJsonValueObject>(MakeActorSnapshotObject(Actor)));
-						}
-					}
-					Snapshot->SetNumberField(TEXT("levelActorScanCount"), LevelActors.Num());
+					LevelActors = ActorSubsystem->GetAllLevelActors();
+					ActorCaptureStatus = LevelActors.Num() > 0 ? TEXT("captured") : TEXT("empty_world");
 				}
+				else if (EditorWorld)
+				{
+					for (TActorIterator<AActor> ActorIt(EditorWorld); ActorIt; ++ActorIt)
+					{
+						LevelActors.Add(*ActorIt);
+					}
+					ActorCaptureStatus = TEXT("iterator_fallback");
+				}
+
+				LevelActors.Sort([](const AActor& Left, const AActor& Right)
+				{
+					return Left.GetPathName() < Right.GetPathName();
+				});
+
+				const int32 SafeLimit = FMath::Max(1, Limit);
+				for (const AActor* Actor : LevelActors)
+				{
+					if (Actor && Actors.Num() < SafeLimit)
+					{
+						Actors.Add(MakeShared<FJsonValueObject>(MakeActorSnapshotObject(Actor)));
+					}
+				}
+				LevelActorScanCount = LevelActors.Num();
 			}
+			Snapshot->SetBoolField(TEXT("actorCaptureAvailable"), bActorCaptureAvailable);
+			Snapshot->SetStringField(TEXT("actorCaptureStatus"), ActorCaptureStatus);
+			Snapshot->SetNumberField(TEXT("actorSnapshotCount"), Actors.Num());
+			Snapshot->SetNumberField(TEXT("levelActorScanCount"), LevelActorScanCount);
 			Snapshot->SetArrayField(TEXT("actors"), Actors);
 		}
 
@@ -572,6 +593,41 @@ namespace UnrealMcp
 			return Diff;
 		}
 
+		bool GetSnapshotBoolField(const TSharedPtr<FJsonObject>& Snapshot, const FString& FieldName, bool DefaultValue)
+		{
+			if (!Snapshot.IsValid())
+			{
+				return DefaultValue;
+			}
+
+			bool Value = DefaultValue;
+			return Snapshot->TryGetBoolField(FieldName, Value) ? Value : DefaultValue;
+		}
+
+		int32 GetSnapshotIntField(const TSharedPtr<FJsonObject>& Snapshot, const FString& FieldName, int32 DefaultValue)
+		{
+			if (!Snapshot.IsValid())
+			{
+				return DefaultValue;
+			}
+
+			double Value = 0.0;
+			return Snapshot->TryGetNumberField(FieldName, Value) ? static_cast<int32>(Value) : DefaultValue;
+		}
+
+		FString MakeActorDiffCaveat(bool bBeforeAvailable, bool bAfterAvailable)
+		{
+			if (!bBeforeAvailable && !bAfterAvailable)
+			{
+				return TEXT("before-side and after-side actor capture was unavailable; diff totals not meaningful");
+			}
+			if (!bBeforeAvailable)
+			{
+				return TEXT("before-side actor capture was unavailable; diff totals not meaningful");
+			}
+			return TEXT("after-side actor capture was unavailable; diff totals not meaningful");
+		}
+
 		TSharedPtr<FJsonObject> BuildSnapshotDiffObject(const TSharedPtr<FJsonObject>& Before, const TSharedPtr<FJsonObject>& After)
 		{
 			TSharedPtr<FJsonObject> Diff = MakeShared<FJsonObject>();
@@ -580,9 +636,39 @@ namespace UnrealMcp
 			int32 RemovedTotal = 0;
 			for (const FString& Area : Areas)
 			{
-				TSharedPtr<FJsonObject> AreaDiff = MakeSetDiffObject(ExtractIdentitySet(Before, Area), ExtractIdentitySet(After, Area));
-				AddedTotal += static_cast<int32>(AreaDiff->GetNumberField(TEXT("addedCount")));
-				RemovedTotal += static_cast<int32>(AreaDiff->GetNumberField(TEXT("removedCount")));
+				const TSet<FString> BeforeSet = ExtractIdentitySet(Before, Area);
+				const TSet<FString> AfterSet = ExtractIdentitySet(After, Area);
+				TSharedPtr<FJsonObject> AreaDiff = MakeSetDiffObject(BeforeSet, AfterSet);
+
+				int32 AreaAddedCount = static_cast<int32>(AreaDiff->GetNumberField(TEXT("addedCount")));
+				int32 AreaRemovedCount = static_cast<int32>(AreaDiff->GetNumberField(TEXT("removedCount")));
+				if (Area == TEXT("actors"))
+				{
+					const bool bBeforeAvailable = GetSnapshotBoolField(Before, TEXT("actorCaptureAvailable"), false);
+					const bool bAfterAvailable = GetSnapshotBoolField(After, TEXT("actorCaptureAvailable"), false);
+					const int32 BeforeCount = GetSnapshotIntField(Before, TEXT("actorSnapshotCount"), BeforeSet.Num());
+					const int32 AfterCount = GetSnapshotIntField(After, TEXT("actorSnapshotCount"), AfterSet.Num());
+					const bool bComparable = bBeforeAvailable && bAfterAvailable;
+					AreaDiff->SetBoolField(TEXT("beforeAvailable"), bBeforeAvailable);
+					AreaDiff->SetBoolField(TEXT("afterAvailable"), bAfterAvailable);
+					AreaDiff->SetNumberField(TEXT("beforeCount"), BeforeCount);
+					AreaDiff->SetNumberField(TEXT("afterCount"), AfterCount);
+					AreaDiff->SetBoolField(TEXT("comparable"), bComparable);
+					if (!bComparable)
+					{
+						AreaDiff->SetNumberField(TEXT("addedCount"), 0);
+						AreaDiff->SetNumberField(TEXT("removedCount"), 0);
+						AreaDiff->SetNumberField(TEXT("unchangedCount"), 0);
+						AreaDiff->SetArrayField(TEXT("added"), TArray<TSharedPtr<FJsonValue>>());
+						AreaDiff->SetArrayField(TEXT("removed"), TArray<TSharedPtr<FJsonValue>>());
+						AreaDiff->SetStringField(TEXT("caveat"), MakeActorDiffCaveat(bBeforeAvailable, bAfterAvailable));
+						AreaAddedCount = 0;
+						AreaRemovedCount = 0;
+					}
+				}
+
+				AddedTotal += AreaAddedCount;
+				RemovedTotal += AreaRemovedCount;
 				Diff->SetObjectField(Area, AreaDiff);
 			}
 			Diff->SetNumberField(TEXT("addedTotal"), AddedTotal);

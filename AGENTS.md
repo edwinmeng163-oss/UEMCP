@@ -36,7 +36,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: Unreal MCP
-VersionName: 0.12.0-pilot
+VersionName: 0.15.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -106,6 +106,17 @@ Plugins/UnrealMcp/README.md
 Tools/install_unrealmcp_to_project.py
 ```
 
+If the task is about Windows compatibility / Win build / Win packaging / a "works on Mac but breaks on Win" bug:
+
+```text
+Docs/WindowsCompatibilityLessons.md
+Docs/Stage2WindowsVerify.md
+Tools/package_plugin.ps1
+Tools/UnrealMcpCodexBridge/start-bridge.ps1
+```
+
+`WindowsCompatibilityLessons.md` indexes 20 hard-won failure modes from the issue #2 saga (commits 57ce634 / fe65d25 / 9fd70ac / e08a995 / 088d056 / 8917f99). Grep your symptom against it before re-deriving.
+
 If the task is about self-extension:
 
 ```text
@@ -160,9 +171,11 @@ Docs/
   Roadmap.md
   SecurityModel.md
   SelfExtensionPipeline.md
+  Stage2WindowsVerify.md
   Supervisor.md
   ToolNaming.md
   UnrealTaskRecipes.md
+  WindowsCompatibilityLessons.md
 
 Plugins/UnrealMcp/
   UnrealMcp.uplugin
@@ -230,6 +243,7 @@ Editor and inspection:
 
 - `unreal.editor_status`
 - `unreal.editor.engine_version`
+- `unreal.project_settings_get`
 - `unreal.tail_log`
 - `unreal.map_check`
 - map, asset, selected asset, actor, and selected actor listing
@@ -239,9 +253,12 @@ Editor and inspection:
 - map/asset opening
 - Content Browser sync
 - save dirty packages
+- asset move, redirector fixup, dependency remap, and project version migration
 
 Actor tools:
 
+- read actor property and transform state with `unreal.actor_get_property` and
+  `unreal.actor_get_transform`
 - select actors
 - set transforms
 - spawn actors with fixed schemas
@@ -256,6 +273,11 @@ Blueprint tools:
 - create Blueprint class
 - compile one Blueprint or all Blueprints in a path
 - add variables/functions/event/call/branch/foreach nodes
+- add and delete macro graphs with macro-reference checks
+- delete graph nodes
+- delete member variables and user function graphs
+- rename member variables and user function graphs with local reference fixup
+- add and remove Blueprint interface implementations
 - connect pins
 - set pin defaults
 - arrange graph
@@ -286,7 +308,7 @@ Self-extension:
 - C++ patch validation
 - patch-fragment editing
 - scaffold apply with dry run, backup, manifest, and idempotence checks
-- build editor
+- build editor/game/server/client targets and packaged BuildCookRun
 - run one tool test or a suite
 - generate tests
 - pipeline orchestration/status
@@ -353,7 +375,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 119 entries across:
+At the time this file was written, the registry contained 140 entries across:
 
 - actors
 - blueprint
@@ -363,6 +385,39 @@ At the time this file was written, the registry contained 119 entries across:
 - self-extension
 - skills
 - widget
+
+This count includes the v0.14 Python runtime smoke tool, the three v0.15
+chunk 1 C++ readback inspectors (`unreal.actor_get_property`,
+`unreal.actor_get_transform`, and `unreal.project_settings_get`), and the five
+v0.15 chunk 2a C++ Blueprint refactor basics (`unreal.bp_delete_node`,
+`unreal.bp_delete_variable`, `unreal.bp_delete_function`,
+`unreal.bp_rename_variable`, and `unreal.bp_rename_function`), and the four
+v0.15 chunk 2b Blueprint macro/interface tools (`unreal.bp_add_macro_graph`,
+`unreal.bp_delete_macro_graph`, `unreal.bp_interface_add`, and
+`unreal.bp_interface_remove`), and the four v0.15 chunk 4 UBT target matrix
+tools (`unreal.mcp_build_game`, `unreal.mcp_build_server`,
+`unreal.mcp_build_client`, and `unreal.mcp_build_packaged`), and the four
+v0.15 chunk 5 migration tools (`unreal.asset_move`,
+`unreal.redirector_fixup`, `unreal.dependency_remap`, and
+`unreal.project_version_migration`). Earlier handoff text lagged at 119
+entries.
+
+Current project status: v0.15 chunk 5 landed; migration toolchain is complete
+(`asset_move` + `redirector_fixup` + `dependency_remap` +
+`project_version_migration`), and v0.15 chunks 1-5 close all Known Limitations
+from v0.14.0-python-track. UBT target matrix is complete (editor + game +
+server + client + packaged), recipe catalog lists 7 named recipes, and Lane Z
+Blueprint refactor is complete. The previous Lane V get/inspect-tool gap for
+actor property, actor transform, and project settings readback is done in C++;
+Blueprint delete + rename basics are done in C++, and macro + interface editing
+is now done in C++. Tier 2 path resolution is fixed: example projects can host
+the plugin through `AdditionalPluginDirectories` while Python bridge handlers,
+ToolRegistry reads, and scaffold apply/inspect/validate readers fall back to
+repo-root shared content with per-project drafts taking precedence.
+Issue #2 comment 8 follow-up is upstreamed in the Codex App Server bridge:
+Windows now defaults to stdio outbound transport, prefers user-mode Codex under
+`%LOCALAPPDATA%\OpenAI\Codex\bin\*`, and skips WindowsApps binaries that Bun
+cannot spawn.
 
 `unreal.configure_fps_settings` and
 `unreal.bp_add_input_axis_event_node` were moved back to scaffold-only status
@@ -467,6 +522,43 @@ Private/Tests/*.cpp
 The largest current files are still ChatPanel, ActorTools, KnowledgeTools,
 ScaffoldTools, BlueprintTools, WidgetTools, ToolDefinitions, AssistantRun, and
 several SelfExtension helpers. Prefer cautious single-category edits.
+
+## Path Resolution Policy (Four Domains)
+
+As of commit `fe65d25` (Tier 2 — issue #2 fix), runtime path resolution is
+formally split into four trust domains. This is the **canonical contract**
+for anything in the plugin source touching `Tools/...`,
+`Plugins/UnrealMcp/...`, or `Saved/UnrealMcp/...` paths. Pre-Tier-2 code
+assumed `FPaths::ProjectDir()` for everything, which broke example-host
+mode (`Examples/UEvolveExample{,57}.uproject`) that loads the plugin via
+`AdditionalPluginDirectories: ["../../Plugins"]`.
+
+| Domain | What lives here | Resolver |
+|---|---|---|
+| **READER** | versioned `Tools/...` assets: PyTools, ToolRegistry source, scaffold recipes (`Tools/UnrealMcpToolScaffolds/<id>`), skills, tests, knowledge | `ResolveToolsReadSubpath(subpath, sentinels)` in `UnrealMcpSharedPathResolver.h`. Project-local first, then walks up via `IPluginManager::FindPlugin("UnrealMcp")->GetBaseDir()` anchor. Returns `FToolsReadResolution {Path, bFound, SourceKind (Unresolved|ProjectLocal|SharedRepoRoot|PluginResources), Candidates, Warning}` — surface `SourceKind` + `Candidates` in tool responses. |
+| **WRITER** | new scaffold drafts from `unreal.scaffold_mcp_tool`, session output, project-local generated artifacts | `ResolveProjectOutputDirectory` in `UnrealMcpScaffoldTools.cpp`. UNCHANGED post-Tier-2. Always lands under active `<ProjectDir>/Tools/UnrealMcpToolScaffolds/<id>`. Do NOT walk up — per-project draft isolation (CATEGORY B). |
+| **PLUGIN SOURCE** | C++ source / `Resources/` writes (apply scaffold target files) | `ResolvePluginSourceRoot()` in `UnrealMcpSharedPathResolver.h`. Returns `IPluginManager::FindPlugin("UnrealMcp")->GetBaseDir() + "/Source"`. Never assume `<ProjectDir>/Plugins/UnrealMcp` — example projects mount the plugin from elsewhere. |
+| **SAVED** | backups, manifests, locks, ActivityLog, BuildLogs, packages, project memory | `FPaths::ProjectSavedDir()` / `Saved/UnrealMcp/`. UNCHANGED. Do NOT migrate to shared repo. Manifest body CAN reference paths under plugin BaseDir or shared Tools root for rollback target validation. |
+
+**Apply scaffold crosses three domains in one operation:**
+
+- READ scaffold metadata + patch fragments via **READER**
+- WRITE C++ patches into plugin source via **PLUGIN SOURCE**
+- WRITE backup manifests + rollback breadcrumbs via **SAVED**
+
+When adding new code that touches any of these paths, pick the right
+resolver from the table above. When refactoring code that uses
+`FPaths::ProjectDir()`, ask which domain the path belongs to and convert
+to the matching resolver. Pure-function variants of these resolvers
+(`ResolveToolsReadSubpath_Pure(ProjectDir, PluginBaseDir, Subpath,
+FileOrDirExists)`) enable unit tests without mocking — see
+`Plugins/UnrealMcp/Source/UnrealMcp/Private/Tests/UnrealMcpSharedPathResolverTests.cpp`
+for the canonical 9-case test matrix + 5 root-host zero-regression
+invariants.
+
+The full writer/reader/plugin-source/Saved rule is also formalized in
+`Tools/codex-prompt-header.md` § "Path resolution domains" for Codex
+prompt prefix purposes.
 
 ## How To Add A New MCP Tool
 
@@ -664,8 +756,11 @@ Tools/UnrealMcpCodexBridge
 
 The daemon is not part of the UE plugin yet. It spawns a fresh
 `codex app-server` subprocess on a platform-selected transport (Unix socket on
-macOS/Linux, localhost WebSocket on Windows), performs App Server
-initialization and `thread/start`, then exposes a small UE-facing WebSocket API:
+macOS/Linux, stdio child-process pipe on Windows — current Codex builds reject
+`--listen ws://...`; see issue #2 comment 8), performs App Server
+initialization and `thread/start`, then exposes a small UE-facing WebSocket API
+(the UE-facing inbound listener is always WebSocket regardless of which
+outbound transport speaks to Codex):
 
 ```text
 ws://127.0.0.1:8766/uevolve
@@ -809,6 +904,153 @@ bounded sandbox.
 
 Tests can assert structured content fields with
 `expectToolCallStructuredFields`.
+
+## Release Verification SOP (Mac Stage 2 e2e)
+
+Every projectroot zip MUST be e2e-tested before tag-publish. The procedure is
+the "Mac Stage 2 e2e" workflow that locked the v0.14.0-python-track Mac
+release. Replicate exactly:
+
+1. **Fresh test project** at `/tmp/UEvolveMacZipTest` from `TP_Blank` (the
+   Codex-bridge / scaffold-applier tools fail loudly if a stale Saved/ tree
+   is reused, so always start from a clean template).
+2. **Extract zip at project root**, NOT under `Plugins/`. The projectroot
+   overlay creates `Plugins/UnrealMcp/`, `Tools/...`, and `Docs/FIRST_LAUNCH.md`.
+3. **UBT build** the editor module against the local UE 5.7 install:
+   ```bash
+   "/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh" \
+     UEvolveMacZipTestEditor Mac Development \
+     -project="/tmp/UEvolveMacZipTest/UEvolveMacZipTest.uproject" -waitmutex
+   ```
+   Expected: `Result: Succeeded` in ~30s on a warm cache.
+4. **Launch editor headless** with `-nullrhi -unattended`; poll the log for
+   `LogUnrealMcp:` listening + `Engine is initialized`. Confirm port 8765 is
+   bound (`lsof -nP -iTCP:8765 -sTCP:LISTEN`).
+5. **Three smoke curls** (PASS = all three return `isError=false` with the
+   listed payloads):
+
+   - `tools/list`: expect `len(tools) >= 110` AND
+     `unreal.editor.python_runtime_info` present.
+   - `tools/call unreal.editor.python_runtime_info` (no args): expect
+     `isError=false` and the bridge resolved the handler file
+     (`Tools/UnrealMcpPyTools/editor_python_runtime_info/main.py`).
+   - `tools/call unreal.mcp_apply_scaffold` with
+     `{toolName: "unreal.fps.bootstrap", dryRun: true}`: expect
+     `canApply=true`, `scaffolds=2` (= `fps_bootstrap` +
+     `verify_input_drives_pawn` dependency chain), `scaffoldDir` resolving
+     to `Tools/UnrealMcpToolScaffolds/fps_bootstrap`, plus
+     `buildRequirements.includesPlanned` of 3 + `requiredModules` containing
+     `BlueprintGraph`.
+
+6. **Cleanup**: `kill <editor PID>`, wait for port 8765 free, then
+   `rm -rf /tmp/UEvolveMacZipTest /tmp/uezip-editor.log`.
+
+If smoke 3 fails on a missing scaffold file, it is almost always a packager
+gap, not an applier bug — re-read the projectroot overlay invariants below
+before opening a defect against the applier.
+
+### Stale plugin-level binary trap
+
+Real failure mode observed during the 2026-05-17 Tier 2 e2e: when a previous
+build wrote a dylib to `Plugins/UnrealMcp/Binaries/Mac/UnrealEditor-UnrealMcp.dylib`
+(e.g. from a dev-host build on `UEvolve.uproject` at the repo root) AND you
+then UBT-rebuild against an example host, UBT writes the fresh dylib to
+`Examples/<ExampleName>/Binaries/<Platform>/`, but the editor mount path for
+the externally-loaded plugin keeps loading the OLD plugin-level binary. The
+smoke responses look exactly like pre-fix behavior, with newly-added
+structured-content fields totally missing.
+
+Diagnostic signal: the runtime response of a tool you just changed lacks any
+new structured-content keys you added in the patch.
+
+**Mandatory cleanup before any example-host smoke after a plugin code
+change:**
+
+```bash
+cd "$REPO_ROOT"
+rm -rf Plugins/UnrealMcp/Binaries Plugins/UnrealMcp/Intermediate
+"<UE>/Engine/Build/BatchFiles/Mac/Build.sh" MyProjectEditor Mac Development \
+  -project="$REPO_ROOT/Examples/UEvolveExample57/UEvolveExample57.uproject" \
+  -WaitMutex
+```
+
+After rebuild, the only `UnrealEditor-UnrealMcp.dylib` on disk should be
+under the example host's `Binaries/`. If the plugin-level path still has
+one, the rm above did not run successfully — repeat.
+
+### Projectroot zip overlay invariants
+
+Every Mac source-only / Windows full-experience projectroot zip MUST ship
+the following tree (extract-target = `<UserProject>/` next to the
+`.uproject`):
+
+```
+<UserProject>/Plugins/UnrealMcp/                      # plugin source (Mac) or source+Win64 binaries (full)
+<UserProject>/Tools/UnrealMcpToolRegistry/            # tools.json + schema.json (writable)
+<UserProject>/Tools/UnrealMcpPyTools/                 # Python handler scripts
+<UserProject>/Tools/UnrealMcpToolScaffoldStarters/    # pristine templates for unreal.scaffold_mcp_tool
+<UserProject>/Tools/UnrealMcpToolScaffolds/           # pre-staged ready-to-apply scaffolds
+  fps_bootstrap/                                      # canonical recipe (apply unit)
+  verify_input_drives_pawn/                           # canonical recipe (apply unit)
+<UserProject>/Tools/UnrealMcpSkills/                  # SKILL.md tree
+<UserProject>/Tools/UnrealMcpKnowledge/               # Sources/ + Evals/core_rag_eval.json
+<UserProject>/Tools/UnrealMcpTests/                   # Core/ + SelfExtension/ + Knowledge/closed_loop
+<UserProject>/Tools/UnrealMcpCodexBridge/             # bridge source (excludes node_modules + runtime)
+<UserProject>/Docs/FIRST_LAUNCH.md                    # trilingual quickstart
+```
+
+`UnrealMcpToolScaffoldStarters` and `UnrealMcpToolScaffolds` are NOT the
+same. Starters are templates `unreal.scaffold_mcp_tool` clones from when a
+user adds a new tool. Scaffolds are the pre-staged working copies
+`unreal.mcp_apply_scaffold` reads at apply time. Both must coexist; do
+not rename one to the other.
+
+`Tools/package_plugin.sh` and `Tools/package_plugin.ps1` enforce these
+invariants via `[ -f ... ] || die "Staging integrity failure: ..."` (sh) and
+`Assert-PlainFile` (ps1). If you add a new top-level overlay subtree, add
+both the copy step and the matching assertion in both packagers.
+
+### Tool-count discipline
+
+The registry tool count appears in three places that must stay synced:
+
+- `Tools/UnrealMcpToolRegistry/tools.json` length (canonical)
+- `Plugins/UnrealMcp/Resources/ToolRegistry/tools.json` length (mirror; must
+  match canonical byte-for-byte via `cmp -s`)
+- The `"the registry contained N entries"` line in this AGENTS.md
+- The `N registered MCP tools` line in `README.md` (EN + 中文 + 日本語)
+- The "Read-only and context tools" / "Editor action tools" lists in
+  `Plugins/UnrealMcp/README.md`
+
+Cross-check via:
+```bash
+python3 -c 'import json; print(len(json.load(open("Tools/UnrealMcpToolRegistry/tools.json"))["tools"]))'
+grep -nE "registry contained|registered MCP tools" AGENTS.md README.md
+```
+
+Before any commit that adds or removes a tool, bump all three numbers in
+the same commit. The "lagging by one" failure mode (v0.14 left AGENTS.md
+at 119 while the registry was 120) is the canary that a freshness-clause
+audit was skipped.
+
+### Release publish flow
+
+After a tag-moving fix (e.g. Lane P3+P4 packaging fixes on a release tag):
+
+```bash
+git tag -d <tag> && git tag <tag> <newSha>
+git push origin <branch>
+git push --force origin <tag>
+bash Tools/package_plugin.sh --version <ver> --engine-tag ue56-ue57
+gh release delete-asset <tag> <old-asset-name>     --yes --repo <repo>
+gh release delete-asset <tag> <old-asset-name>.sha256 --yes --repo <repo>
+gh release upload <tag> <new-zip> <new-zip>.sha256 --repo <repo>
+gh release edit <tag> --notes-file <updated-body.md> --repo <repo>
+```
+
+Always update both the filename AND the SHA in the release notes' `Verify`
+block; the v0.14 draft was caught with v0.12.0-pilot filenames left over
+because only the body text was edited but not the asset reference.
 
 ## Safety Rules For Future AI
 

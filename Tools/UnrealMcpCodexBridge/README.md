@@ -96,24 +96,33 @@ The bridge defaults to Unix-domain sockets on macOS and Linux:
 codex app-server --listen unix://<tmpdir>/codex.sock
 ```
 
-On Windows, it automatically uses localhost WebSocket transport instead:
+On Windows, it defaults to stdio because current Codex App Server builds reject
+`--listen ws://127.0.0.1:<port>`:
 
 ```text
-codex app-server --listen ws://127.0.0.1:<auto-port>
+codex app-server --listen stdio://
 ```
 
 The bridge resolves the Codex binary before spawning:
 
 - `UEVOLVE_CODEX_BIN` wins when set. It must be an absolute path to
   `codex.exe`, `codex.cmd`, or the POSIX `codex` binary.
+- On Windows, the bridge first checks
+  `%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe` and prefers that user-mode
+  install location over the WindowsApps packaged binary.
 - Otherwise the bridge runs `where codex` on Windows or `which codex` on
-  macOS/Linux and uses the first result.
+  macOS/Linux and uses the first usable result.
+- WindowsApps `codex.exe` paths under `C:\Program Files\WindowsApps\` are
+  skipped because Bun cannot spawn them reliably; install user-mode Codex or
+  set `UEVOLVE_CODEX_BIN`.
 - If the resolved Windows path ends in `.cmd` or `.bat`, the bridge starts
   Codex in shell mode so `cmd.exe` can interpret the npm shim. The startup log
   marks this as `shell mode for Windows shim`.
+- The Windows launchers automatically use `runtime\bun.exe` when it is bundled
+  with the bridge, before falling back to `bun` on PATH.
 
 If a firewall or local policy requires a stable Codex App Server port, set
-`UEVOLVE_CODEX_APP_SERVER_PORT`.
+`UEVOLVE_CODEX_APP_SERVER_PORT` and select `UEVOLVE_CODEX_TRANSPORT=ws`.
 
 ## Configuration
 
@@ -127,7 +136,7 @@ UEVOLVE_CODEX_MODEL=gpt-5.5
 UEVOLVE_CODEX_EFFORT=xhigh
 UEVOLVE_CODEX_BIN=<absolute path to codex.exe/codex.cmd/codex>
 UEVOLVE_CODEX_APPROVAL_POLICY=reject|auto-approve
-UEVOLVE_CODEX_TRANSPORT=ws|unix
+UEVOLVE_CODEX_TRANSPORT=ws|unix|stdio
 UEVOLVE_CODEX_APP_SERVER_PORT=<port for ws transport; default is auto>
 UEVOLVE_MCP_NAME=unrealmcp
 UEVOLVE_MCP_URL=http://127.0.0.1:8765/mcp
@@ -136,8 +145,9 @@ UEVOLVE_MCP_BEARER=<future UE MCP bearer token>
 ```
 
 `UEVOLVE_CODEX_TRANSPORT` overrides the OS default on any platform. `ws` uses
-`ws://127.0.0.1:<port>`; `unix` uses a temporary Unix-domain socket. When
-`UEVOLVE_CODEX_APP_SERVER_PORT` is unset, the bridge briefly binds
+`ws://127.0.0.1:<port>`; `unix` uses a temporary Unix-domain socket; `stdio`
+uses newline-delimited App Server JSON on the child process stdin/stdout. When
+`UEVOLVE_CODEX_APP_SERVER_PORT` is unset for `ws`, the bridge briefly binds
 `127.0.0.1:0` to discover a free port, closes that probe listener, then starts
 Codex App Server on the selected port.
 

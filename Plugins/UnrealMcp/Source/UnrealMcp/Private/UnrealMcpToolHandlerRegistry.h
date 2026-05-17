@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-
+#include "UnrealMcpToolRegistry.h"
 class FJsonObject;
 
 namespace UnrealMcp
@@ -11,6 +11,10 @@ namespace UnrealMcp
 		FString HandlerName;
 		FString Category;
 		FString SourceFile;
+		EToolImplementationTrack ImplementationTrack = EToolImplementationTrack::Cpp;
+		FString PythonHandlerPath;
+		FString PythonHandlerSha256;
+		TArray<FString> PythonImportAllowList;
 		TArray<FString> ToolNames;
 		bool bLoadedFromExplicitRegistry = false;
 		bool bLoadedFromDescriptor = false;

@@ -8,6 +8,7 @@ can run it before opening Unreal Editor or as a lightweight CI step.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -18,6 +19,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / "Tools" / "UnrealMcpToolRegistry" / "tools.json"
 SCHEMA_PATH = ROOT / "Tools" / "UnrealMcpToolRegistry" / "schema.json"
+SCHEMA_MIRROR_PATH = ROOT / "Plugins" / "UnrealMcp" / "Resources" / "ToolRegistry" / "schema.json"
+SCHEMA_ALIAS_PATH = ROOT / "Schemas" / "UnrealMcpToolRegistry.schema.json"
 MIRROR_PATH = ROOT / "Plugins" / "UnrealMcp" / "Resources" / "ToolRegistry" / "tools.json"
 PRIVATE_SOURCE_PATH = ROOT / "Plugins" / "UnrealMcp" / "Source" / "UnrealMcp" / "Private"
 TOOL_REGISTRAR_PATH = PRIVATE_SOURCE_PATH / "UnrealMcpToolRegistrar.cpp"
@@ -66,6 +69,10 @@ BOOLEAN_FIELDS = {
 KNOWN_EXPOSURES = {"visible", "legacy_hidden"}
 KNOWN_RISK_LEVELS = {"read_only", "low", "medium", "high", "critical"}
 KNOWN_TEST_COVERAGE = {"missing", "core", "category", "manual", "external"}
+KNOWN_IMPLEMENTATION_TRACKS = {"cpp", "python"}
+PYTHON_HANDLER_PATH_RE = re.compile(r"^Tools/UnrealMcpPyTools/[^/]+/main\.py$")
+PYTHON_HANDLER_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+PYTHON_MODULE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 EXPECTED_NON_STANDARD_DISPATCH: set[str] = {
     "unreal.spawn_actor_basic",  # Alias: visible tool shares the unreal.spawn_actor dispatcher branch.
     "unreal.spawn_actor_batch_basic",  # Alias: visible tool shares the unreal.spawn_actor_batch dispatcher branch.
@@ -121,6 +128,75 @@ def validate_registry_shape(registry: dict[str, Any], schema: dict[str, Any], is
 def docs_file_exists(docs_path: str) -> bool:
     file_part = docs_path.split("#", 1)[0]
     return bool(file_part) and (ROOT / file_part).exists()
+
+
+def tool_implementation_track(tool: dict[str, Any]) -> str:
+    track = tool.get("implementationTrack", "cpp")
+    return track if isinstance(track, str) else ""
+
+
+def python_handler_file_hash(path_value: str) -> str | None:
+    handler_path = ROOT / path_value
+    if not handler_path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with handler_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def python_handler_metadata_valid(tool: dict[str, Any]) -> bool:
+    path_value = tool.get("pythonHandlerPath")
+    sha_value = tool.get("pythonHandlerSha256")
+    if not isinstance(path_value, str) or not PYTHON_HANDLER_PATH_RE.fullmatch(path_value):
+        return False
+    if not isinstance(sha_value, str) or not PYTHON_HANDLER_SHA256_RE.fullmatch(sha_value):
+        return False
+    actual_sha = python_handler_file_hash(path_value)
+    return actual_sha == sha_value
+
+
+def validate_implementation_metadata(tool: dict[str, Any], name: str, issues: list[str]) -> None:
+    track = tool.get("implementationTrack", "cpp")
+    if not isinstance(track, str):
+        issues.append(f"{name}: implementationTrack must be a string when present.")
+        track = ""
+    elif track not in KNOWN_IMPLEMENTATION_TRACKS:
+        issues.append(f"{name}: invalid implementationTrack {track!r}")
+
+    path_value = tool.get("pythonHandlerPath")
+    if "pythonHandlerPath" in tool:
+        if not isinstance(path_value, str) or not PYTHON_HANDLER_PATH_RE.fullmatch(path_value):
+            issues.append(
+                f"{name}: pythonHandlerPath must match "
+                "^Tools/UnrealMcpPyTools/[^/]+/main\\.py$"
+            )
+
+    sha_value = tool.get("pythonHandlerSha256")
+    if "pythonHandlerSha256" in tool:
+        if not isinstance(sha_value, str) or not PYTHON_HANDLER_SHA256_RE.fullmatch(sha_value):
+            issues.append(f"{name}: pythonHandlerSha256 must be a lowercase 64-character sha256 hex string.")
+
+    allow_list = tool.get("pythonImportAllowList", [])
+    if not isinstance(allow_list, list):
+        issues.append(f"{name}: pythonImportAllowList must be an array when present.")
+    else:
+        for index, module_name in enumerate(allow_list):
+            if not isinstance(module_name, str) or not PYTHON_MODULE_NAME_RE.fullmatch(module_name):
+                issues.append(f"{name}: pythonImportAllowList[{index}] must be a Python module name string.")
+
+    if track == "python":
+        if "pythonHandlerPath" not in tool:
+            issues.append(f"{name}: pythonHandlerPath is required when implementationTrack is 'python'.")
+        if "pythonHandlerSha256" not in tool:
+            issues.append(f"{name}: pythonHandlerSha256 is required when implementationTrack is 'python'.")
+        if isinstance(path_value, str) and PYTHON_HANDLER_PATH_RE.fullmatch(path_value):
+            actual_sha = python_handler_file_hash(path_value)
+            if actual_sha is None:
+                issues.append(f"{name}: pythonHandlerPath file does not exist: {path_value!r}")
+            elif isinstance(sha_value, str) and PYTHON_HANDLER_SHA256_RE.fullmatch(sha_value) and actual_sha != sha_value:
+                issues.append(f"{name}: pythonHandlerSha256 does not match file content for {path_value!r}.")
 
 
 def collect_test_expectations() -> dict[str, dict[str, Any]]:
@@ -245,6 +321,10 @@ def main(argv: list[str]) -> int:
     tools = registry.get("tools", [])
     mirror_tools = mirror.get("tools", [])
     validate_registry_shape(registry, schema, issues)
+    if SCHEMA_PATH.read_bytes() != SCHEMA_MIRROR_PATH.read_bytes():
+        issues.append("Schema mirror content differs from Tools/UnrealMcpToolRegistry/schema.json.")
+    if SCHEMA_ALIAS_PATH.exists() and SCHEMA_PATH.read_bytes() != SCHEMA_ALIAS_PATH.read_bytes():
+        issues.append("Schema alias content differs from Tools/UnrealMcpToolRegistry/schema.json.")
     if registry != mirror:
         issues.append("Registry mirror content differs from Tools/UnrealMcpToolRegistry/tools.json.")
     handler_entries = collect_handler_entries(tools)
@@ -269,6 +349,7 @@ def main(argv: list[str]) -> int:
             issues.append(f"{name}: invalid exposure {tool.get('exposure')!r}")
         if tool.get("testCoverage") not in KNOWN_TEST_COVERAGE:
             issues.append(f"{name}: invalid testCoverage {tool.get('testCoverage')!r}")
+        validate_implementation_metadata(tool, str(name), issues)
         for field in BOOLEAN_FIELDS:
             if not isinstance(tool.get(field), bool):
                 issues.append(f"{name}: {field} must be boolean, got {type(tool.get(field)).__name__}.")
@@ -302,11 +383,15 @@ def main(argv: list[str]) -> int:
 
     dispatch_matched = 0
     dispatch_allowlisted = 0
+    dispatch_python_exempted = 0
     dispatch_warnings: list[str] = []
     for tool in tools:
         if tool.get("exposure") != "visible":
             continue
         name = str(tool.get("name", ""))
+        if tool_implementation_track(tool) == "python" and python_handler_metadata_valid(tool):
+            dispatch_python_exempted += 1
+            continue
         if name in EXPECTED_NON_STANDARD_DISPATCH:
             dispatch_allowlisted += 1
             continue
@@ -332,10 +417,13 @@ def main(argv: list[str]) -> int:
         "handlerCount": len(handler_entries),
         "issueCount": len(issues),
         "schemaPath": str(SCHEMA_PATH.relative_to(ROOT)),
+        "schemaMirrorPath": str(SCHEMA_MIRROR_PATH.relative_to(ROOT)),
+        "schemaAliasPath": str(SCHEMA_ALIAS_PATH.relative_to(ROOT)),
         "testFixtureToolCount": len(test_expectations),
         "dispatchCheck": {
             "allowlisted": dispatch_allowlisted,
             "matched": dispatch_matched,
+            "pythonExempted": dispatch_python_exempted,
             "strict": args.strict_dispatch,
             "warnings": len(dispatch_warnings),
         },
@@ -350,7 +438,7 @@ def main(argv: list[str]) -> int:
         print("\nIssues:", file=sys.stderr)
         for issue in issues:
             print(f"- {issue}", file=sys.stderr)
-    print(f"dispatch check: {dispatch_matched} matched, {len(dispatch_warnings)} warnings, {dispatch_allowlisted} allowlisted")
+    print(f"dispatch check: {dispatch_matched} matched, {len(dispatch_warnings)} warnings, {dispatch_allowlisted} allowlisted, {dispatch_python_exempted} python exempted")
     if issues:
         return 1
     return 0

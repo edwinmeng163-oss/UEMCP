@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UnrealMcpModule.h"
+#include "UnrealMcpSharedPathResolver.h"
 
 class FJsonObject;
 class FJsonValue;
@@ -14,6 +15,16 @@ namespace UnrealMcp
 	FUnrealMcpExecutionResult AuditMcpTools(const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	bool ResolveProjectPathInsideProject(const FString& RequestedPath, FString& OutPath, FString& OutFailureReason);
 	bool ResolveProjectOutputDirectory(const FString& RequestedOutputRoot, FString& OutDirectory, FString& OutFailureReason);
+	bool ResolveScaffoldReadDirectory(
+		const FString& ToolId,
+		FString& OutScaffoldDirectory,
+		FString& OutFailureReason,
+		FToolsReadResolution* OutResolution = nullptr);
+	FToolsReadResolution ResolveScaffoldReadDirectory_Pure(
+		const FString& ProjectDir,
+		const FString& PluginBaseDir,
+		const FString& ToolId,
+		TFunctionRef<bool(const FString&)> FileOrDirExists);
 	FString SanitizeMcpToolIdForPath(const FString& ToolName);
 	FString GetMcpModuleSourcePath();
 	FString GetMcpModuleHeaderPath();
@@ -30,6 +41,11 @@ namespace UnrealMcp
 	FString MakePathRelativeToProject(const FString& Path);
 	FString FileTimeToIsoString(const FDateTime& Time);
 	bool IsPathInsideDirectory(const FString& Path, const FString& Directory);
+	bool ResolvePathInsideTrustedSourceDomains(
+		const FString& RequestedPath,
+		FString& OutPath,
+		FToolsReadResolution::ESource& OutSourceKind,
+		FString& OutFailureReason);
 	bool LoadJsonObject(const FString& JsonText, TSharedPtr<FJsonObject>& OutObject);
 	bool SaveJsonObjectToFile(const TSharedPtr<FJsonObject>& Object, const FString& FilePath, FString& OutFailureReason);
 	TSharedPtr<FJsonObject> NormalizeOpenAiSchemaObject(const TSharedPtr<FJsonObject>& InputObject);
@@ -61,7 +77,12 @@ namespace UnrealMcp
 		const FString& Severity,
 		const FString& Location,
 		const FString& Message);
-	bool ResolveMcpScaffoldDirectory(const FJsonObject& Arguments, FString& OutDirectory, FString& OutToolName, FString& OutFailureReason);
+	bool ResolveMcpScaffoldDirectory(
+		const FJsonObject& Arguments,
+		FString& OutDirectory,
+		FString& OutToolName,
+		FString& OutFailureReason,
+		FToolsReadResolution* OutResolution = nullptr);
 	TSharedPtr<FJsonObject> FindToolDefinitionByName(const TArray<TSharedPtr<FJsonValue>>& ToolsArray, const FString& ToolName);
 	bool ExtractRequestedSchemaFromScaffoldReadme(const FString& ScaffoldDirectory, FString& OutSchemaJson);
 	TSharedPtr<FJsonObject> ValidateCppSnippetText(
@@ -79,6 +100,7 @@ namespace UnrealMcp
 	FUnrealMcpExecutionResult BackupProjectState(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult RollbackToManifest(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult BuildEditor(const FJsonObject& Arguments);
+	bool TryExecuteSelfExtensionBuildTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
 	FUnrealMcpExecutionResult SupervisorInstall(const FJsonObject& Arguments);
 	FUnrealMcpExecutionResult ListMcpScaffolds(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);
 	FUnrealMcpExecutionResult InspectMcpScaffold(const FJsonObject& Arguments, const TArray<TSharedPtr<FJsonValue>>& ToolsArray);

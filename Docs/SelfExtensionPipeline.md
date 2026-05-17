@@ -11,7 +11,9 @@ The self-extension pipeline lets Unreal MCP add new MCP tools from inside Editor
 - `unreal.mcp_validate_cpp_patch`: static-check generated C++ patch fragments.
 - `unreal.mcp_patch_scaffold_patch`: edit scaffold patch fragments with dry run and backup.
 - `unreal.mcp_apply_scaffold`: apply `ToolRegistryPatch.json`, registrar descriptor, category handler, and dispatcher patches with dry run, backup, and idempotence checks.
-- `unreal.mcp_build_editor`: run UBT and parse build logs.
+- `unreal.mcp_build_editor`: run UBT for the editor target and parse build logs.
+- `unreal.mcp_build_game`, `unreal.mcp_build_server`, `unreal.mcp_build_client`: run UBT for non-editor target coverage and parse build logs.
+- `unreal.mcp_build_packaged`: run RunUAT BuildCookRun for cooked packaged output and parse UAT logs.
 - `unreal.mcp_run_tool_test`: run one generated test request.
 - `unreal.mcp_run_test_suite`: run a generated test directory.
 - `unreal.mcp_rollback_last_extension`: restore the latest apply backup.
@@ -30,6 +32,25 @@ Shared contracts:
 - Tool names follow [Tool Naming](ToolNaming.md).
 - Real apply manifests follow [Extension Manifest Schema](ManifestSchema.md).
 - Restart handoff is documented in [External Supervisor](Supervisor.md).
+
+## Path Resolution
+
+Scaffold writers are project-local by design. `unreal.scaffold_mcp_tool` and
+other draft/Saved creators write under the active `<ProjectDir>` so multiple
+host projects can keep isolated drafts.
+
+Reader-side tools use project-first fallback. `unreal.mcp_apply_scaffold`,
+`unreal.mcp_inspect_scaffold`, `unreal.mcp_validate_*`, Python bridge handler
+resolution, and ToolRegistry reads check active-project `Tools/` content first,
+then walk up to the shared repo-root `Tools/` tree. This lets example projects
+loaded through `AdditionalPluginDirectories` use canonical repo-root handlers,
+registry metadata, and pre-staged scaffolds while still allowing per-project
+overrides.
+
+Applier source writes use the loaded plugin location from `IPluginManager`,
+not `<ProjectDir>/Plugins/UnrealMcp`. Example projects can therefore apply
+patches to the real plugin source even when the plugin is imported through
+`AdditionalPluginDirectories`.
 
 ## Normal Flow
 

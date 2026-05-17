@@ -53,6 +53,12 @@
             "type": "string",
             "pattern": "^unreal\\.[a-z0-9_\\.]+$"
           },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
           "category": {
             "type": "string",
             "enum": [
@@ -69,6 +75,30 @@
           "handlerName": {
             "type": "string",
             "pattern": "^unreal\\.[a-z0-9_\\.]+$"
+          },
+          "implementationTrack": {
+            "type": "string",
+            "enum": [
+              "cpp",
+              "python"
+            ],
+            "default": "cpp"
+          },
+          "pythonHandlerPath": {
+            "type": "string",
+            "pattern": "^Tools/UnrealMcpPyTools/[^/]+/main\\.py$"
+          },
+          "pythonHandlerSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "pythonImportAllowList": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "default": []
           },
           "exposure": {
             "type": "string",
@@ -140,10 +170,36 @@
             "type": "string",
             "description": "Human-readable template interpolating {args.*} and {result.*} fields for the Chat panel tool card header."
           },
+          "inputSchema": {
+            "type": "object"
+          },
+          "outputSchema": {
+            "type": "object"
+          },
           "notes": {
             "type": "string"
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "implementationTrack": {
+                  "const": "python"
+                }
+              },
+              "required": [
+                "implementationTrack"
+              ]
+            },
+            "then": {
+              "required": [
+                "pythonHandlerPath",
+                "pythonHandlerSha256"
+              ]
+            }
+          }
+        ]
       }
     }
   }

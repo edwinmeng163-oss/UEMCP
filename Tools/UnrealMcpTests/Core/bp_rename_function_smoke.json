@@ -1,0 +1,21 @@
+{
+  "name": "bp_rename_function_smoke",
+  "description": "List-only smoke for renaming a Blueprint user function graph. The refactor call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 137,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_rename_function",
+      "arguments": {
+        "blueprintPath": "/Game/__UEvolveMcpTest_chunk2a/BP_RefactorSmoke",
+        "oldName": "RefactorFunction",
+        "newName": "RefactorFunctionRenamed"
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "bp_rename_variable_smoke",
+  "description": "List-only smoke for renaming a Blueprint member variable. The refactor call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 136,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_rename_variable",
+      "arguments": {
+        "blueprintPath": "/Game/__UEvolveMcpTest_chunk2a/BP_RefactorSmoke",
+        "oldName": "RefactorCounter",
+        "newName": "RefactorCounterRenamed"
+      }
+    }
+  }
+}
