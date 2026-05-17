@@ -851,6 +851,7 @@ Pre-commit / CI checks:
 ```bash
 python3 Tools/validate_tool_registry.py
 python3 Tools/check_ue56_compat.py
+python3 Tools/verify_package_integrity.py --root . --mode source --repo-root .
 ```
 
 Core test suite from Chat:

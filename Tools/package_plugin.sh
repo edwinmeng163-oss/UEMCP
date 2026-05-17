@@ -333,6 +333,13 @@ else
 
   zip_name="UnrealMcp-v${version_name}-mac-ue56-ue57-projectroot.zip"
 fi
+package_mode="source"
+if [ "$full_experience" -eq 1 ]; then
+  package_mode="full-win"
+fi
+if ! (cd "$repo_root" && python3 Tools/verify_package_integrity.py --strict --root "$stage_parent" --repo-root "$repo_root" --mode "$package_mode"); then
+  die "Package integrity verifier failed for staged $package_mode package"
+fi
 zip_path="$output_dir/$zip_name"
 sha_path="$zip_path.sha256"
 

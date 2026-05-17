@@ -1,0 +1,20 @@
+{
+  "name": "install_verify_smoke",
+  "description": "Core smoke test for the package integrity verifier result schema vocabulary. CLI/package-script verification executes the standalone verifier itself.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 31,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.mcp_validate_tool_schema",
+      "arguments": {
+        "schemaJson": "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"mode\",\"scope\",\"overallSeverity\",\"blockingIssueCount\",\"warningCount\",\"lastRunUtc\",\"validatorVersion\",\"checks\"],\"properties\":{\"mode\":{\"type\":\"string\",\"enum\":[\"source\",\"full-win\"]},\"scope\":{\"type\":\"string\"},\"overallSeverity\":{\"type\":\"string\",\"enum\":[\"pass\",\"warning\",\"error\"]},\"blockingIssueCount\":{\"type\":\"integer\",\"minimum\":0},\"warningCount\":{\"type\":\"integer\",\"minimum\":0},\"lastRunUtc\":{\"type\":\"string\"},\"validatorVersion\":{\"type\":\"string\",\"enum\":[\"0.15.0-c5-1a\"]},\"checks\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"id\",\"severity\",\"summary\"],\"properties\":{\"id\":{\"type\":\"string\"},\"severity\":{\"type\":\"string\",\"enum\":[\"pass\",\"warning\",\"error\"]},\"summary\":{\"type\":\"string\"},\"details\":{\"type\":\"object\"},\"recommendedFix\":{\"type\":\"string\"}}}}}}",
+        "returnNormalizedSchema": false
+      }
+    }
+  }
+}

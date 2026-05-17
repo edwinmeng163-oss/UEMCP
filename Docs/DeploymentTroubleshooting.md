@@ -15,6 +15,23 @@ The recommended install path is a project-level plugin:
 
 Do not install a second copy under the Unreal Engine installation while also using a project copy. Duplicate plugin copies can make Unreal load the wrong binary or compile against stale files.
 
+## Package Integrity Before Handoff
+
+Before publishing a zip or handing one to testers, run the package integrity
+verifier against the staged root or final zip:
+
+```bash
+python3 Tools/verify_package_integrity.py --root <staged-package-root> --mode source --strict --repo-root .
+python3 Tools/verify_package_integrity.py --zip <package.zip> --mode source --strict --repo-root .
+```
+
+Use `--mode full-win` for the Windows full-experience package. The verifier
+checks registry/schema mirror equality, package-only generated path exclusions,
+install and first-launch docs, full Windows binaries/runtime files, and the
+Windows git-symlink-stub failure mode that can turn schema aliases into tiny
+path files instead of real JSON. See [PackagingIntegrity.md](PackagingIntegrity.md)
+for the full invariant catalog and exit-code contract.
+
 ## Required Project Plugins
 
 The target `.uproject` should enable:
@@ -107,4 +124,3 @@ If an imported tool or self-extension fails:
 3. Use `unreal.mcp_rollback_last_extension` or `unreal.mcp_rollback_to_manifest`.
 4. Rebuild with the Editor closed.
 5. Reopen Editor and run `unreal.mcp_workbench_status`.
-

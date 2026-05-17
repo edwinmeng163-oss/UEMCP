@@ -45,7 +45,7 @@ function Assert-SameFileHash {
 }
 
 function Invoke-PythonScript {
-    param([string]$ScriptPath)
+    param([string]$ScriptPath, [string[]]$Arguments = @())
     foreach ($pythonCommand in @("python", "python3")) {
         $command = Get-Command $pythonCommand -ErrorAction SilentlyContinue
         if ($null -eq $command) {
@@ -56,7 +56,7 @@ function Invoke-PythonScript {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            & $command.Source $ScriptPath 2>&1 | ForEach-Object { Write-Host $_ }
+            & $command.Source $ScriptPath @Arguments 2>&1 | ForEach-Object { Write-Host $_ }
         } finally {
             $ErrorActionPreference = $prevEAP
         }
@@ -444,6 +444,15 @@ try {
         }
 
         $zipName = "UnrealMcp-v$Version-win-ue56-ue57-projectroot.zip"
+    }
+    $packageMode = if ($FullExperience) { "full-win" } else { "source" }
+    Push-Location $repoRoot
+    try {
+        if (-not (Invoke-PythonScript -ScriptPath "Tools/verify_package_integrity.py" -Arguments @("--strict", "--root", $stageParent, "--repo-root", $repoRoot, "--mode", $packageMode))) {
+            Die "Package integrity verifier failed for staged $packageMode package"
+        }
+    } finally {
+        Pop-Location
     }
     $zipPath = Join-Path $outputDir $zipName
     $shaPath = "$zipPath.sha256"
