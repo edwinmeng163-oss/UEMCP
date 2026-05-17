@@ -115,7 +115,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.project_settings_get"),
 					TEXT("Get Project Setting"),
-					TEXT("Reads a project setting; pass effective=true to get the current runtime/PIE value when available (else returns the configured default)."),
+					TEXT("Reads a project setting; pass `effective=true` to get the current runtime/PIE value when available (else returns the configured default)."),
 					TEXT("editor"),
 					TEXT("UnrealMcpEditorTools.cpp"),
 					EUnrealMcpToolRisk::Low);
