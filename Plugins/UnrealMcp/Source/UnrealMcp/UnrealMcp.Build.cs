@@ -6,6 +6,18 @@ public class UnrealMcp : ModuleRules
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// Disable unity build for this module. Several per-file helpers
+		// (GetTaskRoot, GetEditorAssetSubsystem, GetActivityLogRoot,
+		// IsEditorPlaying, MakePieBlockedResult, MakeErrorObject, etc.)
+		// live in per-file anonymous namespaces and collide when UBT
+		// concatenates the .cpp files. UE 5.7 adaptive unity exclusion
+		// hid the issue against the example host but UE 5.6 dev-host
+		// builds against UEvolve.uproject surfaced redefinition errors.
+		// Refactoring all helpers to unique names is invasive; per-file
+		// compilation removes the risk entirely with only modest
+		// full-build cost (incremental builds unaffected).
+		bUseUnity = false;
+
 		PublicDependencyModuleNames.AddRange(new[]
 		{
 			"Core"

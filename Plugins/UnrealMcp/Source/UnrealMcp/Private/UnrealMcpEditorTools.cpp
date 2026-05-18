@@ -64,17 +64,18 @@ namespace UnrealMcp
 		FString& OutFailureReason);
 	TSharedPtr<FJsonValue> PropertyValueToJson(FProperty* Property, const void* ValuePtr);
 
+	// PIE-block helpers are defined once at namespace UnrealMcp scope in
+	// UnrealMcpCoreHelpers.cpp; declare them here so the chunk 5 migration
+	// tools (asset_move, redirector_fixup, dependency_remap,
+	// project_version_migration) inside the anonymous namespace below can
+	// resolve them via name lookup. A previous duplicate definition inside
+	// the anonymous namespace below caused unity-build ambiguity on UE 5.6.
+	bool IsEditorPlaying();
+	FUnrealMcpExecutionResult MakePieBlockedResult(const FString& ToolName);
+
 	namespace
 	{
 		static constexpr int32 EditorToolDefaultListLimit = 200;
-
-		// Forward decls so the chunk 5 migration tools (asset_move,
-		// redirector_fixup, dependency_remap, project_version_migration) at
-		// lines ~675/797/932/1071 can reference the PIE-block helpers whose
-		// definitions live below at ~1271/1279 in this same anonymous
-		// namespace.
-		bool IsEditorPlaying();
-		FUnrealMcpExecutionResult MakePieBlockedResult(const FString& ToolName);
 
 		struct FEditorToolAssetPath
 		{
@@ -1548,21 +1549,10 @@ namespace UnrealMcp
 			return MakeExecutionResult(TailText, StructuredContent, false);
 		}
 
-		bool IsEditorPlaying()
-		{
-			return GEditor
-				&& (GEditor->PlayWorld != nullptr
-					|| GEditor->bIsSimulatingInEditor
-					|| GEditor->GetPlaySessionRequest().IsSet());
-		}
-
-		FUnrealMcpExecutionResult MakePieBlockedResult(const FString& ToolName)
-		{
-			return MakeExecutionResult(
-				FString::Printf(TEXT("Tool '%s' is blocked while Play In Editor is active or starting."), *ToolName),
-				nullptr,
-				true);
-		}
+		// IsEditorPlaying() and MakePieBlockedResult() are defined at
+		// namespace UnrealMcp scope in UnrealMcpCoreHelpers.cpp and forward
+		// declared above (outside this anonymous namespace). Calls inside
+		// this anonymous namespace resolve via name lookup.
 
 		bool EditorToolTryGetStringArrayField(const FJsonObject& Arguments, const FString& FieldName, TArray<FString>& OutValues)
 		{
