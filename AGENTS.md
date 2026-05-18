@@ -458,6 +458,11 @@ hooks, and the Task Atlas Slate window are in place. v0.18 Task Atlas
 promote actions now make To Skills and To RAG functional; v0.19 is complete
 with Part A Make Tool scaffold drafts, Part B Markdown ingestion/RAG indexing
 for promoted workflows, and Part C LLM retrospective label backfill.
+v0.19.1 patched a latent unity-build symbol collision that blocked UE 5.6
+dev-host builds against `UEvolve.uproject` (fixed by setting `bUseUnity =
+false` for the UnrealMcp module); same source now compiles cleanly on UE
+5.6 and UE 5.7. v0.19.1 also ships Mac and Windows zips on the same
+release tag.
 v0.16 C2 landed; UMG parity now covers rename,
 reorder, duplicate, and guarded delete, and the first Material Instance surface
 now covers list, parameter inspection, scalar set, and vector set. v0.15 chunk
