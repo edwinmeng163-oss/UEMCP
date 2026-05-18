@@ -30,6 +30,7 @@ public class UnrealMcp : ModuleRules
 			"JsonUtilities",
 			"Kismet",
 			"KismetCompiler",
+			"MovieScene",
 			"Projects",
 			"PythonScriptPlugin",
 			"Settings",

@@ -2820,6 +2820,420 @@
       "notes": ""
     },
     {
+      "name": "unreal.widget_rename",
+      "category": "widget",
+      "handlerName": "unreal.widget_rename",
+      "title": "Rename Widget",
+      "description": "Renames a widget node inside a Widget Blueprint, preserving bindings, variable references, animation bindings, and designer hierarchy references. Use this to rename a button, text block, panel, or other UMG widget by name.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Plugins/UnrealMcp/README.md#editor-action-tools",
+      "reason": "UMG parity tool: rename a button widget, text block, panel, image, or designer widget while preserving bindings and Blueprint variable references.",
+      "summaryTemplate": "Renamed widget {args.oldName} to {args.newName} in {args.widgetBlueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "widgetBlueprintPath",
+          "oldName",
+          "newName"
+        ],
+        "properties": {
+          "widgetBlueprintPath": { "type": "string" },
+          "oldName": { "type": "string" },
+          "newName": { "type": "string" },
+          "force": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "success": { "type": "boolean" },
+          "oldName": { "type": "string" },
+          "newName": { "type": "string" },
+          "bindingCount": { "type": "number" },
+          "referencesUpdated": { "type": "number" },
+          "warnings": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "notes": "Binding preservation is covered by C++ automation helper tests and Widget fixture notes; graph/event reference coverage uses existing widget_dump_tree readback."
+    },
+    {
+      "name": "unreal.widget_reorder_child",
+      "category": "widget",
+      "handlerName": "unreal.widget_reorder_child",
+      "title": "Reorder Widget",
+      "description": "Moves a widget to a new sibling index inside its parent panel in a Widget Blueprint. Use this when a user asks to move a button, text block, image, or panel earlier or later in a UMG layout.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Plugins/UnrealMcp/README.md#editor-action-tools",
+      "reason": "UMG parity tool: reorder children inside a Canvas, VerticalBox, HorizontalBox, Overlay, or other panel by widget name.",
+      "summaryTemplate": "Reordered widget {args.widgetName} to index {args.newIndex} in {args.widgetBlueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "widgetBlueprintPath",
+          "widgetName",
+          "newIndex"
+        ],
+        "properties": {
+          "widgetBlueprintPath": { "type": "string" },
+          "widgetName": { "type": "string" },
+          "newIndex": { "type": "number" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "success": { "type": "boolean" },
+          "oldIndex": { "type": "number" },
+          "newIndex": { "type": "number" },
+          "parentPath": { "type": "string" },
+          "totalSiblings": { "type": "number" }
+        }
+      },
+      "notes": "Low-risk hierarchy edit; root widgets without a parent panel are refused."
+    },
+    {
+      "name": "unreal.widget_duplicate",
+      "category": "widget",
+      "handlerName": "unreal.widget_duplicate",
+      "title": "Duplicate Widget",
+      "description": "Duplicates a widget node inside the same Widget Blueprint, optionally copying its child subtree and assigning unique names. Use this when duplicating a UMG button, text block, card, panel, or layout group.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Plugins/UnrealMcp/README.md#editor-action-tools",
+      "reason": "UMG parity tool: duplicate a button, text block, panel, or complete widget subtree with collision-safe generated names.",
+      "summaryTemplate": "Duplicated widget {args.sourceName} in {args.widgetBlueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "widgetBlueprintPath",
+          "sourceName"
+        ],
+        "properties": {
+          "widgetBlueprintPath": { "type": "string" },
+          "sourceName": { "type": "string" },
+          "newName": { "type": "string" },
+          "includeSubtree": { "type": "boolean", "default": true }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "success": { "type": "boolean" },
+          "sourceName": { "type": "string" },
+          "duplicatedName": { "type": "string" },
+          "subtreeNodeCount": { "type": "number" }
+        }
+      },
+      "notes": "The deep binding-integrity fixture is deferred to C++ helper coverage plus widget_dump_tree readback because JSON fixtures cannot construct arbitrary UMG bindings by themselves."
+    },
+    {
+      "name": "unreal.widget_delete",
+      "category": "widget",
+      "handlerName": "unreal.widget_delete",
+      "title": "Delete Widget",
+      "description": "Deletes a widget subtree from a Widget Blueprint after checking bindings, bound events, and animation references. Use force only when the user explicitly wants to remove referenced UMG widgets.",
+      "exposure": "visible",
+      "riskLevel": "high",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Plugins/UnrealMcp/README.md#editor-action-tools",
+      "reason": "UMG parity tool: safely delete a button, text block, panel, or widget subtree and refuse when bindings would break unless force=true.",
+      "summaryTemplate": "Deleted widget {args.widgetName} from {args.widgetBlueprintPath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "widgetBlueprintPath",
+          "widgetName"
+        ],
+        "properties": {
+          "widgetBlueprintPath": { "type": "string" },
+          "widgetName": { "type": "string" },
+          "force": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "success": { "type": "boolean" },
+          "deletedName": { "type": "string" },
+          "bindingsBroken": { "type": "number" },
+          "subtreeNodeCount": { "type": "number" },
+          "warnings": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "notes": "Mirrors Blueprint delete discipline: force=false refuses referenced widgets instead of silently breaking UMG bindings."
+    },
+    {
+      "name": "unreal.material_instance_list",
+      "category": "material",
+      "handlerName": "unreal.material_instance_list",
+      "title": "List Material Instances",
+      "description": "Lists Material Instance assets under a content path with parent material and class metadata. Use this first when a user asks to edit a mesh material, make a material redder, or find editable material instances.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/MaterialInstanceTools.md",
+      "reason": "Material discovery tool for workflows like list material instances, inspect parameters, then set scalar or vector color/tint values.",
+      "summaryTemplate": "Listed material instances under {args.contentRoot}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contentRoot": { "type": "string", "default": "/Game" },
+          "recursive": { "type": "boolean", "default": true },
+          "classFilter": { "type": "string" },
+          "limit": { "type": "number", "default": 200 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instances": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": { "type": "string" },
+                "parent": { "type": "string" },
+                "classPath": { "type": "string" }
+              }
+            }
+          },
+          "totalCount": { "type": "number" },
+          "truncated": { "type": "boolean" }
+        }
+      },
+      "notes": "Phase 1.5 ships list/get/set_scalar/set_vector. Texture and static switch setters are deferred for asset-reference and permutation safety."
+    },
+    {
+      "name": "unreal.material_instance_get_parameters",
+      "category": "material",
+      "handlerName": "unreal.material_instance_get_parameters",
+      "title": "Get Material Parameters",
+      "description": "Reads scalar, vector, texture, and static switch parameters from a Material Instance. Use this before changing brightness, roughness, color, tint, emissive color, or other material parameters.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/MaterialInstanceTools.md",
+      "reason": "Material inspection tool for choosing whether to set a scalar value such as brightness or a vector value such as BaseColor/Tint to make a material redder.",
+      "summaryTemplate": "Read material parameters from {args.materialInstancePath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "materialInstancePath"
+        ],
+        "properties": {
+          "materialInstancePath": { "type": "string" },
+          "includeInherited": { "type": "boolean", "default": true }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "materialInstancePath": { "type": "string" },
+          "parentMaterialPath": { "type": "string" },
+          "scalarParameters": { "type": "array" },
+          "vectorParameters": { "type": "array" },
+          "textureParameters": { "type": "array" },
+          "staticSwitchParameters": { "type": "array" }
+        }
+      },
+      "notes": "Read-only. Returns fromParent=true when a value is inherited and includeInherited=true."
+    },
+    {
+      "name": "unreal.material_instance_set_scalar",
+      "category": "material",
+      "handlerName": "unreal.material_instance_set_scalar",
+      "title": "Set Material Scalar",
+      "description": "Sets a scalar parameter on a Material Instance Constant with strict numeric input and previous-value readback. Use this for brightness, roughness, metallic, opacity, intensity, or other numeric material edits.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/MaterialInstanceTools.md",
+      "reason": "Type-safe scalar setter for material instance parameter changes; rejects value strings with errorKind TypeMismatch instead of coercing.",
+      "summaryTemplate": "Set scalar material parameter {args.parameterName} on {args.materialInstancePath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "materialInstancePath",
+          "parameterName",
+          "value"
+        ],
+        "properties": {
+          "materialInstancePath": { "type": "string" },
+          "parameterName": { "type": "string" },
+          "value": { "type": "number" },
+          "save": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "success": { "type": "boolean" },
+          "parameterName": { "type": "string" },
+          "previousValue": { "type": "number" },
+          "newValue": { "type": "number" },
+          "saved": { "type": "boolean" },
+          "errorKind": { "type": "string" }
+        }
+      },
+      "notes": "Does not set texture or static switch parameters; those are future v0.16.x work because they need asset-reference and permutation invalidation discipline."
+    },
+    {
+      "name": "unreal.material_instance_set_vector",
+      "category": "material",
+      "handlerName": "unreal.material_instance_set_vector",
+      "title": "Set Material Vector",
+      "description": "Sets an RGBA vector parameter on a Material Instance Constant with strict object input and previous-value readback. Use this for color, tint, emissive color, or make this material redder requests.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/MaterialInstanceTools.md",
+      "reason": "Type-safe vector setter for material colors and tints; useful when the user says make this material redder, bluer, brighter, or change its emissive color.",
+      "summaryTemplate": "Set vector material parameter {args.parameterName} on {args.materialInstancePath}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "materialInstancePath",
+          "parameterName",
+          "value"
+        ],
+        "properties": {
+          "materialInstancePath": { "type": "string" },
+          "parameterName": { "type": "string" },
+          "value": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "r",
+              "g",
+              "b",
+              "a"
+            ],
+            "properties": {
+              "r": { "type": "number" },
+              "g": { "type": "number" },
+              "b": { "type": "number" },
+              "a": { "type": "number" }
+            }
+          },
+          "save": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "success": { "type": "boolean" },
+          "parameterName": { "type": "string" },
+          "previousValue": { "type": "object" },
+          "newValue": { "type": "object" },
+          "saved": { "type": "boolean" },
+          "errorKind": { "type": "string" }
+        }
+      },
+      "notes": "Does not set texture or static switch parameters; those are future v0.16.x work because they need asset-reference and permutation invalidation discipline."
+    },
+    {
       "name": "unreal.chat_label_active_task",
       "category": "skills",
       "handlerName": "unreal.chat_label_active_task",

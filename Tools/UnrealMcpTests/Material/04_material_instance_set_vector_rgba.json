@@ -1,0 +1,31 @@
+{
+  "name": "material_instance_set_vector_rgba",
+  "description": "List-only vector write fixture for a pre-staged Material Instance Constant with a BaseColor vector parameter.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "precondition": "Create /Game/__UEvolveMcpTest/Materials/MI_ParameterSmoke with vector parameter BaseColor.",
+    "postcheck": "Tool returns previousValue/newValue RGBA objects and rejects value strings with errorKind TypeMismatch."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 504,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.material_instance_set_vector",
+      "arguments": {
+        "materialInstancePath": "/Game/__UEvolveMcpTest/Materials/MI_ParameterSmoke",
+        "parameterName": "BaseColor",
+        "value": {
+          "r": 1.0,
+          "g": 0.25,
+          "b": 0.2,
+          "a": 1.0
+        },
+        "save": false
+      }
+    }
+  }
+}

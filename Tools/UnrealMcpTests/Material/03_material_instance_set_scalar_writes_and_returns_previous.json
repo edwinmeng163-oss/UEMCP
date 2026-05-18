@@ -1,0 +1,26 @@
+{
+  "name": "material_instance_set_scalar_writes_and_returns_previous",
+  "description": "List-only scalar write fixture for a pre-staged Material Instance Constant with a Brightness scalar parameter.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "precondition": "Create /Game/__UEvolveMcpTest/Materials/MI_ParameterSmoke with scalar parameter Brightness.",
+    "postcheck": "Tool returns previousValue as a number, newValue=0.5, saved=false, and rejects string values with errorKind TypeMismatch."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 503,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.material_instance_set_scalar",
+      "arguments": {
+        "materialInstancePath": "/Game/__UEvolveMcpTest/Materials/MI_ParameterSmoke",
+        "parameterName": "Brightness",
+        "value": 0.5,
+        "save": false
+      }
+    }
+  }
+}

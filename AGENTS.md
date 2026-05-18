@@ -288,12 +288,20 @@ Blueprint tools:
 Widget tools:
 
 - add/remove widgets
+- rename/reorder/duplicate/delete widgets with binding/reference checks
 - set widget properties
 - set slot layout
 - bind events
 - bind Blueprint variables
 - build templates
 - dump Widget Blueprint tree
+
+Material tools:
+
+- list Material Instance assets
+- inspect scalar, vector, texture, and static switch parameters
+- set scalar and RGBA vector parameters on Material Instance Constant assets
+  with strict JSON number/object typing
 
 Scaffold and workflow:
 
@@ -375,11 +383,12 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 141 entries across:
+At the time this file was written, the registry contained 149 entries across:
 
 - actors
 - blueprint
 - editor
+- material
 - memory
 - scaffold
 - self-extension
@@ -400,10 +409,18 @@ tools (`unreal.mcp_build_game`, `unreal.mcp_build_server`,
 v0.15 chunk 5 migration tools (`unreal.asset_move`,
 `unreal.redirector_fixup`, `unreal.dependency_remap`, and
 `unreal.project_version_migration`), and the C5 runtime install doctor
-(`unreal.install_doctor`). Earlier handoff text lagged at 119
+(`unreal.install_doctor`), and the eight v0.16 C2 UMG/material tools
+(`unreal.widget_rename`, `unreal.widget_reorder_child`,
+`unreal.widget_duplicate`, `unreal.widget_delete`,
+`unreal.material_instance_list`, `unreal.material_instance_get_parameters`,
+`unreal.material_instance_set_scalar`, and
+`unreal.material_instance_set_vector`). Earlier handoff text lagged at 119
 entries.
 
-Current project status: v0.15 chunk 5 landed; migration toolchain is complete
+Current project status: v0.16 C2 landed; UMG parity now covers rename,
+reorder, duplicate, and guarded delete, and the first Material Instance surface
+now covers list, parameter inspection, scalar set, and vector set. v0.15 chunk
+5 landed; migration toolchain is complete
 (`asset_move` + `redirector_fixup` + `dependency_remap` +
 `project_version_migration`), and v0.15 chunks 1-5 close all Known Limitations
 from v0.14.0-python-track. UBT target matrix is complete (editor + game +

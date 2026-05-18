@@ -70,11 +70,19 @@ Editor action tools:
 - `unreal.bp_compile_save`
 - `unreal.widget_add`
 - `unreal.widget_remove`
+- `unreal.widget_rename`
+- `unreal.widget_reorder_child`
+- `unreal.widget_duplicate`
+- `unreal.widget_delete`
 - `unreal.widget_set_property`
 - `unreal.widget_set_slot_layout`
 - `unreal.widget_bind_event`
 - `unreal.widget_bind_blueprint_variable`
 - `unreal.widget_build_template`
+- `unreal.material_instance_list`
+- `unreal.material_instance_get_parameters`
+- `unreal.material_instance_set_scalar`
+- `unreal.material_instance_set_vector`
 - `unreal.scaffold_round_system`
 - `unreal.scaffold_shop_system`
 - `unreal.scaffold_economy_system`
@@ -375,6 +383,28 @@ Then call `unreal.bp_compile_save` for the Widget Blueprint when the hierarchy e
 
 ```text
 /tool unreal.widget_bind_event {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","widgetName":"RefreshButton","eventName":"OnClicked","compile":true}
+```
+
+```text
+/tool unreal.widget_rename {"widgetBlueprintPath":"/Game/MCPDemo/Blueprints/UI/WBP_Demo_HUD","oldName":"RefreshButton","newName":"ApplyButton","force":false}
+```
+
+Material instance editing example:
+
+```text
+/tool unreal.material_instance_list {"contentRoot":"/Game","recursive":true,"limit":25}
+```
+
+```text
+/tool unreal.material_instance_get_parameters {"materialInstancePath":"/Game/MCPDemo/Materials/MI_Demo","includeInherited":true}
+```
+
+```text
+/tool unreal.material_instance_set_scalar {"materialInstancePath":"/Game/MCPDemo/Materials/MI_Demo","parameterName":"Brightness","value":0.75,"save":false}
+```
+
+```text
+/tool unreal.material_instance_set_vector {"materialInstancePath":"/Game/MCPDemo/Materials/MI_Demo","parameterName":"BaseColor","value":{"r":1.0,"g":0.2,"b":0.15,"a":1.0},"save":false}
 ```
 
 Playable system scaffold examples:

@@ -1,0 +1,27 @@
+{
+  "name": "widget_rename_preserves_binding",
+  "description": "List-only binding-preservation fixture. A pre-staged Widget Blueprint must contain BoundButton with an OnClicked binding; after rename, widget_dump_tree with graph nodes must still show the bound event.",
+  "category": "binding_preservation",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectationNote": "The fixture runner cannot construct arbitrary UMG delegate bindings. C++ automation covers binding object-name preservation; this contract records the required editor smoke sequence.",
+  "expectedContract": {
+    "precondition": "Create /Game/__UEvolveMcpTest/Widget/WBP_BindingSmoke with widget BoundButton and an OnClicked binding.",
+    "postcheck": "Call unreal.widget_dump_tree with includeGraphNodes=true and verify the bound event still references RenamedButton."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 401,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.widget_rename",
+      "arguments": {
+        "widgetBlueprintPath": "/Game/__UEvolveMcpTest/Widget/WBP_BindingSmoke",
+        "oldName": "BoundButton",
+        "newName": "RenamedButton",
+        "force": false
+      }
+    }
+  }
+}

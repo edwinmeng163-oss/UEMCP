@@ -80,6 +80,30 @@ namespace UnrealMcp
 			return Schema;
 		}
 
+		TSharedPtr<FJsonObject> MakeSchemaWithRequired(const TSharedPtr<FJsonObject>& Properties, const TArray<FString>& RequiredFields)
+		{
+			TArray<TSharedPtr<FJsonValue>> Required;
+			for (const FString& RequiredField : RequiredFields)
+			{
+				Required.Add(MakeShared<FJsonValueString>(RequiredField));
+			}
+
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetObjectField(TEXT("properties"), Properties);
+			Schema->SetArrayField(TEXT("required"), Required);
+			return Schema;
+		}
+
+		TSharedPtr<FJsonObject> MakeLinearColorValueSchema()
+		{
+			TSharedPtr<FJsonObject> ColorProperties = MakeShared<FJsonObject>();
+			ColorProperties->SetObjectField(TEXT("r"), MakeNumberProperty(TEXT("Red channel value."), 1.0));
+			ColorProperties->SetObjectField(TEXT("g"), MakeNumberProperty(TEXT("Green channel value."), 1.0));
+			ColorProperties->SetObjectField(TEXT("b"), MakeNumberProperty(TEXT("Blue channel value."), 1.0));
+			ColorProperties->SetObjectField(TEXT("a"), MakeNumberProperty(TEXT("Alpha channel value."), 1.0));
+			return MakeSchemaWithRequired(ColorProperties, TArray<FString>{ TEXT("r"), TEXT("g"), TEXT("b"), TEXT("a") });
+		}
+
 		void RegisterEditorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -610,6 +634,180 @@ namespace UnrealMcp
 					TEXT("UnrealMcpWidgetTools.cpp"),
 					EUnrealMcpToolRisk::ReadOnly),
 				Schema);
+		}
+
+		void RegisterWidgetEditMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
+		{
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("widgetBlueprintPath"), MakeStringProperty(TEXT("Widget Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("oldName"), MakeStringProperty(TEXT("Existing widget name inside the Widget Blueprint designer tree."), FString()));
+				Properties->SetObjectField(TEXT("newName"), MakeStringProperty(TEXT("New unique widget name to apply."), FString()));
+				Properties->SetObjectField(TEXT("force"), MakeBoolProperty(TEXT("Reserved safety override for future rename conflict handling."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.widget_rename"),
+					TEXT("Rename Widget"),
+					TEXT("Renames a UMG widget node while preserving bindings, variable references, animation bindings, and designer hierarchy references."),
+					TEXT("widget"),
+					TEXT("UnrealMcpWidgetEditTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: UMG parity rename tool for button, text block, and widget variable edits with binding preservation.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("widgetBlueprintPath"), TEXT("oldName"), TEXT("newName") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("widgetBlueprintPath"), MakeStringProperty(TEXT("Widget Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("widgetName"), MakeStringProperty(TEXT("Widget name to move within its parent panel."), FString()));
+				Properties->SetObjectField(TEXT("newIndex"), MakeNumberProperty(TEXT("New zero-based child index inside the parent panel."), 0.0));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.widget_reorder_child"),
+					TEXT("Reorder Widget"),
+					TEXT("Moves a UMG widget to a new sibling index inside its parent panel so layout order can be edited by name."),
+					TEXT("widget"),
+					TEXT("UnrealMcpWidgetEditTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: UMG hierarchy editing parity tool for reordering children in panel widgets.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("widgetBlueprintPath"), TEXT("widgetName"), TEXT("newIndex") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("widgetBlueprintPath"), MakeStringProperty(TEXT("Widget Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("sourceName"), MakeStringProperty(TEXT("Widget name to duplicate."), FString()));
+				Properties->SetObjectField(TEXT("newName"), MakeStringProperty(TEXT("Optional requested duplicate name; a suffix is added if needed."), FString()));
+				Properties->SetObjectField(TEXT("includeSubtree"), MakeBoolProperty(TEXT("Whether to duplicate child widgets recursively."), true));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.widget_duplicate"),
+					TEXT("Duplicate Widget"),
+					TEXT("Duplicates a UMG widget, optionally including its child subtree, and assigns unique names for quick layout iteration."),
+					TEXT("widget"),
+					TEXT("UnrealMcpWidgetEditTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: UMG parity duplicate tool for copying buttons, text blocks, panels, and their designer subtree.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("widgetBlueprintPath"), TEXT("sourceName") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("widgetBlueprintPath"), MakeStringProperty(TEXT("Widget Blueprint asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("widgetName"), MakeStringProperty(TEXT("Widget name to delete."), FString()));
+				Properties->SetObjectField(TEXT("force"), MakeBoolProperty(TEXT("Delete even when widget bindings, bound events, or animation references exist."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.widget_delete"),
+					TEXT("Delete Widget"),
+					TEXT("Deletes a UMG widget subtree after checking binding and graph references; force is required when references would break."),
+					TEXT("widget"),
+					TEXT("UnrealMcpWidgetEditTools.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: UMG parity delete tool with binding/reference refusal unless force=true.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("widgetBlueprintPath"), TEXT("widgetName") }));
+			}
+		}
+
+		void RegisterMaterialInstanceMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
+		{
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("contentRoot"), MakeStringProperty(TEXT("Content Browser root to search for material instances."), TEXT("/Game")));
+				Properties->SetObjectField(TEXT("recursive"), MakeBoolProperty(TEXT("Whether to include child folders."), true));
+				Properties->SetObjectField(TEXT("classFilter"), MakeStringProperty(TEXT("Optional class path or class-name substring filter."), FString()));
+				Properties->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum material instances to return."), 200.0));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.material_instance_list"),
+					TEXT("List Material Instances"),
+					TEXT("Lists Material Instance assets under a content path with parent material and class metadata for parameter-edit discovery."),
+					TEXT("material"),
+					TEXT("UnrealMcpMaterialInstanceTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: read-only material instance discovery tool for workflows like finding the instance to make a mesh redder.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("materialInstancePath"), MakeStringProperty(TEXT("Material Instance asset path to inspect."), FString()));
+				Properties->SetObjectField(TEXT("includeInherited"), MakeBoolProperty(TEXT("Include inherited parent parameter values as fromParent=true."), true));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.material_instance_get_parameters"),
+					TEXT("Get Material Parameters"),
+					TEXT("Reads scalar, vector, texture, and static switch parameters from a Material Instance, including inherited values when requested."),
+					TEXT("material"),
+					TEXT("UnrealMcpMaterialInstanceTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: read-only material parameter inspection before safe scalar or vector edits.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("materialInstancePath") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("materialInstancePath"), MakeStringProperty(TEXT("Material Instance Constant asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("parameterName"), MakeStringProperty(TEXT("Scalar parameter name to set."), FString()));
+				Properties->SetObjectField(TEXT("value"), MakeNumberProperty(TEXT("New scalar value. Must be a JSON number, not a string."), 1.0));
+				Properties->SetObjectField(TEXT("save"), MakeBoolProperty(TEXT("Whether to save the Material Instance package after editing."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.material_instance_set_scalar"),
+					TEXT("Set Material Scalar"),
+					TEXT("Sets one scalar parameter on a Material Instance Constant with strict numeric input and previous-value readback."),
+					TEXT("material"),
+					TEXT("UnrealMcpMaterialInstanceTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: type-safe material scalar setter for brightness, roughness, metallic, opacity, and similar numeric edits.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("materialInstancePath"), TEXT("parameterName"), TEXT("value") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("materialInstancePath"), MakeStringProperty(TEXT("Material Instance Constant asset path to edit."), FString()));
+				Properties->SetObjectField(TEXT("parameterName"), MakeStringProperty(TEXT("Vector parameter name to set."), FString()));
+				Properties->SetObjectField(TEXT("value"), MakeLinearColorValueSchema());
+				Properties->SetObjectField(TEXT("save"), MakeBoolProperty(TEXT("Whether to save the Material Instance package after editing."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.material_instance_set_vector"),
+					TEXT("Set Material Vector"),
+					TEXT("Sets one RGBA vector parameter on a Material Instance Constant, useful for color edits like making a material redder."),
+					TEXT("material"),
+					TEXT("UnrealMcpMaterialInstanceTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: type-safe material vector setter for color, tint, emissive color, and make-this-material-redder workflows.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("materialInstancePath"), TEXT("parameterName"), TEXT("value") }));
+			}
 		}
 
 		void RegisterScaffoldMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
@@ -1168,6 +1366,8 @@ namespace UnrealMcp
 			RegisterActorMcpToolDescriptors(Registrar);
 			RegisterBlueprintInspectorMcpToolDescriptors(Registrar);
 			RegisterWidgetInspectorMcpToolDescriptors(Registrar);
+			RegisterWidgetEditMcpToolDescriptors(Registrar);
+			RegisterMaterialInstanceMcpToolDescriptors(Registrar);
 			RegisterScaffoldMcpToolDescriptors(Registrar);
 			RegisterSkillSessionMcpToolDescriptors(Registrar);
 			RegisterSelfExtensionMcpToolDescriptors(Registrar);

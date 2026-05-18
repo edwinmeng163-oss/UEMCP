@@ -4,6 +4,7 @@
 #include "UnrealMcpActorTools.h"
 #include "UnrealMcpBlueprintTools.h"
 #include "UnrealMcpEditorTools.h"
+#include "UnrealMcpMaterialInstanceTools.h"
 #include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpScaffoldTools.h"
 #include "UnrealMcpSelfExtensionTools.h"
@@ -163,6 +164,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 	else if (Category == TEXT("widget"))
 	{
 		if (UnrealMcp::TryExecuteWidgetTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("material"))
+	{
+		if (UnrealMcp::TryExecuteMaterialInstanceTool(ToolName, Arguments, CategoryResult))
 		{
 			return CategoryResult;
 		}

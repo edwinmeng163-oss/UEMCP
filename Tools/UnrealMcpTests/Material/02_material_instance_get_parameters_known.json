@@ -1,0 +1,24 @@
+{
+  "name": "material_instance_get_parameters_known",
+  "description": "List-only fixture for reading known scalar/vector/texture/static switch parameter arrays from a pre-staged Material Instance.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "precondition": "Create /Game/__UEvolveMcpTest/Materials/MI_ParameterSmoke with at least one scalar and one vector parameter.",
+    "postcheck": "Returned structuredContent includes scalarParameters and vectorParameters arrays with parameter names and fromParent flags."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 502,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.material_instance_get_parameters",
+      "arguments": {
+        "materialInstancePath": "/Game/__UEvolveMcpTest/Materials/MI_ParameterSmoke",
+        "includeInherited": true
+      }
+    }
+  }
+}

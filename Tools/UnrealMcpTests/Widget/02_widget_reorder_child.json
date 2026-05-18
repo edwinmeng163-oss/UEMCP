@@ -1,0 +1,21 @@
+{
+  "name": "widget_reorder_child",
+  "description": "List-only smoke for moving a widget to a new sibling index inside a pre-staged Widget Blueprint panel.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 402,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.widget_reorder_child",
+      "arguments": {
+        "widgetBlueprintPath": "/Game/__UEvolveMcpTest/Widget/WBP_McpSmoke",
+        "widgetName": "DebugText",
+        "newIndex": 0
+      }
+    }
+  }
+}

@@ -29,6 +29,7 @@ KNOWN_CATEGORIES = {
     "actors",
     "blueprint",
     "editor",
+    "material",
     "memory",
     "scaffold",
     "self-extension",

@@ -1,0 +1,25 @@
+{
+  "name": "widget_delete_force_false_refuses_with_bindings",
+  "description": "List-only negative fixture for refusing to delete a widget with bindings when force=false.",
+  "category": "negative_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": true,
+  "expectedContract": {
+    "precondition": "Create /Game/__UEvolveMcpTest/Widget/WBP_BindingSmoke with BoundButton and at least one binding or bound event.",
+    "postcheck": "Tool returns success=false with a warning and does not remove BoundButton."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 404,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.widget_delete",
+      "arguments": {
+        "widgetBlueprintPath": "/Game/__UEvolveMcpTest/Widget/WBP_BindingSmoke",
+        "widgetName": "BoundButton",
+        "force": false
+      }
+    }
+  }
+}

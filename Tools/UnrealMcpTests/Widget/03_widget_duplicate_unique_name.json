@@ -1,0 +1,27 @@
+{
+  "name": "widget_duplicate_unique_name",
+  "description": "List-only fixture for duplicating a widget with a requested name collision; C++ automation covers unique-name generation and binding-preservation helper behavior.",
+  "category": "binding_preservation",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectationNote": "Deep binding survival after duplicate requires a pre-staged Widget Blueprint with delegate bindings; C++ automation covers collision-safe names and the required contract is recorded here.",
+  "expectedContract": {
+    "precondition": "Create /Game/__UEvolveMcpTest/Widget/WBP_BindingSmoke with BoundButton and an OnClicked binding.",
+    "postcheck": "Call unreal.widget_dump_tree after duplicate and verify the original BoundButton binding still resolves."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 403,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.widget_duplicate",
+      "arguments": {
+        "widgetBlueprintPath": "/Game/__UEvolveMcpTest/Widget/WBP_BindingSmoke",
+        "sourceName": "BoundButton",
+        "newName": "BoundButton",
+        "includeSubtree": true
+      }
+    }
+  }
+}

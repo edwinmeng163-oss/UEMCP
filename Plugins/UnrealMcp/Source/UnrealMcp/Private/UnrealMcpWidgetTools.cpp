@@ -1,6 +1,7 @@
 #include "UnrealMcpWidgetTools.h"
 
 #include "UnrealMcpModule.h"
+#include "UnrealMcpWidgetEditTools.h"
 
 #include "Blueprint/UserWidget.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -1742,6 +1743,11 @@ namespace UnrealMcp
 
 	bool TryExecuteWidgetTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
 	{
+		if (TryExecuteWidgetEditTool(ToolName, Arguments, OutResult))
+		{
+			return true;
+		}
+
 		if (ToolName == TEXT("unreal.widget_dump_tree"))
 		{
 			OutResult = WidgetDumpTreeTool(Arguments);
