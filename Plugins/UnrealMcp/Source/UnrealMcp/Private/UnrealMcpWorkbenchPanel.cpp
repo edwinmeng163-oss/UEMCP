@@ -3,6 +3,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/Paths.h"
 #include "Policies/PrettyJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
@@ -65,6 +66,17 @@ namespace UnrealMcpWorkbench
 			: Fallback;
 	}
 
+	int32 NumberFieldToInt(const TSharedPtr<FJsonObject>& Object, const FString& FieldName, int32 Fallback = 0)
+	{
+		if (!Object.IsValid())
+		{
+			return Fallback;
+		}
+
+		double Value = 0.0;
+		return Object->TryGetNumberField(FieldName, Value) ? static_cast<int32>(Value) : Fallback;
+	}
+
 	FString StringFieldOrFallback(const TSharedPtr<FJsonObject>& Object, const FString& FieldName, const FString& Fallback = TEXT("-"))
 	{
 		if (!Object.IsValid())
@@ -94,6 +106,47 @@ namespace UnrealMcpWorkbench
 			return Text;
 		}
 		return Text.Left(MaxChars) + TEXT("\n... truncated ...");
+	}
+
+	FString NormalizeSeverity(const FString& Severity)
+	{
+		return Severity.TrimStartAndEnd().ToLower();
+	}
+
+	FLinearColor SeverityColor(const FString& Severity)
+	{
+		const FString NormalizedSeverity = NormalizeSeverity(Severity);
+		if (NormalizedSeverity == TEXT("pass"))
+		{
+			return FLinearColor(0.30f, 0.70f, 0.30f, 1.0f);
+		}
+		if (NormalizedSeverity == TEXT("warning"))
+		{
+			return FLinearColor(0.95f, 0.65f, 0.10f, 1.0f);
+		}
+		if (NormalizedSeverity == TEXT("error"))
+		{
+			return FLinearColor(0.85f, 0.25f, 0.25f, 1.0f);
+		}
+		return FLinearColor(0.36f, 0.36f, 0.36f, 1.0f);
+	}
+
+	FString TopLevelSeverityLabel(const FString& Severity)
+	{
+		const FString NormalizedSeverity = NormalizeSeverity(Severity);
+		if (NormalizedSeverity == TEXT("pass"))
+		{
+			return TEXT("OK");
+		}
+		if (NormalizedSeverity == TEXT("warning"))
+		{
+			return TEXT("Warning");
+		}
+		if (NormalizedSeverity == TEXT("error"))
+		{
+			return TEXT("Error");
+		}
+		return TEXT("Unknown");
 	}
 
 	bool HasImmediateJsonFiles(const FString& Directory)
@@ -332,6 +385,129 @@ void SUnrealMcpWorkbenchPanel::Construct(const FArguments& InArgs, FUnrealMcpMod
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
+			.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(10.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("InstallDoctorTitle", "Install Doctor"))
+						.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("InstallDoctorStatusLabel", "Status:"))
+							.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 14.0f, 0.0f)
+						[
+							SAssignNew(StatusBadgeBorder, SBorder)
+							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+							.BorderBackgroundColor(FSlateColor(FLinearColor(0.36f, 0.36f, 0.36f, 1.0f)))
+							.Padding(FMargin(8.0f, 2.0f))
+							[
+								SAssignNew(StatusBadgeText, STextBlock)
+								.Text(LOCTEXT("InstallDoctorStatusPending", "Pending"))
+								.ColorAndOpacity(FSlateColor(FLinearColor::White))
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("InstallDoctorLastRunLabel", "Last run:"))
+							.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 14.0f, 0.0f)
+						[
+							SAssignNew(LastRunValueText, STextBlock)
+							.Text(FText::FromString(TEXT("-")))
+						]
+						+ SHorizontalBox::Slot()
+						.FillWidth(1.0f)
+						.VAlign(VAlign_Center)
+						[
+							SNew(STextBlock)
+							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+							.Text_Lambda([this]()
+							{
+								return FText::FromString(FString::Printf(
+									TEXT("(validator %s)"),
+									LatestInstallDoctorValidatorVersion.IsEmpty() ? TEXT("-") : *LatestInstallDoctorValidatorVersion));
+							})
+						]
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SAssignNew(IssueCountSummaryText, STextBlock)
+						.AutoWrapText(true)
+						.Text(LOCTEXT("InstallDoctorPendingSummary", "Install doctor has not run yet - click Re-run to scan."))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SNew(SBox)
+						.MaxDesiredHeight(200.0f)
+						[
+							SAssignNew(ChecksScrollBox, SScrollBox)
+							+ SScrollBox::Slot()
+							[
+								SNew(STextBlock)
+								.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+								.Text(LOCTEXT("InstallDoctorNoChecksYet", "(no checks yet)"))
+							]
+						]
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("InstallDoctorRefresh", "Re-run install doctor"))
+							.OnClicked(this, &SUnrealMcpWorkbenchPanel::OnRefreshInstallDoctor)
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("InstallDoctorOpenLatest", "Open latest.json folder"))
+							.OnClicked(this, &SUnrealMcpWorkbenchPanel::OnOpenInstallDoctorLatestFolder)
+						]
+					]
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			.Padding(0.0f, 10.0f, 0.0f, 6.0f)
 			[
 				MakeMetricRow(LOCTEXT("LastActionLabel", "Last action"), SAssignNew(LastActionValueText, STextBlock).Text(LOCTEXT("None", "None")))
@@ -493,6 +669,28 @@ FReply SUnrealMcpWorkbenchPanel::HandleCopyResultClicked()
 	return FReply::Handled();
 }
 
+FReply SUnrealMcpWorkbenchPanel::OnRefreshInstallDoctor()
+{
+	TSharedPtr<FJsonObject> Arguments = UnrealMcpWorkbench::MakeEmptyObject();
+	Arguments->SetBoolField(TEXT("includeDetails"), true);
+	Arguments->SetBoolField(TEXT("refresh"), true);
+	RunToolAndDisplay(TEXT("unreal.install_doctor"), Arguments);
+	return HandleRefreshClicked();
+}
+
+FReply SUnrealMcpWorkbenchPanel::OnOpenInstallDoctorLatestFolder()
+{
+	if (!LatestInstallDoctorPath.IsEmpty())
+	{
+		const FString FolderPath = FPaths::GetPath(LatestInstallDoctorPath);
+		if (!FolderPath.IsEmpty())
+		{
+			FPlatformProcess::ExploreFolder(*FolderPath);
+		}
+	}
+	return FReply::Handled();
+}
+
 void SUnrealMcpWorkbenchPanel::RunToolAndDisplay(const FString& ToolName, const TSharedPtr<FJsonObject>& Arguments)
 {
 	if (!OwnerModule)
@@ -547,6 +745,158 @@ void SUnrealMcpWorkbenchPanel::UpdateWorkbenchSummary(const TSharedPtr<FJsonObje
 	if (NextStepValueText.IsValid())
 	{
 		NextStepValueText->SetText(FText::FromString(UnrealMcpWorkbench::StringFieldOrFallback(StructuredContent, TEXT("recommendedNextStep"))));
+	}
+
+	UpdateInstallDoctorCard(StructuredContent);
+}
+
+void SUnrealMcpWorkbenchPanel::UpdateInstallDoctorCard(const TSharedPtr<FJsonObject>& StructuredContent)
+{
+	LatestInstallDoctorPath.Reset();
+	LatestInstallDoctorValidatorVersion.Reset();
+
+	bool bInstallDoctorFound = false;
+	if (StructuredContent.IsValid())
+	{
+		StructuredContent->TryGetBoolField(TEXT("installDoctorFound"), bInstallDoctorFound);
+		StructuredContent->TryGetStringField(TEXT("installDoctorLatestPath"), LatestInstallDoctorPath);
+	}
+
+	const TSharedPtr<FJsonObject> InstallDoctorSummary = UnrealMcpWorkbench::ObjectFieldOrNull(StructuredContent, TEXT("installDoctorSummary"));
+	const bool bHasInstallDoctorSummary = bInstallDoctorFound && InstallDoctorSummary.IsValid();
+
+	if (!bHasInstallDoctorSummary)
+	{
+		if (StatusBadgeBorder.IsValid())
+		{
+			StatusBadgeBorder->SetBorderBackgroundColor(FSlateColor(UnrealMcpWorkbench::SeverityColor(TEXT("unknown"))));
+		}
+		if (StatusBadgeText.IsValid())
+		{
+			StatusBadgeText->SetText(LOCTEXT("InstallDoctorPendingStatus", "Pending"));
+		}
+		if (LastRunValueText.IsValid())
+		{
+			LastRunValueText->SetText(FText::FromString(TEXT("-")));
+		}
+		if (IssueCountSummaryText.IsValid())
+		{
+			IssueCountSummaryText->SetText(LOCTEXT("InstallDoctorPendingMessage", "Install doctor has not run yet - click Re-run to scan."));
+		}
+		if (ChecksScrollBox.IsValid())
+		{
+			ChecksScrollBox->ClearChildren();
+			ChecksScrollBox->AddSlot()
+			[
+				SNew(STextBlock)
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Text(LOCTEXT("InstallDoctorNoChecksPlaceholder", "(no checks yet)"))
+			];
+		}
+		return;
+	}
+
+	FString OverallSeverity = UnrealMcpWorkbench::StringFieldOrFallback(InstallDoctorSummary, TEXT("overallSeverity"), TEXT("unknown"));
+	LatestInstallDoctorValidatorVersion = UnrealMcpWorkbench::StringFieldOrFallback(InstallDoctorSummary, TEXT("validatorVersion"), TEXT(""));
+
+	if (StatusBadgeBorder.IsValid())
+	{
+		StatusBadgeBorder->SetBorderBackgroundColor(FSlateColor(UnrealMcpWorkbench::SeverityColor(OverallSeverity)));
+	}
+	if (StatusBadgeText.IsValid())
+	{
+		StatusBadgeText->SetText(FText::FromString(UnrealMcpWorkbench::TopLevelSeverityLabel(OverallSeverity)));
+	}
+	if (LastRunValueText.IsValid())
+	{
+		LastRunValueText->SetText(FText::FromString(UnrealMcpWorkbench::StringFieldOrFallback(InstallDoctorSummary, TEXT("lastRunUtc"), TEXT("-"))));
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Checks = nullptr;
+	InstallDoctorSummary->TryGetArrayField(TEXT("checks"), Checks);
+	const int32 TotalChecks = Checks ? Checks->Num() : 0;
+	const int32 BlockingIssueCount = UnrealMcpWorkbench::NumberFieldToInt(InstallDoctorSummary, TEXT("blockingIssueCount"));
+	const int32 WarningCount = UnrealMcpWorkbench::NumberFieldToInt(InstallDoctorSummary, TEXT("warningCount"));
+	const int32 PassCount = FMath::Max(0, TotalChecks - BlockingIssueCount - WarningCount);
+
+	if (IssueCountSummaryText.IsValid())
+	{
+		IssueCountSummaryText->SetText(FText::FromString(FString::Printf(
+			TEXT("%d blocking | %d warnings | %d passes"),
+			BlockingIssueCount,
+			WarningCount,
+			PassCount)));
+	}
+
+	if (!ChecksScrollBox.IsValid())
+	{
+		return;
+	}
+
+	ChecksScrollBox->ClearChildren();
+	if (!Checks || Checks->Num() == 0)
+	{
+		ChecksScrollBox->AddSlot()
+		[
+			SNew(STextBlock)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.Text(LOCTEXT("InstallDoctorNoChecksInSummary", "(no checks yet)"))
+		];
+		return;
+	}
+
+	for (const TSharedPtr<FJsonValue>& CheckValue : *Checks)
+	{
+		const TSharedPtr<FJsonObject> CheckObject = CheckValue.IsValid() ? CheckValue->AsObject() : nullptr;
+		if (!CheckObject.IsValid())
+		{
+			continue;
+		}
+
+		const FString CheckId = UnrealMcpWorkbench::StringFieldOrFallback(CheckObject, TEXT("id"), TEXT("(unknown)"));
+		const FString CheckSeverity = UnrealMcpWorkbench::StringFieldOrFallback(CheckObject, TEXT("severity"), TEXT("unknown"));
+		const FString CheckSummary = UnrealMcpWorkbench::StringFieldOrFallback(CheckObject, TEXT("summary"), TEXT("-"));
+
+		ChecksScrollBox->AddSlot()
+		.Padding(0.0f, 2.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FSlateColor(UnrealMcpWorkbench::SeverityColor(CheckSeverity)))
+				.Padding(FMargin(6.0f, 1.0f))
+				[
+					SNew(STextBlock)
+					.MinDesiredWidth(54.0f)
+					.Justification(ETextJustify::Center)
+					.ColorAndOpacity(FSlateColor(FLinearColor::White))
+					.Text(FText::FromString(UnrealMcpWorkbench::NormalizeSeverity(CheckSeverity)))
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 10.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.MinDesiredWidth(190.0f)
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.Text(FText::FromString(CheckId))
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(false)
+				.Text(FText::FromString(CheckSummary))
+			]
+		];
 	}
 }
 
