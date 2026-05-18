@@ -103,51 +103,6 @@ function Resolve-ScaffoldSource {
     Die "Missing scaffold: neither $working nor $starter exists"
 }
 
-# Create a portable zip with forward-slash entry paths. PowerShell's
-# Compress-Archive uses backslashes on Windows, producing zips that look
-# empty to Unix/Mac tools (and to verify_package_integrity.py on those
-# platforms). This helper writes entries directly via System.IO.Compression
-# with normalized paths so the same zip works cross-platform.
-function New-PortableZip {
-    param([string]$SourceDir, [string]$DestZip, [string[]]$ExcludeRelativePaths = @())
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    if (Test-Path -LiteralPath $DestZip) {
-        Remove-Item -LiteralPath $DestZip -Force
-    }
-    $resolvedSource = (Resolve-Path -LiteralPath $SourceDir).Path
-    $sourceLen = $resolvedSource.Length
-    if (-not $resolvedSource.EndsWith([IO.Path]::DirectorySeparatorChar)) {
-        $sourceLen += 1
-    }
-    $zip = [System.IO.Compression.ZipFile]::Open($DestZip, [System.IO.Compression.ZipArchiveMode]::Create)
-    try {
-        Get-ChildItem -LiteralPath $resolvedSource -Recurse -File | ForEach-Object {
-            $relativeRaw = $_.FullName.Substring($sourceLen)
-            $relative = $relativeRaw.Replace([IO.Path]::DirectorySeparatorChar, '/').Replace('\', '/')
-            $skip = $false
-            foreach ($pattern in $ExcludeRelativePaths) {
-                if ($relative -like $pattern) { $skip = $true; break }
-            }
-            if ($skip) { return }
-            $entry = $zip.CreateEntry($relative, [System.IO.Compression.CompressionLevel]::Optimal)
-            $entryStream = $entry.Open()
-            try {
-                $fileStream = [System.IO.File]::OpenRead($_.FullName)
-                try {
-                    $fileStream.CopyTo($entryStream)
-                } finally {
-                    $fileStream.Dispose()
-                }
-            } finally {
-                $entryStream.Dispose()
-            }
-        }
-    } finally {
-        $zip.Dispose()
-    }
-}
-
 function Assert-RequiredDirectory {
     param([string]$Path, [string]$Message)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
@@ -521,11 +476,11 @@ try {
     $shaPath = "$zipPath.sha256"
 
     Remove-Item -LiteralPath $zipPath, $shaPath -Force -ErrorAction SilentlyContinue
-    # Compress-Archive on Windows PowerShell 5.1 uses backslash entry paths,
-    # producing zips that look empty to Mac/Linux tools and to the cross-
-    # platform package verifier. Use New-PortableZip to emit forward-slash
-    # entries regardless of host OS / PowerShell version.
-    New-PortableZip -SourceDir $stageParent -DestZip $zipPath
+    if ($FullExperience) {
+        Compress-Archive -Path (Join-Path $stageParent "*") -DestinationPath $zipPath -CompressionLevel Optimal
+    } else {
+        Compress-Archive -Path (Join-Path $stageParent "*") -DestinationPath $zipPath -CompressionLevel Optimal
+    }
 
     # The sidecar uses the same two-space format produced by shasum.
     $shaValue = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()

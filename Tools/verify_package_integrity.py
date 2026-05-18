@@ -123,13 +123,42 @@ def sha256_file(path: Path) -> str:
 
 
 def safe_extract_zip(zip_path: Path, destination: Path) -> None:
+    """Extract zip with path-separator normalization.
+
+    Zips produced by PowerShell's Compress-Archive on Windows use backslash
+    entry names. The Python zipfile module on macOS/Linux treats those as
+    literal characters in filenames rather than path separators, so a member
+    named "Docs\\FIRST_LAUNCH.md" extracts as a single file with that literal
+    name instead of a Docs/ directory with FIRST_LAUNCH.md inside.
+
+    The Zip specification (APPNOTE.TXT 4.4.17.1) requires forward slashes,
+    but Windows tools tolerate backslashes for reading and emit them on
+    write. To accept both, we rewrite each member's filename to use forward
+    slashes before extraction.
+    """
     destination_resolved = destination.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
         for member in archive.infolist():
-            target = (destination / member.filename).resolve()
+            normalized = member.filename.replace("\\", "/")
+            target = (destination / normalized).resolve()
             if target != destination_resolved and destination_resolved not in target.parents:
-                raise ValueError("Zip member escapes extraction root: %s" % member.filename)
-        archive.extractall(destination)
+                raise ValueError("Zip member escapes extraction root: %s" % normalized)
+            # Manual extraction with the normalized name. archive.extractall()
+            # looks members up by their original (possibly backslash) key, so
+            # in-place renaming of member.filename does not redirect the write
+            # path. Writing each file directly is the only reliable way to
+            # honor the rewritten path.
+            if normalized.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, open(target, "wb") as dest:
+                while True:
+                    chunk = source.read(65536)
+                    if not chunk:
+                        break
+                    dest.write(chunk)
 
 
 def find_validation_root(extracted_root: Path) -> Path:

@@ -134,9 +134,9 @@ Zip size: ~1 MiB
 SHA-256: <hash>
 ```
 
-**Note** (fixed in v0.19.1+): On clean checkouts the script automatically falls back from `Tools\UnrealMcpToolScaffolds\<id>` (the developer working dir, gitignored) to `Tools\UnrealMcpToolScaffoldStarters\<id>` (the canonical committed copy). No manual staging copy needed. If you're packaging from a tag older than v0.19.1, see §5 "Pre-v0.19.1 scaffold fallback" for the workaround.
+**Note** (script fix landed after v0.19.1): On clean checkouts the script automatically falls back from `Tools\UnrealMcpToolScaffolds\<id>` (the developer working dir, gitignored) to `Tools\UnrealMcpToolScaffoldStarters\<id>` (the canonical committed copy). No manual staging copy needed. If you're packaging from `v0.19.1` exactly, see §5 "Scaffold path fallback" for the workaround.
 
-**Note** (fixed in v0.19.1+): The packager now emits zip entries with forward-slash paths. Older zips produced with `Compress-Archive` had backslash entries that looked empty to Mac/Linux tools and to `verify_package_integrity.py` on those platforms — see §5 "Pre-v0.19.1 path separator" if you see a verifier-PASS-on-Win but ERROR-on-Mac mismatch.
+**Path separators**: The Win zip is produced by PowerShell's `Compress-Archive`, which uses `\` (backslash) entry paths. This is fine on Windows — Windows zip tools, Unreal's `IPlatformFile` extraction, `Expand-Archive`, and 7-Zip all handle it. PM's Mac-side `verify_package_integrity.py` now normalizes `\` → `/` during extraction so the same zip verifies cleanly cross-platform without needing to repackage. **Do not rewrite the zip to forward slashes** — the Win-tested artifact is the canonical Win release.
 
 #### Flavor B: full-experience (with prebuilt Win64 binaries)
 
@@ -255,9 +255,9 @@ git checkout main
 
 ## 5. Common pitfalls
 
-### Pre-v0.19.1 scaffold fallback (no longer needed at v0.19.1+)
+### Scaffold path fallback (needed for v0.19.1 and older)
 
-If you are packaging a tag older than `v0.19.1` and hit:
+If you're packaging exactly `v0.19.1` (or any earlier tag) and hit:
 
 ```
 Error: Missing directory: <repo>\Tools\UnrealMcpToolScaffolds\fps_bootstrap
@@ -273,20 +273,7 @@ Copy-Item Tools\UnrealMcpToolScaffoldStarters\verify_input_drives_pawn Tools\Unr
 
 After packaging, remove `Tools\UnrealMcpToolScaffolds` to keep the worktree clean.
 
-### Pre-v0.19.1 path separator (no longer needed at v0.19.1+)
-
-If `verify_package_integrity.py` PASSes on Windows but reports missing files on Mac/Linux for a zip you built from an older tag, the zip likely has backslash entry names from `Compress-Archive`. Rebuild from v0.19.1+ which uses `New-PortableZip`, or rewrite the zip with forward slashes:
-
-```python
-import zipfile, os
-src = "input.zip"; dst = "fixed.zip"
-with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
-    for e in zin.infolist():
-        data = zin.read(e.filename)
-        i = zipfile.ZipInfo(e.filename.replace("\\", "/"))
-        i.date_time = e.date_time
-        zout.writestr(i, data)
-```
+The script-side fallback landed on `main` after v0.19.1, so all future tags packaged from `main` won't need this step.
 
 
 
