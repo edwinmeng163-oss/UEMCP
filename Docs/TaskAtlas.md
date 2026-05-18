@@ -1,7 +1,7 @@
 # Task Atlas
 
-Task Atlas is the v0.17 foundation for turning local ActivityLog evidence into
-reviewable workflow records. It is local-first: runtime task files live under
+Task Atlas turns local ActivityLog evidence into reviewable workflow records
+and promotion sources. It is local-first: runtime task files live under
 `Saved/UnrealMcp/Tasks/` and are not committed.
 
 ## Functional In v0.17
@@ -17,7 +17,25 @@ reviewable workflow records. It is local-first: runtime task files live under
 - The Chat panel opens a Task Atlas window and can show `Success` / `Fail`
   rating buttons on final assistant responses.
 - `STaskAtlasWindow` shows workflows, unused tools, live search, tool details,
-  functional pinning, and visible placeholders for future promote actions.
+  functional pinning, and visible promote buttons.
+
+## Functional In v0.18
+
+- `To Skills` is row-specific and calls
+  `unreal.skill_distill_from_activity` for the selected workflow with its
+  `sessionId`, a deterministic slug derived from the task label, the task
+  label as title, the user intent as goal when available, and draft-writing
+  options enabled.
+- `To RAG` is row-specific and writes one markdown source file under
+  `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/<taskId>.md`, including task
+  metadata, user intent, AI summary, critical path tools, and compact event
+  refs, then calls `unreal.knowledge_index_refresh` with default arguments.
+  **v0.18 known limitation**: `knowledge_index_refresh` currently scans
+  `documents.jsonl` manifest files, not arbitrary `*.md` under the source
+  root. The Task Atlas `.md` is written reliably but is not yet picked up by
+  the RAG index. The indexing extension lands in v0.19 alongside the
+  Make Tool integration.
+- `Make Tool` remains a visible v0.19 placeholder.
 
 ## Frozen ActivityLog Events
 
@@ -86,9 +104,10 @@ Malformed, older, or non-object JSONL records are skipped defensively.
 v0.17 ships extraction, listing, details, rating, pinning, Chat hooks, and the
 Task Atlas window.
 
-v0.18 is reserved for real `To Skills` and `To RAG` promotion behavior.
+v0.18 ships real `To Skills` and `To RAG` promotion behavior in the Task Atlas
+window.
 
 v0.19 is reserved for real `Make Tool` behavior and LLM retrospective labeling.
 
-In v0.17, the `To Skills`, `To RAG`, and `Make Tool` buttons are visible
-placeholders only and show `Coming in v0.18` or `Coming in v0.19`.
+In v0.18, the `Make Tool` button is still a visible placeholder and shows
+`Coming in v0.19`.

@@ -375,8 +375,9 @@ Task Atlas:
 - annotate ActivityLog with `user_intent` and `ai_summary`
 - extract local task JSON files under `Saved/UnrealMcp/Tasks`
 - list/describe/rate/pin tasks with preserved local choices
-- view workflows, unused tools, search, tool details, and v0.18/v0.19
-  placeholder actions in the Chat-launched Task Atlas window
+- view workflows, unused tools, search, tool details, To Skills / To RAG
+  promote actions, and the v0.19 Make Tool placeholder in the Chat-launched
+  Task Atlas window
 
 ## Tool Registry Status
 
@@ -440,8 +441,9 @@ handoff text lagged at 119 entries.
 
 Current project status: v0.17 Task Atlas foundation landed; ActivityLog
 annotations, local task JSON extraction/list/detail/rating/pinning, Chat rating
-hooks, and the Task Atlas Slate window are in place. v0.18 Skills/RAG promote
-behavior and v0.19 Make Tool/LLM labeling remain placeholders only. v0.16 C2
+hooks, and the Task Atlas Slate window are in place. v0.18 Task Atlas
+promote actions now make To Skills and To RAG functional; v0.19 Make Tool/LLM
+labeling remain placeholders only. v0.16 C2
 landed; UMG parity now covers rename,
 reorder, duplicate, and guarded delete, and the first Material Instance surface
 now covers list, parameter inspection, scalar set, and vector set. v0.15 chunk

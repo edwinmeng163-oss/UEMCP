@@ -44,6 +44,8 @@ private:
 	void HandleSearchChanged(const FText& NewText);
 	FReply HandlePinClicked(FString TaskId, bool bNewPinned);
 	FReply HandleFutureActionClicked(FString Label);
+	FReply HandlePromoteToSkillsClicked(FWorkflowRow Row);
+	FReply HandlePromoteToRagClicked(FWorkflowRow Row);
 	FReply HandleToolClicked(FString ToolName);
 
 	void RefreshData();
