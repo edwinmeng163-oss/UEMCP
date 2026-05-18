@@ -111,12 +111,21 @@ If the task is about Windows compatibility / Win build / Win packaging / a "work
 
 ```text
 Docs/WindowsCompatibilityLessons.md
+Docs/WindowsPackaging.md
 Docs/Stage2WindowsVerify.md
 Tools/package_plugin.ps1
 Tools/UnrealMcpCodexBridge/start-bridge.ps1
 ```
 
-`WindowsCompatibilityLessons.md` indexes 20 hard-won failure modes from the issue #2 saga (commits 57ce634 / fe65d25 / 9fd70ac / e08a995 / 088d056 / 8917f99). Grep your symptom against it before re-deriving.
+`WindowsCompatibilityLessons.md` indexes 20 hard-won failure modes from the issue #2 saga (commits 57ce634 / fe65d25 / 9fd70ac / e08a995 / 088d056 / 8917f99). `WindowsPackaging.md` is the per-version Win zip workflow for collaborators. Grep your symptom against both before re-deriving.
+
+If the task is about build hygiene / packaging script issues / "build passes one way but breaks another":
+
+```text
+Docs/BuildAndPackagingPitfalls.md
+```
+
+This indexes 11 traps from the Task Atlas v0.17 → v0.19.1 program: unity-build symbol collisions, build target name traps, stale dylib shadow, cross-platform zip path separators, scaffold script gaps, codex-agent CLI hygiene, Hermes coordinator hygiene, end-to-end verification at boundaries, Codex spec deviation policy, and the "editor-load warnings are not build errors" rule. Read it before authoring a new chunk or shipping a release.
 
 If the task is about self-extension:
 

@@ -29,6 +29,23 @@
   schemas, run the validator yourself before reporting done.
 - Do NOT touch unrelated pre-existing untracked files (e.g. `Tools/git-hooks/post-*`
   artifacts from local hook installation). Leave them alone in `git status`.
+- **Unity-build hygiene** (v0.19.1 lesson, see `Docs/BuildAndPackagingPitfalls.md`):
+  the UnrealMcp module has `bUseUnity = false` because per-file anonymous
+  namespaces with same-named helpers (`GetTaskRoot`, `GetEditorAssetSubsystem`,
+  `MakeErrorObject`, `IsEditorPlaying`, ...) used to collide under UBT unity
+  build. Do NOT add new ODR violations:
+  - Cross-file helpers (`IsEditorPlaying`, `MakePieBlockedResult`,
+    `MakeExecutionResult`) are defined exactly once at `namespace UnrealMcp`
+    scope (typically in `UnrealMcpCoreHelpers.cpp`); every other file forward-
+    declares them at the same scope. Do NOT duplicate the definition inside
+    an anonymous namespace "for convenience".
+  - Per-file private helpers should either (a) use file-unique names with a
+    short prefix matching the .cpp filename, or (b) live in a properly named
+    sub-namespace, never an unprefixed anonymous one with a generic name like
+    `GetCacheRoot` that another file might also pick.
+  - Anonymous-namespace forward declarations do NOT bind to external-linkage
+    definitions in other files. Forward decls of cross-file helpers belong at
+    `namespace UnrealMcp` scope, never inside anonymous namespaces.
 
 ## Workflow expectations
 
