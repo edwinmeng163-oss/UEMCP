@@ -34,6 +34,7 @@ KNOWN_CATEGORIES = {
     "scaffold",
     "self-extension",
     "skills",
+    "task-atlas",
     "widget",
 }
 REQUIRED_FIELDS = {

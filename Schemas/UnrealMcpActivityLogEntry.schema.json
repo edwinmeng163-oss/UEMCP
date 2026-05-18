@@ -42,7 +42,11 @@
         "skill_draft_saved",
         "skill_draft_promoted",
         "mcp_tool_call",
-        "mcp_tool_result"
+        "mcp_tool_result",
+        "user_intent",
+        "ai_summary",
+        "task_rating",
+        "task_pin_change"
       ]
     },
     "taskLabel": {

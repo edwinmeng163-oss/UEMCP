@@ -38,6 +38,9 @@ struct FUnrealMcpChatEntry
 	FString ToolRiskLevel;
 	FString ToolCategory;
 	FString ToolSummary;
+	bool bCanRateTask = false;
+	FString TaskAtlasTaskId;
+	FString TaskAtlasRating;
 };
 
 struct FUnrealMcpSkillOption
@@ -72,6 +75,7 @@ private:
 	FReply HandleCopyChatClicked();
 	FReply HandleCopyToolLogClicked();
 	FReply HandleToolsOverviewClicked();
+	FReply HandleTaskAtlasClicked();
 	FReply HandleOpenAiSettingsClicked();
 	FReply HandleTestAiConnectionClicked();
 	FReply HandleRefreshSkillsClicked();
@@ -129,6 +133,10 @@ private:
 	FString BuildEntryCopyText(const FUnrealMcpChatEntry& Entry) const;
 	bool IsTranscriptNearBottom() const;
 	FReply HandleEntryCopyClicked(TSharedPtr<FUnrealMcpChatEntry> Entry);
+	FReply HandleRateTaskClicked(TSharedPtr<FUnrealMcpChatEntry> Entry, FString Rating);
+	void AnnotateTaskAtlasEvent(const FString& Kind, const FString& Content);
+	FString ResolveLatestTaskAtlasTaskId() const;
+	bool ShouldOfferTaskRating(const FString& AssistantText, bool bIsError, bool bWasCancelled) const;
 	void LoadHistory();
 	void SaveHistory() const;
 	void ResetHistory(bool bAddReadyMessage);

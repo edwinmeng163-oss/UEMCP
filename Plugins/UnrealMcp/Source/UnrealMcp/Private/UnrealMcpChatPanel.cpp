@@ -18,6 +18,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Styling/AppStyle.h"
+#include "STaskAtlasWindow.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpToolRegistry.h"
@@ -445,16 +446,16 @@ namespace UnrealMcpChat
 			return TEXT("...");
 		}
 
-		return Entry.bIsError ? TEXT("✗") : TEXT("✓");
+		return Entry.bIsError ? TEXT("[error]") : TEXT("ok");
 	}
 
 	FString BuildEntryTitleText(const FUnrealMcpChatEntry& Entry)
 	{
-		const FString ErrorPrefix = Entry.bIsError ? TEXT("⚠ ") : FString();
+		const FString ErrorPrefix = Entry.bIsError ? TEXT("[warn] ") : FString();
 		if (Entry.Type == EUnrealMcpChatEntryType::Tool)
 		{
 			const FString Status = Entry.bIsPending ? TEXT("running") : (Entry.bIsError ? TEXT("error") : TEXT("done"));
-			return FString::Printf(TEXT("%s%s Tool • %s (%s)"), *ErrorPrefix, *GetToolStatusIcon(Entry), *Entry.Title, *Status);
+			return FString::Printf(TEXT("%s%s Tool - %s (%s)"), *ErrorPrefix, *GetToolStatusIcon(Entry), *Entry.Title, *Status);
 		}
 
 		return ErrorPrefix + Entry.Speaker;
@@ -993,6 +994,13 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 					.Text(LOCTEXT("ToolsPreset", "Tools"))
 					.ToolTipText(LOCTEXT("ToolsPresetTooltip", "Show MCP tools grouped by self-extension, legacy, AI/CLI dynamic, and built-in tools."))
 					.OnClicked(this, &SUnrealMcpChatPanel::HandleToolsOverviewClicked)
+				]
+				+ SWrapBox::Slot()
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("TaskAtlasButton", "Task Atlas"))
+					.ToolTipText(LOCTEXT("TaskAtlasButtonTooltip", "Open the local Task Atlas workflow view."))
+					.OnClicked(this, &SUnrealMcpChatPanel::HandleTaskAtlasClicked)
 				]
 				+ SWrapBox::Slot()
 				[
@@ -1620,6 +1628,102 @@ FReply SUnrealMcpChatPanel::HandleEntryCopyClicked(TSharedPtr<FUnrealMcpChatEntr
 	return FReply::Handled();
 }
 
+FReply SUnrealMcpChatPanel::HandleRateTaskClicked(TSharedPtr<FUnrealMcpChatEntry> Entry, FString Rating)
+{
+	if (!OwnerModule || !Entry.IsValid())
+	{
+		return FReply::Handled();
+	}
+
+	FString TaskId = Entry->TaskAtlasTaskId.TrimStartAndEnd();
+	if (TaskId.IsEmpty())
+	{
+		TaskId = ResolveLatestTaskAtlasTaskId();
+	}
+	if (TaskId.IsEmpty())
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("No Task Atlas task could be resolved for this assistant message."), true);
+		return FReply::Handled();
+	}
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("taskId"), TaskId);
+	Arguments->SetStringField(TEXT("rating"), Rating);
+	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.task_rate"), *Arguments);
+	if (Result.bIsError)
+	{
+		AppendToolExecutionResult(TEXT("unreal.task_rate"), *Arguments, Result);
+		return FReply::Handled();
+	}
+
+	Entry->TaskAtlasTaskId = TaskId;
+	Entry->TaskAtlasRating = Rating;
+	InvalidateEntryWidgets();
+	SaveHistory();
+	return FReply::Handled();
+}
+
+void SUnrealMcpChatPanel::AnnotateTaskAtlasEvent(const FString& Kind, const FString& Content)
+{
+	if (!OwnerModule || Content.TrimStartAndEnd().IsEmpty())
+	{
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("kind"), Kind);
+	Arguments->SetStringField(TEXT("content"), Content.Left(8000));
+	OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.activity_log_annotate"), *Arguments);
+}
+
+FString SUnrealMcpChatPanel::ResolveLatestTaskAtlasTaskId() const
+{
+	if (!OwnerModule)
+	{
+		return FString();
+	}
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("filter"), TEXT("all"));
+	Arguments->SetNumberField(TEXT("limit"), 1.0);
+	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.task_list"), *Arguments);
+	if (Result.bIsError || !Result.StructuredContent.IsValid())
+	{
+		return FString();
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Tasks = nullptr;
+	if (!Result.StructuredContent->TryGetArrayField(TEXT("tasks"), Tasks) || !Tasks || Tasks->Num() == 0)
+	{
+		return FString();
+	}
+
+	const TSharedPtr<FJsonObject> Task = (*Tasks)[0].IsValid() ? (*Tasks)[0]->AsObject() : nullptr;
+	return UnrealMcpChat::GetJsonStringField(Task, TEXT("taskId"));
+}
+
+bool SUnrealMcpChatPanel::ShouldOfferTaskRating(const FString& AssistantText, bool bIsError, bool bWasCancelled) const
+{
+	if (bIsError || bWasCancelled)
+	{
+		return false;
+	}
+
+	const FString Text = AssistantText.TrimStartAndEnd().ToLower();
+	if (Text.IsEmpty())
+	{
+		return false;
+	}
+
+	return Text.Contains(TEXT("done"))
+		|| Text.Contains(TEXT("completed"))
+		|| Text.Contains(TEXT("finished"))
+		|| Text.Contains(TEXT("success"))
+		|| Text.Contains(TEXT("implemented"))
+		|| Text.Contains(TEXT("fixed"))
+		|| Text.Contains(TEXT("verified"));
+}
+
 FReply SUnrealMcpChatPanel::HandleToolsOverviewClicked()
 {
 	if (!OwnerModule)
@@ -1637,6 +1741,25 @@ FReply SUnrealMcpChatPanel::HandleToolsOverviewClicked()
 	}
 
 	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tools"), BuildToolsOverviewText(Result));
+	return FReply::Handled();
+}
+
+FReply SUnrealMcpChatPanel::HandleTaskAtlasClicked()
+{
+	if (!OwnerModule)
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		return FReply::Handled();
+	}
+
+	TSharedRef<SWindow> Window = SNew(SWindow)
+		.Title(LOCTEXT("TaskAtlasWindowTitle", "Task Atlas"))
+		.ClientSize(FVector2D(1100.0f, 720.0f))
+		.SupportsMaximize(true)
+		.SupportsMinimize(true);
+
+	Window->SetContent(SNew(STaskAtlasWindow, OwnerModule));
+	FSlateApplication::Get().AddWindow(Window);
 	return FReply::Handled();
 }
 
@@ -2954,6 +3077,7 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 		return;
 	}
 
+	AnnotateTaskAtlasEvent(TEXT("user_intent"), UserPrompt);
 	bAssistantRequestInFlight = true;
 	ActiveAssistantRequestStartTime = FDateTime::UtcNow();
 	ActiveAssistantEntry = AppendMessage(EUnrealMcpChatEntryType::Assistant, TEXT("Unreal MCP AI"), FString());
@@ -3084,6 +3208,12 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 					PinnedThis->MoveEntryToEnd(PinnedThis->ActiveAssistantEntry);
 				}
 
+				const FString FinalAssistantText = PinnedThis->ActiveAssistantEntry.IsValid() ? PinnedThis->ActiveAssistantEntry->Body : Result.Text;
+				if (!Result.bIsError && !Result.bWasCancelled && !FinalAssistantText.TrimStartAndEnd().IsEmpty())
+				{
+					PinnedThis->AnnotateTaskAtlasEvent(TEXT("ai_summary"), FinalAssistantText);
+				}
+
 				if (Result.bIsError && PinnedThis->ActiveAssistantEntry.IsValid() && PinnedThis->ActiveAssistantEntry->Body.IsEmpty())
 				{
 					PinnedThis->ActiveAssistantEntry->Body = Result.Text;
@@ -3095,6 +3225,13 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 				else if (Result.bIsError && (!PinnedThis->ActiveAssistantEntry.IsValid() || !PinnedThis->ActiveAssistantEntry->Body.Equals(Result.Text, ESearchCase::CaseSensitive)))
 				{
 					PinnedThis->AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), Result.Text, true);
+				}
+
+				if (PinnedThis->ActiveAssistantEntry.IsValid()
+					&& PinnedThis->ShouldOfferTaskRating(FinalAssistantText, Result.bIsError, Result.bWasCancelled))
+				{
+					PinnedThis->ActiveAssistantEntry->TaskAtlasTaskId = PinnedThis->ResolveLatestTaskAtlasTaskId();
+					PinnedThis->ActiveAssistantEntry->bCanRateTask = !PinnedThis->ActiveAssistantEntry->TaskAtlasTaskId.IsEmpty();
 				}
 
 				PinnedThis->ActiveAssistantEntry.Reset();
@@ -3295,7 +3432,7 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 									SNew(SButton)
 									.ContentPadding(FMargin(4.0f, 1.0f))
 									.ToolTipText(LOCTEXT("CopyEntryTooltip", "Copy this entry."))
-									.Text(LOCTEXT("CopyEntryIcon", "📋"))
+									.Text(LOCTEXT("CopyEntryIcon", "Copy"))
 									.OnClicked_Lambda([this, Entry]()
 									{
 										return HandleEntryCopyClicked(Entry);
@@ -3420,7 +3557,7 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 						SNew(SButton)
 						.ContentPadding(FMargin(4.0f, 1.0f))
 						.ToolTipText(LOCTEXT("CopyEntryTooltip", "Copy this entry."))
-						.Text(LOCTEXT("CopyEntryIcon", "📋"))
+						.Text(LOCTEXT("CopyEntryIcon", "Copy"))
 						.OnClicked_Lambda([this, Entry]()
 						{
 							return HandleEntryCopyClicked(Entry);
@@ -3473,6 +3610,56 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 								})),
 								FAppStyle::GetFontStyle("SmallFont"))
 						]
+					]
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+				[
+					SNew(SHorizontalBox)
+					.Visibility_Lambda([Entry]()
+					{
+						return Entry->Type == EUnrealMcpChatEntryType::Assistant && Entry->bCanRateTask && !Entry->bIsPending
+							? EVisibility::Visible
+							: EVisibility::Collapsed;
+					})
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("SmallFont"))
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						.Text_Lambda([Entry]()
+						{
+							return Entry->TaskAtlasRating.IsEmpty()
+								? FText::FromString(TEXT("Rate task"))
+								: FText::FromString(FString::Printf(TEXT("Rated: %s"), *Entry->TaskAtlasRating));
+						})
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.ContentPadding(FMargin(8.0f, 2.0f))
+						.Text(LOCTEXT("TaskRateSuccess", "Success"))
+						.OnClicked_Lambda([this, Entry]()
+						{
+							return HandleRateTaskClicked(Entry, TEXT("success"));
+						})
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.ContentPadding(FMargin(8.0f, 2.0f))
+						.Text(LOCTEXT("TaskRateFail", "Fail"))
+						.OnClicked_Lambda([this, Entry]()
+						{
+							return HandleRateTaskClicked(Entry, TEXT("failed"));
+						})
 					]
 				]
 			]
@@ -3532,7 +3719,7 @@ FText SUnrealMcpChatPanel::GetActiveRequestProgressText() const
 
 	// FUnrealMcpAssistantEvent and FUnrealMcpAssistantTurnResult do not expose token usage yet,
 	// so the v1 progress indicator reports elapsed wall-clock time only.
-	return FText::FromString(FString::Printf(TEXT("⏱ %ds"), ElapsedSeconds));
+	return FText::FromString(FString::Printf(TEXT("[time] %ds"), ElapsedSeconds));
 }
 
 bool SUnrealMcpChatPanel::IsTranscriptNearBottom() const
@@ -4140,6 +4327,9 @@ void SUnrealMcpChatPanel::LoadHistory()
 		const bool bLoadedToolRiskLevel = EntryObject->TryGetStringField(TEXT("tool_risk_level"), Entry->ToolRiskLevel);
 		const bool bLoadedToolCategory = EntryObject->TryGetStringField(TEXT("tool_category"), Entry->ToolCategory);
 		EntryObject->TryGetStringField(TEXT("tool_summary"), Entry->ToolSummary);
+		EntryObject->TryGetBoolField(TEXT("task_atlas_can_rate"), Entry->bCanRateTask);
+		EntryObject->TryGetStringField(TEXT("task_atlas_task_id"), Entry->TaskAtlasTaskId);
+		EntryObject->TryGetStringField(TEXT("task_atlas_rating"), Entry->TaskAtlasRating);
 		if (Entry->Type == EUnrealMcpChatEntryType::Tool
 			&& (!bLoadedToolRequiresWrite || !bLoadedToolRiskLevel || !bLoadedToolCategory))
 		{
@@ -4181,6 +4371,9 @@ void SUnrealMcpChatPanel::SaveHistory() const
 		EntryObject->SetStringField(TEXT("tool_risk_level"), Entry->ToolRiskLevel);
 		EntryObject->SetStringField(TEXT("tool_category"), Entry->ToolCategory);
 		EntryObject->SetStringField(TEXT("tool_summary"), Entry->ToolSummary);
+		EntryObject->SetBoolField(TEXT("task_atlas_can_rate"), Entry->bCanRateTask);
+		EntryObject->SetStringField(TEXT("task_atlas_task_id"), Entry->TaskAtlasTaskId);
+		EntryObject->SetStringField(TEXT("task_atlas_rating"), Entry->TaskAtlasRating);
 		EntriesArray.Add(MakeShared<FJsonValueObject>(EntryObject));
 	}
 

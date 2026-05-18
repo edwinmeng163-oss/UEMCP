@@ -104,6 +104,18 @@ namespace UnrealMcp
 			return MakeSchemaWithRequired(ColorProperties, TArray<FString>{ TEXT("r"), TEXT("g"), TEXT("b"), TEXT("a") });
 		}
 
+		TSharedPtr<FJsonObject> MakeEnumStringProperty(const FString& Description, const FString& DefaultValue, const TArray<FString>& Values)
+		{
+			TSharedPtr<FJsonObject> Property = MakeStringProperty(Description, DefaultValue);
+			TArray<TSharedPtr<FJsonValue>> EnumValues;
+			for (const FString& Value : Values)
+			{
+				EnumValues.Add(MakeShared<FJsonValueString>(Value));
+			}
+			Property->SetArrayField(TEXT("enum"), EnumValues);
+			return Property;
+		}
+
 		void RegisterEditorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -863,6 +875,110 @@ namespace UnrealMcp
 			Registrar.Add(Descriptor, Schema);
 		}
 
+		void RegisterTaskAtlasMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
+		{
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("kind"), MakeEnumStringProperty(TEXT("Activity annotation kind."), TEXT("user_intent"), TArray<FString>{ TEXT("user_intent"), TEXT("ai_summary") }));
+				Properties->SetObjectField(TEXT("content"), MakeStringProperty(TEXT("Annotation content to write into ActivityLog."), FString()));
+				Properties->SetObjectField(TEXT("sessionId"), MakeStringProperty(TEXT("Optional ActivityLog sessionId. Defaults to the current launch session."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.activity_log_annotate"),
+					TEXT("Annotate Activity Log"),
+					TEXT("Writes a user_intent or ai_summary ActivityLog event for Task Atlas extraction and refreshes local task JSON files."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpTaskAtlasTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.17 Task Atlas annotation tool for user intent and assistant completion summaries.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("kind"), TEXT("content") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("filter"), MakeEnumStringProperty(TEXT("Optional task filter."), TEXT("all"), TArray<FString>{ TEXT("all"), TEXT("success"), TEXT("failed"), TEXT("unrated"), TEXT("pinned") }));
+				Properties->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum tasks to return."), 50.0));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_list"),
+					TEXT("List Task Atlas Tasks"),
+					TEXT("Refreshes Task Atlas JSON files from ActivityLog and lists extracted tasks with rating, pin state, and critical path."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpTaskAtlasTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.17 Task Atlas read-only task listing with optional rating/pin filters.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("taskId"), MakeStringProperty(TEXT("Task Atlas taskId to describe."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_describe"),
+					TEXT("Describe Task Atlas Task"),
+					TEXT("Returns the full persisted Task Atlas JSON document plus task path/status fields for one taskId."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpTaskAtlasTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.17 Task Atlas read-only task detail lookup.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("taskId") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("taskId"), MakeStringProperty(TEXT("Task Atlas taskId to rate."), FString()));
+				Properties->SetObjectField(TEXT("rating"), MakeEnumStringProperty(TEXT("New task rating."), TEXT("unrated"), TArray<FString>{ TEXT("success"), TEXT("failed"), TEXT("unrated") }));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_rate"),
+					TEXT("Rate Task Atlas Task"),
+					TEXT("Persists a success, failed, or unrated rating for an existing Task Atlas task and appends a task_rating ActivityLog event."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpTaskAtlasTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.17 Task Atlas user rating tool with local JSON persistence.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("taskId"), TEXT("rating") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("taskId"), MakeStringProperty(TEXT("Task Atlas taskId to pin or unpin."), FString()));
+				Properties->SetObjectField(TEXT("pinned"), MakeBoolProperty(TEXT("Whether the task should be pinned."), true));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_pin"),
+					TEXT("Pin Task Atlas Task"),
+					TEXT("Persists a pinned state for an existing Task Atlas task and appends a task_pin_change ActivityLog event with a critical path snapshot."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpTaskAtlasTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.17 Task Atlas pinning tool for workflow curation.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("taskId"), TEXT("pinned") }));
+			}
+		}
+
 		void RegisterSelfExtensionMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -1370,6 +1486,7 @@ namespace UnrealMcp
 			RegisterMaterialInstanceMcpToolDescriptors(Registrar);
 			RegisterScaffoldMcpToolDescriptors(Registrar);
 			RegisterSkillSessionMcpToolDescriptors(Registrar);
+			RegisterTaskAtlasMcpToolDescriptors(Registrar);
 			RegisterSelfExtensionMcpToolDescriptors(Registrar);
 		}
 	}

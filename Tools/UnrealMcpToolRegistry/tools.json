@@ -4796,6 +4796,234 @@
       "docsPath": "README.md#tool-coverage",
       "reason": "v0.15 chunk 5 migration tool: reversible .uproject EngineAssociation edit between UE 5.6 and UE 5.7.",
       "notes": "PIE-blocked. Default dryRun=true. Does not cook, regenerate project files, run UnrealVersionSelector, or rebuild binaries."
+    },
+    {
+      "name": "unreal.activity_log_annotate",
+      "category": "task-atlas",
+      "handlerName": "unreal.activity_log_annotate",
+      "title": "Annotate Activity Log",
+      "description": "Writes a user_intent or ai_summary ActivityLog event for Task Atlas extraction and refreshes local task JSON files.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.17 Task Atlas annotation tool for user intent and assistant completion summaries.",
+      "summaryTemplate": "Annotated ActivityLog with {args.kind}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "content"
+        ],
+        "properties": {
+          "kind": { "type": "string", "enum": ["user_intent", "ai_summary"] },
+          "content": { "type": "string" },
+          "sessionId": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "success": { "type": "boolean" },
+          "eventKind": { "type": "string" },
+          "sessionId": { "type": "string" },
+          "taskRoot": { "type": "string" }
+        }
+      },
+      "notes": "v0.17 only writes frozen ActivityLog annotations and refreshes local Saved/UnrealMcp/Tasks JSON. It does not call an LLM."
+    },
+    {
+      "name": "unreal.task_list",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_list",
+      "title": "List Task Atlas Tasks",
+      "description": "Refreshes Task Atlas JSON files from ActivityLog and lists extracted tasks with rating, pin state, and critical path.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.17 Task Atlas read-only task listing with optional rating/pin filters.",
+      "summaryTemplate": "Listed Task Atlas tasks",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filter": { "type": "string", "enum": ["all", "success", "failed", "unrated", "pinned"], "default": "all" },
+          "limit": { "type": "number", "default": 50 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "success": { "type": "boolean" },
+          "count": { "type": "number" },
+          "totalCount": { "type": "number" },
+          "tasks": { "type": "array" }
+        }
+      },
+      "notes": "Read-only from MCP policy perspective, but it may refresh derived task JSON from ActivityLog while preserving rating and pin choices."
+    },
+    {
+      "name": "unreal.task_describe",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_describe",
+      "title": "Describe Task Atlas Task",
+      "description": "Returns the full persisted Task Atlas JSON document plus task path/status fields for one taskId.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.17 Task Atlas read-only task detail lookup.",
+      "summaryTemplate": "Described Task Atlas task {args.taskId}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "success": { "type": "boolean" },
+          "taskId": { "type": "string" },
+          "taskPath": { "type": "string" },
+          "task": { "type": "object" }
+        }
+      },
+      "notes": "Rejects unsafe taskId strings before resolving the Saved/UnrealMcp/Tasks JSON path."
+    },
+    {
+      "name": "unreal.task_rate",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_rate",
+      "title": "Rate Task Atlas Task",
+      "description": "Persists a success, failed, or unrated rating for an existing Task Atlas task and appends a task_rating ActivityLog event.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.17 Task Atlas user rating tool with local JSON persistence.",
+      "summaryTemplate": "Rated Task Atlas task {args.taskId} as {args.rating}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId",
+          "rating"
+        ],
+        "properties": {
+          "taskId": { "type": "string" },
+          "rating": { "type": "string", "enum": ["success", "failed", "unrated"] }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "success": { "type": "boolean" },
+          "taskId": { "type": "string" },
+          "rating": { "type": "string" },
+          "taskPath": { "type": "string" },
+          "errorKind": { "type": "string" }
+        }
+      },
+      "notes": "The rating event is a local audit annotation. It does not promote the task to skills or RAG."
+    },
+    {
+      "name": "unreal.task_pin",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_pin",
+      "title": "Pin Task Atlas Task",
+      "description": "Persists a pinned state for an existing Task Atlas task and appends a task_pin_change ActivityLog event with a critical path snapshot.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.17 Task Atlas pinning tool for workflow curation.",
+      "summaryTemplate": "Changed Task Atlas pin state for {args.taskId}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId",
+          "pinned"
+        ],
+        "properties": {
+          "taskId": { "type": "string" },
+          "pinned": { "type": "boolean" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "success": { "type": "boolean" },
+          "taskId": { "type": "string" },
+          "pinned": { "type": "boolean" },
+          "criticalPathSnapshot": { "type": "array", "items": { "type": "string" } },
+          "taskPath": { "type": "string" },
+          "errorKind": { "type": "string" }
+        }
+      },
+      "notes": "Pinning is functional in v0.17. To Skills, To RAG, and Make Tool remain UI placeholders."
     }
   ]
 }

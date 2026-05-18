@@ -1,0 +1,20 @@
+{
+  "name": "task_pin_wrong_type",
+  "description": "Task Atlas pin should reject non-boolean pinned values.",
+  "category": "wrong_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1705,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.task_pin",
+      "arguments": {
+        "taskId": "fixture-task",
+        "pinned": "true"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "task_rate_invalid_enum",
+  "description": "Task Atlas rate should reject ratings outside the frozen enum.",
+  "category": "invalid_enum",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1704,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.task_rate",
+      "arguments": {
+        "taskId": "fixture-task",
+        "rating": "maybe"
+      }
+    }
+  }
+}

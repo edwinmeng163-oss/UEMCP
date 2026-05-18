@@ -219,10 +219,12 @@ namespace UnrealMcp
 				TEXT("actors"),
 				TEXT("blueprint"),
 				TEXT("editor"),
+				TEXT("material"),
 				TEXT("memory"),
 				TEXT("scaffold"),
 				TEXT("self-extension"),
 				TEXT("skills"),
+				TEXT("task-atlas"),
 				TEXT("widget")
 			};
 			return KnownCategories.Contains(Category);

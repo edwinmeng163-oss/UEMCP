@@ -9,6 +9,7 @@
 #include "UnrealMcpActivityLog.h"
 #include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpSettings.h"
+#include "UnrealMcpToolRegistry.h"
 
 #include <atomic>
 
@@ -19,6 +20,7 @@ namespace UnrealMcp
 	bool IsOpenAiSchemaCompatibleObject(const TSharedPtr<FJsonObject>& InputObject, FString& OutReason);
 	bool LoadJsonObject(const FString& JsonText, TSharedPtr<FJsonObject>& OutObject);
 	TSharedPtr<FJsonObject> MakeEmptyObject();
+	TArray<TSharedPtr<FJsonValue>> MakeJsonStringArray(const TArray<FString>& Values);
 	FUnrealMcpExecutionResult MakeExecutionResult(const FString& Text, const TSharedPtr<FJsonObject>& StructuredContent, bool bIsError);
 	FString JsonObjectToString(const TSharedPtr<FJsonObject>& JsonObject);
 	FString GetJsonStringAtPath(const TSharedPtr<FJsonObject>& Object, std::initializer_list<const TCHAR*> PathSegments);
@@ -342,6 +344,38 @@ private:
 		{
 			RecentToolSummaries.RemoveAt(0);
 		}
+	}
+
+	void EmitToolCallActivityEvent(
+		const FAssistantToolCall& ToolCall,
+		const FJsonObject& Arguments,
+		const FUnrealMcpExecutionResult& ToolResult,
+		const FDateTime& ToolStartTimeUtc) const
+	{
+		TArray<FString> ArgumentKeys;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Arguments.Values)
+		{
+			ArgumentKeys.Add(Pair.Key);
+		}
+		ArgumentKeys.Sort();
+
+		const FString HandlerName = UnrealMcp::ResolveToolHandlerName(ToolCall.UnrealToolName);
+		const UnrealMcp::FToolPolicy ActivityPolicy = UnrealMcp::GetToolPolicy(ToolCall.UnrealToolName);
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("toolName"), ToolCall.UnrealToolName);
+		Payload->SetStringField(TEXT("handlerName"), HandlerName);
+		Payload->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
+		Payload->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
+		Payload->SetBoolField(TEXT("isError"), ToolResult.bIsError);
+		Payload->SetNumberField(TEXT("textLength"), ToolResult.Text.Len());
+		Payload->SetBoolField(TEXT("hasStructuredContent"), ToolResult.StructuredContent.IsValid());
+		Payload->SetNumberField(TEXT("durationMs"), FMath::Max(0.0, (FDateTime::UtcNow() - ToolStartTimeUtc).GetTotalMilliseconds()));
+
+		UnrealMcp::FActivityLogEvent Event;
+		Event.EventKind = TEXT("tool_call");
+		Event.Summary = FString::Printf(TEXT("Called MCP tool %s from Chat AI: %s."), *ToolCall.UnrealToolName, ToolResult.bIsError ? TEXT("failed") : TEXT("completed")).Left(2000);
+		Event.Payload = Payload;
+		UnrealMcp::WriteActivityEvent(Event);
 	}
 
 	void RememberActiveTask(const FString& Status, const FString& NextStep, const FString& Trigger)
@@ -1315,6 +1349,7 @@ private:
 		TArray<TSharedPtr<FJsonValue>> ToolOutputs;
 		for (const FAssistantToolCall& ToolCall : ToolCalls)
 		{
+			const FDateTime ToolStartTimeUtc = FDateTime::UtcNow();
 			if (bCancellationRequested.load(std::memory_order_relaxed))
 			{
 				Finish(TEXT("Generation stopped."), ResponseId, false, true);
@@ -1336,6 +1371,7 @@ private:
 			}
 
 			AddRecentToolSummary(ToolCall, ToolResult);
+			EmitToolCallActivityEvent(ToolCall, *ArgumentsObject, ToolResult, ToolStartTimeUtc);
 			++ToolCallCount;
 			if (ToolResult.bIsError)
 			{

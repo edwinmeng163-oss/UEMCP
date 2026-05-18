@@ -1,0 +1,20 @@
+{
+  "name": "activity_log_annotate_user_intent_valid",
+  "description": "Task Atlas annotation smoke test for a user intent event.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1701,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.activity_log_annotate",
+      "arguments": {
+        "kind": "user_intent",
+        "content": "Task Atlas fixture intent."
+      }
+    }
+  }
+}

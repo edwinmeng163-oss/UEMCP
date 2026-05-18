@@ -29,6 +29,7 @@ Editor UI entry points:
 ```text
 Window > Unreal MCP Chat
 Window > Unreal MCP Workbench
+Task Atlas button inside Unreal MCP Chat
 ```
 
 Current plugin metadata:
@@ -134,6 +135,14 @@ Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpKnowledgeTools.cpp
 Tools/UnrealMcpKnowledge/Evals/core_rag_eval.json
 ```
 
+If the task is about Task Atlas:
+
+```text
+Docs/TaskAtlas.md
+Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpTaskAtlasTools.cpp
+Plugins/UnrealMcp/Source/UnrealMcp/Private/STaskAtlasWindow.cpp
+```
+
 ## Documentation Freshness Rule
 
 After every meaningful project change, update the AI-facing docs before handoff:
@@ -173,6 +182,7 @@ Docs/
   SelfExtensionPipeline.md
   Stage2WindowsVerify.md
   Supervisor.md
+  TaskAtlas.md
   ToolNaming.md
   UnrealTaskRecipes.md
   WindowsCompatibilityLessons.md
@@ -360,6 +370,14 @@ Skills:
 - distill activity into skill drafts
 - save/promote skill drafts
 
+Task Atlas:
+
+- annotate ActivityLog with `user_intent` and `ai_summary`
+- extract local task JSON files under `Saved/UnrealMcp/Tasks`
+- list/describe/rate/pin tasks with preserved local choices
+- view workflows, unused tools, search, tool details, and v0.18/v0.19
+  placeholder actions in the Chat-launched Task Atlas window
+
 ## Tool Registry Status
 
 The explicit ToolRegistry is central. Do not bypass it.
@@ -383,7 +401,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 149 entries across:
+At the time this file was written, the registry contained 154 entries across:
 
 - actors
 - blueprint
@@ -393,6 +411,7 @@ At the time this file was written, the registry contained 149 entries across:
 - scaffold
 - self-extension
 - skills
+- task-atlas
 - widget
 
 This count includes the v0.14 Python runtime smoke tool, the three v0.15
@@ -414,10 +433,16 @@ v0.15 chunk 5 migration tools (`unreal.asset_move`,
 `unreal.widget_duplicate`, `unreal.widget_delete`,
 `unreal.material_instance_list`, `unreal.material_instance_get_parameters`,
 `unreal.material_instance_set_scalar`, and
-`unreal.material_instance_set_vector`). Earlier handoff text lagged at 119
-entries.
+`unreal.material_instance_set_vector`), and the five v0.17 Task Atlas
+foundation tools (`unreal.activity_log_annotate`, `unreal.task_list`,
+`unreal.task_describe`, `unreal.task_rate`, and `unreal.task_pin`). Earlier
+handoff text lagged at 119 entries.
 
-Current project status: v0.16 C2 landed; UMG parity now covers rename,
+Current project status: v0.17 Task Atlas foundation landed; ActivityLog
+annotations, local task JSON extraction/list/detail/rating/pinning, Chat rating
+hooks, and the Task Atlas Slate window are in place. v0.18 Skills/RAG promote
+behavior and v0.19 Make Tool/LLM labeling remain placeholders only. v0.16 C2
+landed; UMG parity now covers rename,
 reorder, duplicate, and guarded delete, and the first Material Instance surface
 now covers list, parameter inspection, scalar set, and vector set. v0.15 chunk
 5 landed; migration toolchain is complete
@@ -509,6 +534,9 @@ UnrealMcpSession.h
 UnrealMcpActivityLog.h
   always-on ActivityLog event writer
 
+UnrealMcpTaskAtlasTools.cpp/.h
+  ActivityLog annotation and local Task Atlas task extraction/list/detail/rate/pin tools
+
 UnrealMcpKnowledgeBridge.h
   shared bridge for knowledge-index card writes
 
@@ -521,12 +549,14 @@ UnrealMcpScaffoldTools.cpp
 UnrealMcpSelfExtension*.cpp
 UnrealMcpMemoryTools.cpp
 UnrealMcpSkillTools.cpp
+UnrealMcpTaskAtlasTools.cpp
 UnrealMcpKnowledgeTools.cpp
 UnrealMcpWorkflowTools.cpp
   category handlers
 
 UnrealMcpChatPanel.cpp/.h
 UnrealMcpWorkbenchPanel.cpp/.h
+STaskAtlasWindow.cpp/.h
 UnrealMcpEditorTabs.cpp
   Slate UI surfaces
 
@@ -732,10 +762,22 @@ Saved/UnrealMcp/ActivityLog/<sessionId>.jsonl
 `UnrealMcp::GetLaunchSessionId()` mints one per-launch session ID at editor
 startup, shaped `{YYYYMMDD-HHMMSS}-{guid8}`. The always-on writer rotates to
 `<sessionId>.<n>.jsonl` at 10 MB or 5000 entries. It emits `tool_call` for every
-MCP dispatch, `chat_turn` per assistant turn, `manifest_apply` /
+HTTP MCP dispatch and Chat AI tool call, `chat_turn` per assistant turn, `manifest_apply` /
 `manifest_dryrun` for self-extension events, plus existing skill events, all
-independent of skill recording. See `Docs/KnowledgeRagSources.md` for the full
-taxonomy.
+independent of skill recording. v0.17 Task Atlas also writes `user_intent`,
+`ai_summary`, `task_rating`, and `task_pin_change` events. See
+`Docs/KnowledgeRagSources.md` and `Docs/TaskAtlas.md` for the full taxonomy.
+
+Task Atlas runtime files live under:
+
+```text
+Saved/UnrealMcp/Tasks/<taskId>.json
+```
+
+Each task file uses `schemaVersion: 1`, stores the observed critical path,
+rating, pin state, compact event refs, user intent, and AI summary, and is
+rebuilt from ActivityLog by `unreal.task_list` while preserving rating/pin
+choices unless `unreal.task_rate` or `unreal.task_pin` explicitly changes them.
 
 Treat `Saved/UnrealMcp` as evidence for local continuity only, not as source of
 truth for versioned product behavior.

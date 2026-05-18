@@ -139,6 +139,11 @@ Editor action tools:
 - `unreal.skill_distill_from_activity`
 - `unreal.skill_save_draft`
 - `unreal.skill_promote_draft`
+- `unreal.activity_log_annotate`
+- `unreal.task_list`
+- `unreal.task_describe`
+- `unreal.task_rate`
+- `unreal.task_pin`
 - `unreal.save_dirty_packages`
 
 Legacy compatibility handlers:
@@ -256,6 +261,7 @@ Behavior notes:
 - `/reset_ai` clears the assistant's response chain so the next ask starts a fresh conversation.
 - `/stop_ai` or the `Stop` button cancels the current generation.
 - The assistant streams text deltas into the panel, renders tool calls as cards, sends tool results back to the model, and then posts the final answer.
+- Chat writes Task Atlas `user_intent` and `ai_summary` annotations for AI turns and can render `Success` / `Fail` task rating buttons on completion-like assistant messages.
 - If the model hits `max_output_tokens`, Unreal MCP automatically attempts a short continuation instead of immediately failing the turn.
 - Long AI turns now use configurable request and activity timeouts so tool-heavy or planning-heavy requests are less likely to fail at the transport layer.
 - Unreal MCP also synchronizes Unreal's global HTTP connection/activity timeouts for AI turns so macOS does not fall back to the engine's default 30-second connection timeout.
@@ -263,6 +269,7 @@ Behavior notes:
 - If an AI turn reaches the tool-round budget, the chat now pauses instead of hard-failing: it writes `chat.active_task`, gives a concrete next step, and avoids carrying forward a half-finished response chain.
 - The conversation history is persisted at `Saved/UnrealMcp/ChatHistory.json`.
 - High-level activity recording is opt-in and starts only after `unreal.skill_recording_start`; while active, it writes local JSONL events under `Saved/UnrealMcp/ActivityLog/*.jsonl`. It records mutating MCP tool call/result metadata and a periodic editor heartbeat roughly once per minute, skips read-only/status tools, and does not store tool result text previews.
+- Task Atlas extraction writes derived local task files under `Saved/UnrealMcp/Tasks/<taskId>.json`; these files are regenerated from ActivityLog and preserve rating/pin choices.
 - On the first AI turn after the panel reloads, Unreal MCP now also replays a small, compact slice of the persisted local transcript back to the model for continuity, so saved history is not just UI-only.
 - `Copy Chat` copies the full visible transcript, and `Copy Log` copies the most recent `/log` or `unreal.tail_log` output.
 - For AI-driven editing, prefer the fixed-schema wrapper tools such as `unreal.spawn_actor_basic`, `unreal.spawn_static_mesh_actor`, `unreal.batch_set_actor_scale`, `unreal.batch_set_actor_tags`, `unreal.batch_set_point_light_properties`, `unreal.batch_configure_static_mesh_actors`, the `unreal.bp_*` Blueprint graph editing tools, the `unreal.widget_*` UMG editing tools, and the `unreal.scaffold_*` gameplay scaffold tools.
@@ -277,6 +284,13 @@ Open the command chat window from:
 Open the thin self-extension console from:
 
 `Window > Unreal MCP Workbench`
+
+The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
+`Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
+tool details, functional pinning, and v0.18/v0.19 placeholder actions.
+The plugin registry currently contains 154 registered MCP tools across actors,
+blueprint, editor, material, memory, scaffold, self-extension, skills,
+task-atlas, and widget categories.
 
 The chat panel supports both direct slash commands and AI-assisted requests, and uses the same tool execution layer as the HTTP MCP server.
 

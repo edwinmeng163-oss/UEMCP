@@ -38,6 +38,9 @@ Local runtime sources:
 - `Saved/UnrealMcp/ProjectMemory.json`: active task, decisions, and pipeline
   state.
 - `Saved/UnrealMcp/ActivityLog/*.jsonl`: optional user-enabled activity records.
+- `Saved/UnrealMcp/Tasks/*.json`: Task Atlas workflow records derived from
+  ActivityLog. v0.17 keeps these local-only; `To RAG` promotion is a v0.18
+  placeholder.
 - `Saved/UnrealMcp/SkillDrafts/**`: unpromoted distilled skill drafts.
 - `Saved/UnrealMcp/TestScaffolds/**`: generated tests and scaffold artifacts.
 - `Saved/UnrealMcp/SupervisorLogs/**`: restart/build/test handoff evidence.

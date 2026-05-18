@@ -26,6 +26,10 @@ namespace UnrealMcp
 			{
 				return TEXT("UnrealMcpMemoryTools.cpp");
 			}
+			if (Category == TEXT("material"))
+			{
+				return TEXT("UnrealMcpMaterialInstanceTools.cpp");
+			}
 			if (Category == TEXT("scaffold"))
 			{
 				return TEXT("UnrealMcpScaffoldTools.cpp");
@@ -37,6 +41,10 @@ namespace UnrealMcp
 			if (Category == TEXT("skills"))
 			{
 				return TEXT("UnrealMcpSkillTools.cpp");
+			}
+			if (Category == TEXT("task-atlas"))
+			{
+				return TEXT("UnrealMcpTaskAtlasTools.cpp");
 			}
 			if (Category == TEXT("widget"))
 			{

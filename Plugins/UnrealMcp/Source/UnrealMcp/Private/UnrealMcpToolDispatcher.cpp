@@ -9,6 +9,7 @@
 #include "UnrealMcpScaffoldTools.h"
 #include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpSkillTools.h"
+#include "UnrealMcpTaskAtlasTools.h"
 #include "UnrealMcpToolExecutionGuard.h"
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistry.h"
@@ -221,6 +222,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 				[this](const FJsonObject& ToolArguments) { return RunMcpExtensionPipeline(ToolArguments); },
 				[this](const FJsonObject& ToolArguments) { return RunWorkflow(ToolArguments); },
 				CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("task-atlas"))
+	{
+		if (UnrealMcp::TryExecuteTaskAtlasTool(ToolName, Arguments, CategoryResult))
 		{
 			return CategoryResult;
 		}

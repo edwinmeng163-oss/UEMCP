@@ -1,0 +1,20 @@
+{
+  "name": "task_list_valid",
+  "description": "Task Atlas list smoke test.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1702,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.task_list",
+      "arguments": {
+        "filter": "all",
+        "limit": 10
+      }
+    }
+  }
+}

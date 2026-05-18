@@ -19,6 +19,8 @@ Recommended policy categories:
 - Code write: scaffold patch/apply, patch-fragment edits, rollback.
 - Build/process: build editor, supervisor launch/restart.
 - Dynamic execution: Python and console command execution.
+- Local Task Atlas writes: ActivityLog annotation, task rating, and task pinning
+  mutate only ignored `Saved/UnrealMcp` JSON/JSONL state.
 
 Each AI-facing tool now carries the same policy object in `tools/list`, `unreal.mcp_tool_audit`, and `unreal.mcp_workbench_status`:
 
@@ -59,6 +61,9 @@ Self-extension tools should preserve these rules:
 ## Tool Outcome Verification
 
 Write-capable tools build structured `preflight` results before handler execution and attach `postcheck` results after execution. Generic checks come from ToolRegistry metadata. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools additionally inspect real editor/file/workflow state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, memory key, skill file, manifest, build log, or test result actually exists as expected."
+
+Task Atlas v0.17 does not promote tasks into skills, RAG, or new tools. The
+`To Skills`, `To RAG`, and `Make Tool` UI buttons are placeholders only.
 
 ## Remaining Hardening Work
 

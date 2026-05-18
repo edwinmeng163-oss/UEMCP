@@ -16,7 +16,8 @@ Core layers:
 - `Tools/unreal_mcp_supervisor.py`: external process for restart-aware pipeline automation.
 - `Tools/UnrealMcpSupervisorTemplates`: versioned macOS/Windows supervisor launcher templates with placeholders instead of machine-specific paths.
 - `Tools/UnrealMcpCodexBridge`: Bun daemon for Plan B Codex Desktop/App Server integration. It spawns `codex app-server` on a platform-selected transport (Unix socket on macOS/Linux, stdio child-process pipe on Windows — current Codex builds reject `--listen ws://...`; see issue #2 comment 8), connects through Codex's App Server protocol, and exposes a small UE-facing WebSocket on `ws://127.0.0.1:8766/uevolve`. The UE-facing inbound listener is always WebSocket regardless of which outbound transport speaks to Codex.
-- `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts.
+- `Saved/UnrealMcp/ActivityLog`: local JSONL activity stream used to distill repeatable workflows into skill drafts and extract Task Atlas workflow records.
+- `Saved/UnrealMcp/Tasks`: local Task Atlas JSON files rebuilt from ActivityLog by `unreal.task_list`.
 - `Schemas/UnrealMcpExtensionManifest.schema.json`: versioned contract for source apply manifests.
 - `Tools/UnrealMcpToolRegistry/schema.json`: versioned contract for explicit tool metadata under `Tools/UnrealMcpToolRegistry/tools.json`.
 - `Saved/UnrealMcp`: local runtime state, memory, manifests, backups, generated tests, and logs.
@@ -25,6 +26,7 @@ Core layers:
 
 - `SUnrealMcpChatPanel`: conversational command and AI surface.
 - `SUnrealMcpWorkbenchPanel`: thin self-extension console over existing MCP tools. It should not own self-extension business logic; it delegates to `ExecuteToolFromEditorUI` so Chat, HTTP MCP, tests, and Workbench continue sharing the same backend behavior.
+- `STaskAtlasWindow`: Chat-launched Slate workflow view backed by Task Atlas MCP tools and registry metadata. Pinning is functional; `To Skills`, `To RAG`, and `Make Tool` are visible v0.18/v0.19 placeholders.
 - `Tools/UnrealMcpSkills`: project-local skill instructions.
 
 ## External AI Bridge
@@ -70,6 +72,7 @@ Recommended split:
 - `Private/Tools/SelfExtension`: validate, apply, build, test, audit, rollback, pipeline.
 - `Private/Tools/Memory`: project memory CRUD in `UnrealMcpMemoryTools.cpp`.
 - `Private/Tools/Skills`: project skill discovery, application, local activity recording, and skill distillation. Skill dispatch now lives in `UnrealMcpSkillTools.cpp`; promote still receives its extension-lock behavior through an explicit module callback.
+- `Private/Tools/TaskAtlas`: ActivityLog annotations, task extraction/list/detail/rating/pinning in `UnrealMcpTaskAtlasTools.cpp`, plus `STaskAtlasWindow` for the editor UI.
 - `Private/Tests`: module-private automation tests such as `UnrealMcpEngineCompatTests.cpp`.
 - `Private/UI`: Chat panel and future Workbench panel.
 

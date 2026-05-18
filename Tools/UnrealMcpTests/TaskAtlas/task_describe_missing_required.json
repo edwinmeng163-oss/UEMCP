@@ -1,0 +1,17 @@
+{
+  "name": "task_describe_missing_required",
+  "description": "Task Atlas describe should reject missing taskId.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1703,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.task_describe",
+      "arguments": {}
+    }
+  }
+}
