@@ -38,6 +38,33 @@ and promotion sources. It is local-first: runtime task files live under
   self-extension scaffold seeded with the workflow's critical path context.
   The button does not apply, build, or test the scaffold; the user still opens
   the draft, edits the handler, and runs `unreal.mcp_extension_pipeline`.
+- `unreal.task_label_backfill` scans `Saved/UnrealMcp/Tasks/*.json` for
+  unpinned tasks whose label is exactly `Session YYYY-MM-DD HH:MM` and whose
+  `userIntentText` is empty, then asks the configured Anthropic Messages
+  provider for a 3-7 word retrospective label. It stores
+  `labelSource: "llm_backfill"` and `labelConfidence` on updated task JSON.
+  Missing Anthropic configuration is a structured success with
+  `processedCount=0` and `no_provider_configured` skip reasons.
+- v0.19 is complete: Part A made `Make Tool` create scaffold drafts, Part B
+  added Task Atlas markdown ingestion/RAG indexing, and Part C added LLM
+  retrospective label backfill.
+
+`unreal.task_label_backfill` accepts:
+
+```json
+{
+  "sessionId": "optional ActivityLog session id filter",
+  "limit": 25,
+  "force": false,
+  "dryRun": false
+}
+```
+
+The tool is intentionally conservative. It never overwrites pinned tasks.
+`force=true` broadens discovery, but it still does not overwrite labels unless
+the current label is the exact `Session YYYY-MM-DD HH:MM` placeholder and
+`userIntentText` is empty. `dryRun=true` reports eligible tasks without calling
+the provider or writing task JSON.
 
 ## Frozen ActivityLog Events
 
@@ -77,17 +104,24 @@ Each task is persisted as `Saved/UnrealMcp/Tasks/<taskId>.json`:
   "eventCount": 0,
   "eventRefs": [{"ts": "...", "tool": "...", "isError": false}],
   "userIntentText": "string|null",
-  "aiSummaryText": "string|null"
+  "aiSummaryText": "string|null",
+  "labelSource": "llm_backfill",
+  "labelConfidence": 0.0
 }
 ```
 
 `schemaVersion` is exactly `1`. `taskId` is deterministic from the ActivityLog
 `sessionId` plus the first task event timestamp compacted into a filename-safe
 token. The default label is the first sentence of `user_intent`; without an
-intent, it falls back to `Session YYYY-MM-DD HH:MM`.
+intent, it falls back to `Session YYYY-MM-DD HH:MM`. `labelSource` and
+`labelConfidence` are optional and are present when retrospective labeling has
+updated the task.
 
 Regeneration preserves existing `rating` and `pinned` fields unless an explicit
-`task_rating` or `task_pin_change` event updates them.
+`task_rating` or `task_pin_change` event updates them. When no explicit
+`userIntentText` exists, regeneration also preserves `labelSource`,
+`labelConfidence`, and non-placeholder user labels so retrospective labeling and
+manual curation are not lost on the next `unreal.task_list` refresh.
 
 ## Clustering Heuristic
 
@@ -109,9 +143,8 @@ Task Atlas window.
 v0.18 ships real `To Skills` and `To RAG` promotion behavior in the Task Atlas
 window.
 
-v0.19 adds RAG ingestion for Task Atlas markdown promotion output and activates
-`Make Tool` as a scaffold creation shortcut. LLM retrospective labeling remains
-deferred.
+v0.19 ships all three final Task Atlas pieces: `Make Tool` scaffold creation,
+Task Atlas markdown RAG ingestion, and `unreal.task_label_backfill`.
 
 The `Make Tool` button creates a local draft scaffold only. It derives a
 `unreal.atlas_*` tool name from the workflow label, calls

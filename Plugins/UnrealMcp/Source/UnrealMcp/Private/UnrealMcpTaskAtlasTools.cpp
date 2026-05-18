@@ -3,6 +3,7 @@
 #include "UnrealMcpActivityLog.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSession.h"
+#include "UnrealMcpTaskLabelBackfillTool.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -33,6 +34,11 @@ namespace UnrealMcp
 		{
 			FString Rating = TEXT("unrated");
 			bool bPinned = false;
+			FString Label;
+			FString LabelSource;
+			double LabelConfidence = 0.0;
+			bool bHasLabel = false;
+			bool bHasLabelConfidence = false;
 		};
 
 		FString GetTaskRoot()
@@ -210,6 +216,34 @@ namespace UnrealMcp
 			return FString::Printf(TEXT("Session %s"), *Timestamp.ToString(TEXT("%Y-%m-%d %H:%M")));
 		}
 
+		bool IsDigitAt(const FString& Text, int32 Index)
+		{
+			return Text.IsValidIndex(Index) && FChar::IsDigit(Text[Index]);
+		}
+
+		bool IsSessionPlaceholderLabel(const FString& Label)
+		{
+			const FString Trimmed = Label.TrimStartAndEnd();
+			if (Trimmed.Len() != 24 || !Trimmed.StartsWith(TEXT("Session "), ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+			if (Trimmed[12] != TEXT('-') || Trimmed[15] != TEXT('-') || Trimmed[18] != TEXT(' ') || Trimmed[21] != TEXT(':'))
+			{
+				return false;
+			}
+
+			const int32 DigitIndices[] = { 8, 9, 10, 11, 13, 14, 16, 17, 19, 20, 22, 23 };
+			for (const int32 Index : DigitIndices)
+			{
+				if (!IsDigitAt(Trimmed, Index))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
 		TSharedPtr<FJsonObject> MakeErrorObject(const FString& Action, const FString& ErrorKind, const FString& Message)
 		{
 			TSharedPtr<FJsonObject> ErrorObject = MakeShared<FJsonObject>();
@@ -373,6 +407,14 @@ namespace UnrealMcp
 			Object->SetStringField(TEXT("tEndUtc"), Record.TEndUtc);
 			Object->SetNumberField(TEXT("eventCount"), Record.EventCount);
 			Object->SetArrayField(TEXT("eventRefs"), MakeEventRefArray(Events));
+			if (!Record.LabelSource.IsEmpty())
+			{
+				Object->SetStringField(TEXT("labelSource"), Record.LabelSource);
+			}
+			if (Record.bHasLabelConfidence)
+			{
+				Object->SetNumberField(TEXT("labelConfidence"), Record.LabelConfidence);
+			}
 			if (Record.UserIntentText.IsEmpty())
 			{
 				Object->SetField(TEXT("userIntentText"), MakeShared<FJsonValueNull>());
@@ -530,6 +572,19 @@ namespace UnrealMcp
 					Choices.Rating = Rating;
 				}
 				Object->TryGetBoolField(TEXT("pinned"), Choices.bPinned);
+				if (Object->TryGetStringField(TEXT("label"), Choices.Label))
+				{
+					Choices.Label = Choices.Label.TrimStartAndEnd();
+					Choices.bHasLabel = !Choices.Label.IsEmpty();
+				}
+				Object->TryGetStringField(TEXT("labelSource"), Choices.LabelSource);
+				Choices.LabelSource = Choices.LabelSource.TrimStartAndEnd();
+				double LabelConfidence = 0.0;
+				if (Object->TryGetNumberField(TEXT("labelConfidence"), LabelConfidence))
+				{
+					Choices.LabelConfidence = LabelConfidence;
+					Choices.bHasLabelConfidence = true;
+				}
 				OutChoices.Add(TaskId, Choices);
 			}
 		}
@@ -619,6 +674,15 @@ namespace UnrealMcp
 				{
 					Cluster.Record.Rating = Choices->Rating;
 					Cluster.Record.bPinned = Choices->bPinned;
+					if (Cluster.Record.UserIntentText.IsEmpty()
+						&& Choices->bHasLabel
+						&& (Choices->LabelSource == TEXT("llm_backfill") || !IsSessionPlaceholderLabel(Choices->Label)))
+					{
+						Cluster.Record.Label = Choices->Label;
+						Cluster.Record.LabelSource = Choices->LabelSource;
+						Cluster.Record.LabelConfidence = Choices->LabelConfidence;
+						Cluster.Record.bHasLabelConfidence = Choices->bHasLabelConfidence;
+					}
 				}
 				if (const FString* Rating = RatingOverrides.Find(Cluster.Record.TaskId))
 				{
@@ -1022,6 +1086,11 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.task_pin"))
 		{
 			OutResult = TaskPin(Arguments);
+			return true;
+		}
+		if (ToolName == TEXT("unreal.task_label_backfill"))
+		{
+			OutResult = TaskLabelBackfill(Arguments);
 			return true;
 		}
 		return false;

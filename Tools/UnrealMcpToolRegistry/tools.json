@@ -5023,7 +5023,70 @@
           "errorKind": { "type": "string" }
         }
       },
-      "notes": "Pinning is functional in v0.17. To Skills, To RAG, and Make Tool remain UI placeholders."
+      "notes": "Pinning is functional in v0.17 and remains a user lock that retrospective label backfill never overwrites."
+    },
+    {
+      "name": "unreal.task_label_backfill",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_label_backfill",
+      "title": "Backfill Task Atlas Labels",
+      "description": "Uses the configured Anthropic Messages provider to infer short labels for unpinned Task Atlas tasks that still have Session timestamp placeholders.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.19 Task Atlas retrospective labeling for placeholder workflow labels with pinned/user-edited safeguards.",
+      "summaryTemplate": "Backfilled Task Atlas labels",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": { "type": "string" },
+          "limit": { "type": "number", "default": 25 },
+          "force": { "type": "boolean", "default": false },
+          "dryRun": { "type": "boolean", "default": false }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string" },
+          "success": { "type": "boolean" },
+          "processedCount": { "type": "number" },
+          "updatedCount": { "type": "number" },
+          "skippedCount": { "type": "number" },
+          "skippedReasons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "taskId": { "type": "string" },
+                "reason": { "type": "string" }
+              }
+            }
+          },
+          "sessionIdFilter": { "type": "string" },
+          "limit": { "type": "number" },
+          "force": { "type": "boolean" },
+          "dryRun": { "type": "boolean" },
+          "taskRoot": { "type": "string" },
+          "errorKind": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "notes": "Calls Anthropic through configured provider settings, preferring claude-haiku-4-5 and falling back to claude-sonnet-4-6. Missing provider config returns success with no_provider_configured skips. The tool never overwrites pinned tasks or labels outside the exact Session YYYY-MM-DD HH:MM placeholder with empty userIntentText."
     }
   ]
 }

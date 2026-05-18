@@ -1,0 +1,19 @@
+{
+  "name": "task_label_backfill_invalid_limit_type",
+  "description": "Task Atlas label backfill should reject non-numeric limit values before provider access.",
+  "category": "wrong_type",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1707,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.task_label_backfill",
+      "arguments": {
+        "limit": "25"
+      }
+    }
+  }
+}

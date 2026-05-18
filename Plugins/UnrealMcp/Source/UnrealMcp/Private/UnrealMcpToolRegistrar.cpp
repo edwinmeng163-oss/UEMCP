@@ -977,6 +977,32 @@ namespace UnrealMcp
 				Descriptor.Reason = TEXT("Descriptor: v0.17 Task Atlas pinning tool for workflow curation.");
 				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("taskId"), TEXT("pinned") }));
 			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("sessionId"), MakeStringProperty(TEXT("Optional Task Atlas sessionId filter."), FString()));
+				Properties->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum placeholder-label tasks to process. Defaults to 25."), 25.0));
+				Properties->SetObjectField(TEXT("force"), MakeBoolProperty(TEXT("Broaden candidate discovery while preserving pinned and user-edited safeguards."), false));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview eligible tasks without calling the provider or writing task JSON."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_label_backfill"),
+					TEXT("Backfill Task Atlas Labels"),
+					TEXT("Uses the configured Anthropic Messages provider to infer short labels for unpinned Task Atlas tasks that still have Session timestamp placeholders."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpTaskAtlasTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.19 Task Atlas LLM retrospective labeling with conservative pin and user-label safeguards.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
 		}
 
 		void RegisterSelfExtensionMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)

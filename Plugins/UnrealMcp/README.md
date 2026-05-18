@@ -269,8 +269,9 @@ Behavior notes:
 - If an AI turn reaches the tool-round budget, the chat now pauses instead of hard-failing: it writes `chat.active_task`, gives a concrete next step, and avoids carrying forward a half-finished response chain.
 - The conversation history is persisted at `Saved/UnrealMcp/ChatHistory.json`.
 - High-level activity recording is opt-in and starts only after `unreal.skill_recording_start`; while active, it writes local JSONL events under `Saved/UnrealMcp/ActivityLog/*.jsonl`. It records mutating MCP tool call/result metadata and a periodic editor heartbeat roughly once per minute, skips read-only/status tools, and does not store tool result text previews.
-- Task Atlas extraction writes derived local task files under `Saved/UnrealMcp/Tasks/<taskId>.json`; these files are regenerated from ActivityLog and preserve rating/pin choices.
-- The Task Atlas window can promote a selected task to a skill draft through `unreal.skill_distill_from_activity`, or write a local markdown RAG source under `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/` and refresh the knowledge index.
+- Task Atlas extraction writes derived local task files under `Saved/UnrealMcp/Tasks/<taskId>.json`; these files are regenerated from ActivityLog and preserve rating/pin choices plus LLM/user label metadata when no explicit user intent exists.
+- The Task Atlas window can promote a selected task to a skill draft through `unreal.skill_distill_from_activity`, write a local markdown RAG source under `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/` and refresh the knowledge index, or create a local Make Tool scaffold draft from a workflow.
+- `unreal.task_label_backfill` can infer short labels for unpinned placeholder tasks through the configured Anthropic provider. It skips pinned tasks, user-edited labels, and provider-missing environments safely.
 - On the first AI turn after the panel reloads, Unreal MCP now also replays a small, compact slice of the persisted local transcript back to the model for continuity, so saved history is not just UI-only.
 - `Copy Chat` copies the full visible transcript, and `Copy Log` copies the most recent `/log` or `unreal.tail_log` output.
 - For AI-driven editing, prefer the fixed-schema wrapper tools such as `unreal.spawn_actor_basic`, `unreal.spawn_static_mesh_actor`, `unreal.batch_set_actor_scale`, `unreal.batch_set_actor_tags`, `unreal.batch_set_point_light_properties`, `unreal.batch_configure_static_mesh_actors`, the `unreal.bp_*` Blueprint graph editing tools, the `unreal.widget_*` UMG editing tools, and the `unreal.scaffold_*` gameplay scaffold tools.
@@ -288,9 +289,9 @@ Open the thin self-extension console from:
 
 The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
-tool details, functional pinning, `To Skills` / `To RAG` promote actions, and a
-v0.19 `Make Tool` placeholder.
-The plugin registry currently contains 154 registered MCP tools across actors,
+tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
+v0.19 `Make Tool` scaffold draft creation.
+The plugin registry currently contains 155 registered MCP tools across actors,
 blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, and widget categories.
 

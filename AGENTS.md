@@ -378,6 +378,9 @@ Task Atlas:
 - view workflows, unused tools, search, tool details, To Skills / To RAG
   promote actions, and Make Tool scaffold draft creation in the Chat-launched
   Task Atlas window
+- backfill placeholder Task Atlas labels with `unreal.task_label_backfill`
+  through the configured Anthropic provider while preserving pinned and
+  user-edited tasks
 
 ## Tool Registry Status
 
@@ -402,7 +405,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 154 entries across:
+At the time this file was written, the registry contained 155 entries across:
 
 - actors
 - blueprint
@@ -436,14 +439,16 @@ v0.15 chunk 5 migration tools (`unreal.asset_move`,
 `unreal.material_instance_set_scalar`, and
 `unreal.material_instance_set_vector`), and the five v0.17 Task Atlas
 foundation tools (`unreal.activity_log_annotate`, `unreal.task_list`,
-`unreal.task_describe`, `unreal.task_rate`, and `unreal.task_pin`). Earlier
-handoff text lagged at 119 entries.
+`unreal.task_describe`, `unreal.task_rate`, and `unreal.task_pin`), and the
+v0.19 Part C Task Atlas LLM backfill tool
+(`unreal.task_label_backfill`). Earlier handoff text lagged at 119 entries.
 
 Current project status: v0.17 Task Atlas foundation landed; ActivityLog
 annotations, local task JSON extraction/list/detail/rating/pinning, Chat rating
 hooks, and the Task Atlas Slate window are in place. v0.18 Task Atlas
-promote actions now make To Skills and To RAG functional; v0.19 Make Tool
-creates self-extension scaffold drafts while LLM labeling remains a placeholder.
+promote actions now make To Skills and To RAG functional; v0.19 is complete
+with Part A Make Tool scaffold drafts, Part B Markdown ingestion/RAG indexing
+for promoted workflows, and Part C LLM retrospective label backfill.
 v0.16 C2 landed; UMG parity now covers rename,
 reorder, duplicate, and guarded delete, and the first Material Instance surface
 now covers list, parameter inspection, scalar set, and vector set. v0.15 chunk
@@ -538,6 +543,9 @@ UnrealMcpActivityLog.h
 
 UnrealMcpTaskAtlasTools.cpp/.h
   ActivityLog annotation and local Task Atlas task extraction/list/detail/rate/pin tools
+
+UnrealMcpTaskLabelBackfillTool.cpp/.h
+  LLM retrospective Task Atlas label backfill with pinned/user-edited safeguards
 
 UnrealMcpKnowledgeBridge.h
   shared bridge for knowledge-index card writes

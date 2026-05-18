@@ -1,0 +1,21 @@
+{
+  "name": "task_label_backfill_skips_pinned",
+  "description": "Task Atlas label backfill registration fixture for the pinned-task safeguard; list-only because live pinned task setup and provider calls are local-state dependent.",
+  "category": "policy_skip",
+  "expectToolListed": true,
+  "executeTool": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 1706,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.task_label_backfill",
+      "arguments": {
+        "sessionId": "fixture-session",
+        "limit": 1,
+        "force": true,
+        "dryRun": true
+      }
+    }
+  }
+}
