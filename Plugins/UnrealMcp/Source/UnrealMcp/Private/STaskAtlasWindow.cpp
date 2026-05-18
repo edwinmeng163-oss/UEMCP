@@ -128,6 +128,62 @@ namespace TaskAtlasWindow
 		}
 	}
 
+	FString TrimUnderscores(FString Value)
+	{
+		while (Value.StartsWith(TEXT("_")))
+		{
+			Value.RightChopInline(1);
+		}
+		while (Value.EndsWith(TEXT("_")))
+		{
+			Value.LeftChopInline(1);
+		}
+		return Value;
+	}
+
+	void AppendNormalizedUnderscore(FString& OutValue)
+	{
+		if (!OutValue.IsEmpty() && !OutValue.EndsWith(TEXT("_")))
+		{
+			OutValue.AppendChar('_');
+		}
+	}
+
+	FString SanitizeToolIdPart(const FString& Source)
+	{
+		FString Slug;
+		for (const TCHAR Ch : Source)
+		{
+			if (Ch >= 'A' && Ch <= 'Z')
+			{
+				Slug.AppendChar(static_cast<TCHAR>(Ch + ('a' - 'A')));
+			}
+			else if ((Ch >= 'a' && Ch <= 'z') || (Ch >= '0' && Ch <= '9'))
+			{
+				Slug.AppendChar(Ch);
+			}
+			else
+			{
+				AppendNormalizedUnderscore(Slug);
+			}
+		}
+		return TrimUnderscores(Slug);
+	}
+
+	FString MakeAtlasToolId(const FString& Label, const FString& TaskId)
+	{
+		FString ToolId = SanitizeToolIdPart(Label);
+		if (ToolId.IsEmpty())
+		{
+			ToolId = SanitizeToolIdPart(TaskId);
+		}
+		if (ToolId.IsEmpty())
+		{
+			ToolId = TEXT("workflow");
+		}
+		return FString::Printf(TEXT("atlas_%s"), *ToolId);
+	}
+
 	FString SanitizeSkillSlugPart(const FString& Source)
 	{
 		FString Slug;
@@ -598,9 +654,59 @@ FReply STaskAtlasWindow::HandlePinClicked(FString TaskId, bool bNewPinned)
 	return FReply::Handled();
 }
 
-FReply STaskAtlasWindow::HandleFutureActionClicked(FString Label)
+FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 {
-	SetStatus(FString::Printf(TEXT("%s: Coming in %s."), *Label, Label == TEXT("Make Tool") ? TEXT("v0.19") : TEXT("v0.18")));
+	if (!OwnerModule)
+	{
+		SetStatus(TEXT("Task Atlas is not connected to the module."));
+		return FReply::Handled();
+	}
+
+	const FString TaskLabel = Row.Label.TrimStartAndEnd();
+	const FString ToolId = TaskAtlasWindow::MakeAtlasToolId(TaskLabel, Row.TaskId);
+	const FString ToolName = FString::Printf(TEXT("unreal.%s"), *ToolId);
+	const FString Title = TaskLabel.IsEmpty() ? ToolId : TaskLabel;
+	const FString CriticalPathText = TaskAtlasWindow::JoinCriticalPath(Row.CriticalPath);
+	const FString CriticalPathDescription = CriticalPathText.IsEmpty()
+		? FString(TEXT("No critical path tools were recorded."))
+		: FString::Printf(TEXT("Critical path: %s."), *CriticalPathText);
+	const FString Description = FString::Printf(
+		TEXT("Task Atlas scaffold for workflow '%s'. %s Task Atlas rows use the self-extension category because scaffold_mcp_tool does not currently accept task-atlas as a scaffold category."),
+		*Title,
+		*CriticalPathDescription);
+	const FString ImplementationNotes = FString::Printf(
+		TEXT("- Seeded from Task Atlas taskId: %s\n- %s\n- Replace the generated message handler with a reviewed implementation based on the workflow evidence before running unreal.mcp_extension_pipeline."),
+		Row.TaskId.TrimStartAndEnd().IsEmpty() ? TEXT("(missing)") : *Row.TaskId,
+		*CriticalPathDescription);
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetStringField(TEXT("toolName"), ToolName);
+	Arguments->SetStringField(TEXT("title"), Title);
+	Arguments->SetStringField(TEXT("description"), Description);
+	Arguments->SetStringField(TEXT("argumentSchemaJson"), TEXT("{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"));
+	Arguments->SetStringField(TEXT("exampleArgumentsJson"), TEXT("{}"));
+	Arguments->SetStringField(TEXT("implementationNotes"), ImplementationNotes);
+	Arguments->SetStringField(TEXT("category"), TEXT("self-extension"));
+	Arguments->SetStringField(TEXT("riskLevel"), TEXT("low"));
+	Arguments->SetBoolField(TEXT("overwrite"), false);
+
+	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.scaffold_mcp_tool"), *Arguments);
+	if (Result.bIsError)
+	{
+		SetStatus(Result.Text.IsEmpty() ? FString(TEXT("Make Tool failed to create a scaffold.")) : Result.Text);
+		return FReply::Handled();
+	}
+
+	const FString Directory = TaskAtlasWindow::GetStringField(Result.StructuredContent, TEXT("directory"));
+	const FString Location = Directory.IsEmpty() ? Result.Text : Directory;
+	if (Location.IsEmpty())
+	{
+		SetStatus(TEXT("Scaffold created. Open it, edit the handler, then run unreal.mcp_extension_pipeline."));
+	}
+	else
+	{
+		SetStatus(FString::Printf(TEXT("Scaffold created at %s. Open it, edit the handler, then run unreal.mcp_extension_pipeline."), *Location));
+	}
 	return FReply::Handled();
 }
 
@@ -951,7 +1057,7 @@ TSharedRef<SWidget> STaskAtlasWindow::BuildWorkflowRow(const FWorkflowRow& Row)
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("MakeTool", "Make Tool"))
-					.OnClicked(this, &STaskAtlasWindow::HandleFutureActionClicked, FString(TEXT("Make Tool")))
+					.OnClicked(this, &STaskAtlasWindow::HandleMakeToolClicked, Row)
 				]
 				+ SWrapBox::Slot()
 				[

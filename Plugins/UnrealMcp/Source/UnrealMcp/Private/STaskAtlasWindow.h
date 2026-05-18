@@ -43,7 +43,7 @@ private:
 	FReply HandleRefreshClicked();
 	void HandleSearchChanged(const FText& NewText);
 	FReply HandlePinClicked(FString TaskId, bool bNewPinned);
-	FReply HandleFutureActionClicked(FString Label);
+	FReply HandleMakeToolClicked(FWorkflowRow Row);
 	FReply HandlePromoteToSkillsClicked(FWorkflowRow Row);
 	FReply HandlePromoteToRagClicked(FWorkflowRow Row);
 	FReply HandleToolClicked(FString ToolName);

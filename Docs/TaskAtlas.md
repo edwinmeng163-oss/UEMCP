@@ -19,7 +19,7 @@ and promotion sources. It is local-first: runtime task files live under
 - `STaskAtlasWindow` shows workflows, unused tools, live search, tool details,
   functional pinning, and visible promote buttons.
 
-## Functional In v0.18
+## Functional In v0.18 And v0.19
 
 - `To Skills` is row-specific and calls
   `unreal.skill_distill_from_activity` for the selected workflow with its
@@ -33,7 +33,11 @@ and promotion sources. It is local-first: runtime task files live under
   v0.19 indexing ingests these Task Atlas markdown files as inline
   `task-atlas` KnowledgeCards so promoted workflows are searchable after the
   refresh completes.
-- `Make Tool` remains a visible v0.19 placeholder.
+- `Make Tool` is row-specific and derives an `atlas_*` tool name from the
+  workflow label, then calls `unreal.scaffold_mcp_tool` to create a draft
+  self-extension scaffold seeded with the workflow's critical path context.
+  The button does not apply, build, or test the scaffold; the user still opens
+  the draft, edits the handler, and runs `unreal.mcp_extension_pipeline`.
 
 ## Frozen ActivityLog Events
 
@@ -105,8 +109,11 @@ Task Atlas window.
 v0.18 ships real `To Skills` and `To RAG` promotion behavior in the Task Atlas
 window.
 
-v0.19 adds RAG ingestion for Task Atlas markdown promotion output. Real
-`Make Tool` behavior and LLM retrospective labeling remain deferred.
+v0.19 adds RAG ingestion for Task Atlas markdown promotion output and activates
+`Make Tool` as a scaffold creation shortcut. LLM retrospective labeling remains
+deferred.
 
-In v0.18, the `Make Tool` button is still a visible placeholder and shows
-`Coming in v0.19`.
+The `Make Tool` button creates a local draft scaffold only. It derives a
+`unreal.atlas_*` tool name from the workflow label, calls
+`unreal.scaffold_mcp_tool`, and leaves handler editing plus
+`unreal.mcp_extension_pipeline` to the user.
