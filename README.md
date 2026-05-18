@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Docs/Images/uevolve-banner.png" alt="UEvolve — Unreal MCP Self-Extension Workbench" width="100%" />
+</p>
+
 # UEvolve
 
 **Unreal Editor MCP Self-Extension Workbench**
