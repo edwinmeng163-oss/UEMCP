@@ -30,11 +30,9 @@ and promotion sources. It is local-first: runtime task files live under
   `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/<taskId>.md`, including task
   metadata, user intent, AI summary, critical path tools, and compact event
   refs, then calls `unreal.knowledge_index_refresh` with default arguments.
-  **v0.18 known limitation**: `knowledge_index_refresh` currently scans
-  `documents.jsonl` manifest files, not arbitrary `*.md` under the source
-  root. The Task Atlas `.md` is written reliably but is not yet picked up by
-  the RAG index. The indexing extension lands in v0.19 alongside the
-  Make Tool integration.
+  v0.19 indexing ingests these Task Atlas markdown files as inline
+  `task-atlas` KnowledgeCards so promoted workflows are searchable after the
+  refresh completes.
 - `Make Tool` remains a visible v0.19 placeholder.
 
 ## Frozen ActivityLog Events
@@ -107,7 +105,8 @@ Task Atlas window.
 v0.18 ships real `To Skills` and `To RAG` promotion behavior in the Task Atlas
 window.
 
-v0.19 is reserved for real `Make Tool` behavior and LLM retrospective labeling.
+v0.19 adds RAG ingestion for Task Atlas markdown promotion output. Real
+`Make Tool` behavior and LLM retrospective labeling remain deferred.
 
 In v0.18, the `Make Tool` button is still a visible placeholder and shows
 `Coming in v0.19`.

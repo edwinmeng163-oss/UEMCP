@@ -567,6 +567,127 @@ namespace UnrealMcp
 				return FallbackTitle;
 			}
 
+			FString ExtractFirstMarkdownH1(const FString& Text, const FString& FallbackTitle)
+			{
+				TArray<FString> Lines;
+				Text.ParseIntoArrayLines(Lines, false);
+				for (const FString& Line : Lines)
+				{
+					const FString Trimmed = Line.TrimStartAndEnd();
+					if (Trimmed.Len() > 2
+						&& Trimmed[0] == TEXT('#')
+						&& Trimmed[1] != TEXT('#')
+						&& FChar::IsWhitespace(Trimmed[1]))
+					{
+						const FString Heading = Trimmed.Mid(1).TrimStartAndEnd();
+						return Heading.IsEmpty() ? FallbackTitle : Heading;
+					}
+				}
+				return FallbackTitle;
+			}
+
+			void AddFrontmatterTags(const FString& RawValue, TArray<FString>& OutTags)
+			{
+				FString Value = RawValue.TrimStartAndEnd();
+				TArray<FString> Parts;
+				if (Value.Len() >= 2 && Value.StartsWith(TEXT("[")) && Value.EndsWith(TEXT("]")))
+				{
+					Value = Value.Mid(1, Value.Len() - 2);
+					Value.ParseIntoArray(Parts, TEXT(","), true);
+				}
+				else
+				{
+					Parts.Add(Value);
+				}
+
+				for (const FString& Part : Parts)
+				{
+					FString Clean = Part.TrimStartAndEnd();
+					while (Clean.EndsWith(TEXT(",")))
+					{
+						Clean.LeftChopInline(1);
+						Clean.TrimStartAndEndInline();
+					}
+					if (Clean.Len() >= 2
+						&& ((Clean[0] == TEXT('"') && Clean[Clean.Len() - 1] == TEXT('"'))
+							|| (Clean[0] == TEXT('\'') && Clean[Clean.Len() - 1] == TEXT('\''))))
+					{
+						Clean = Clean.Mid(1, Clean.Len() - 2).TrimStartAndEnd();
+					}
+					if (!Clean.IsEmpty())
+					{
+						OutTags.AddUnique(Clean);
+					}
+				}
+			}
+
+			bool TryExtractMarkdownFrontmatter(const FString& Text, TArray<FString>& OutTags, FString& OutBody)
+			{
+				OutTags.Reset();
+				OutBody = Text;
+
+				TArray<FString> Lines;
+				Text.ParseIntoArrayLines(Lines, false);
+				if (Lines.Num() < 2 || !Lines[0].TrimStartAndEnd().Equals(TEXT("---"), ESearchCase::CaseSensitive))
+				{
+					return false;
+				}
+
+				int32 EndIndex = INDEX_NONE;
+				for (int32 Index = 1; Index < Lines.Num(); ++Index)
+				{
+					if (Lines[Index].TrimStartAndEnd().Equals(TEXT("---"), ESearchCase::CaseSensitive))
+					{
+						EndIndex = Index;
+						break;
+					}
+				}
+				if (EndIndex == INDEX_NONE)
+				{
+					return false;
+				}
+
+				bool bReadingTagList = false;
+				for (int32 Index = 1; Index < EndIndex; ++Index)
+				{
+					const FString Trimmed = Lines[Index].TrimStartAndEnd();
+					if (Trimmed.Len() >= 5 && Trimmed.Left(5).Equals(TEXT("tags:"), ESearchCase::IgnoreCase))
+					{
+						bReadingTagList = false;
+						const FString TagValue = Trimmed.Mid(5).TrimStartAndEnd();
+						if (TagValue.IsEmpty())
+						{
+							bReadingTagList = true;
+						}
+						else
+						{
+							AddFrontmatterTags(TagValue, OutTags);
+						}
+						continue;
+					}
+
+					if (bReadingTagList)
+					{
+						if (Trimmed.StartsWith(TEXT("-")))
+						{
+							AddFrontmatterTags(Trimmed.Mid(1), OutTags);
+						}
+						else if (!Trimmed.IsEmpty())
+						{
+							bReadingTagList = false;
+						}
+					}
+				}
+
+				TArray<FString> BodyLines;
+				for (int32 Index = EndIndex + 1; Index < Lines.Num(); ++Index)
+				{
+					BodyLines.Add(Lines[Index]);
+				}
+				OutBody = FString::Join(BodyLines, TEXT("\n"));
+				return true;
+			}
+
 		TArray<TSharedPtr<FJsonValue>> StringsToJsonArray(const TArray<FString>& Values)
 		{
 			return MakeJsonStringArray(Values);
@@ -866,6 +987,94 @@ namespace UnrealMcp
 				MaxChunkChars,
 				OverlapChars,
 				OutCards);
+		}
+
+		void AddSourceMarkdownCards(
+			const FString& SourceRoot,
+			TArray<FKnowledgeCard>& OutCards,
+			TArray<FString>& OutMarkdownFiles,
+			int32& OutSkippedMarkdownFiles)
+		{
+			OutMarkdownFiles.Reset();
+			OutSkippedMarkdownFiles = 0;
+			if (!FPaths::DirectoryExists(SourceRoot))
+			{
+				return;
+			}
+
+			IFileManager::Get().FindFilesRecursive(OutMarkdownFiles, *SourceRoot, TEXT("*.md"), true, false);
+			OutMarkdownFiles.Sort();
+
+			TSet<FString> UsedCardIds;
+			TSet<FString> UsedSourceIds;
+			for (const FKnowledgeCard& Card : OutCards)
+			{
+				UsedCardIds.Add(Card.CardId);
+				UsedSourceIds.Add(Card.SourceId);
+			}
+
+			const FString NowIso = FDateTime::UtcNow().ToIso8601();
+			for (const FString& FilePath : OutMarkdownFiles)
+			{
+				FString Text;
+				if (!FFileHelper::LoadFileToString(Text, *FilePath))
+				{
+					OutSkippedMarkdownFiles++;
+					continue;
+				}
+
+				TArray<FString> Tags;
+				FString BodyText = Text;
+				TryExtractMarkdownFrontmatter(Text, Tags, BodyText);
+				const FString CleanText = BodyText.TrimStartAndEnd();
+				if (CleanText.IsEmpty())
+				{
+					OutSkippedMarkdownFiles++;
+					continue;
+				}
+				if (Tags.IsEmpty())
+				{
+					Tags.Add(TEXT("task-atlas"));
+				}
+
+				const FString BaseId = SanitizeKnowledgeId(FPaths::GetBaseFilename(FilePath));
+				FString SourceId = BaseId;
+				int32 SourceIdSuffix = 2;
+				while (UsedSourceIds.Contains(SourceId))
+				{
+					SourceId = FString::Printf(TEXT("%s-%d"), *BaseId, SourceIdSuffix++);
+				}
+				UsedSourceIds.Add(SourceId);
+
+				FString CardId = FString::Printf(TEXT("task-atlas_%s"), *SourceId);
+				int32 CardIdSuffix = 2;
+				while (UsedCardIds.Contains(CardId))
+				{
+					CardId = FString::Printf(TEXT("task-atlas_%s-%d"), *SourceId, CardIdSuffix++);
+				}
+				UsedCardIds.Add(CardId);
+
+				const FString FallbackTitle = FPaths::GetBaseFilename(FilePath);
+				const FString Title = ExtractFirstMarkdownH1(CleanText, FallbackTitle);
+
+				FKnowledgeCard Card;
+				Card.CardId = CardId;
+				Card.SourceId = SourceId;
+				Card.Title = Title;
+				Card.SectionTitle = Title;
+				Card.SectionPath = Title;
+				Card.Category = TEXT("task-atlas");
+				Card.Tags = Tags;
+				Card.SourceKind = TEXT("activity-log");
+				Card.SourcePath = MakeProjectRelativePath(FilePath);
+				Card.Text = CleanText;
+				Card.ChunkIndex = 0;
+				Card.TextLength = Card.Text.Len();
+				Card.SourceWeight = SourceWeightForKind(Card.SourceKind, Card.Category);
+				Card.Confidence = ConfidenceForKind(Card.SourceKind);
+				Card.UpdatedAt = NowIso;
+				OutCards.Add(MoveTemp(Card));
+			}
 		}
 
 		void AddVersionedDocumentationCards(
@@ -1776,7 +1985,9 @@ namespace UnrealMcp
 			int32 ActivityLogFileCount = 0;
 			int32 ActivityEventCount = 0;
 			int32 SkillFileCount = 0;
+			int32 SourceMarkdownSkippedCount = 0;
 			TArray<FString> SourceFiles;
+			TArray<FString> SourceMarkdownFiles;
 			TArray<FString> VersionedKnowledgeRootCandidates;
 			TArray<FString> SkillRootCandidates;
 
@@ -1791,6 +2002,7 @@ namespace UnrealMcp
 					break;
 				}
 			}
+			AddSourceMarkdownCards(SourceRoot, Cards, SourceMarkdownFiles, SourceMarkdownSkippedCount);
 		}
 
 		if (bIncludeVersionedDocs)
@@ -1834,6 +2046,11 @@ namespace UnrealMcp
 		{
 			SourceFileValues.Add(MakeShared<FJsonValueString>(MakeProjectRelativePath(SourceFile)));
 		}
+		TArray<TSharedPtr<FJsonValue>> SourceMarkdownFileValues;
+		for (const FString& SourceMarkdownFile : SourceMarkdownFiles)
+		{
+			SourceMarkdownFileValues.Add(MakeShared<FJsonValueString>(MakeProjectRelativePath(SourceMarkdownFile)));
+		}
 
 		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 		StructuredContent->SetStringField(TEXT("action"), TEXT("knowledge_index_refresh"));
@@ -1844,16 +2061,19 @@ namespace UnrealMcp
 		StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 			StructuredContent->SetNumberField(TEXT("cardCount"), Cards.Num());
 			StructuredContent->SetNumberField(TEXT("sourceDocumentsJsonlCount"), SourceFiles.Num());
+			StructuredContent->SetNumberField(TEXT("sourceMarkdownCount"), SourceMarkdownFiles.Num());
+			StructuredContent->SetNumberField(TEXT("sourceMarkdownSkippedCount"), SourceMarkdownSkippedCount);
 			StructuredContent->SetNumberField(TEXT("skippedRows"), SkippedRows);
 			StructuredContent->SetNumberField(TEXT("activityLogFileCount"), ActivityLogFileCount);
 			StructuredContent->SetNumberField(TEXT("activityEventCount"), ActivityEventCount);
 			StructuredContent->SetNumberField(TEXT("skillFileCount"), SkillFileCount);
 			StructuredContent->SetArrayField(TEXT("sourceDocumentsJsonl"), SourceFileValues);
+			StructuredContent->SetArrayField(TEXT("sourceMarkdown"), SourceMarkdownFileValues);
 
 		if (bDryRun)
 		{
 			return MakeExecutionResult(
-				FString::Printf(TEXT("Knowledge index dry run: would write %d KnowledgeCards from %d source documents.jsonl files."), Cards.Num(), SourceFiles.Num()),
+				FString::Printf(TEXT("Knowledge index dry run: would write %d KnowledgeCards from %d source documents.jsonl files and %d source markdown files."), Cards.Num(), SourceFiles.Num(), SourceMarkdownFiles.Num()),
 				StructuredContent,
 				false);
 		}
@@ -1874,6 +2094,8 @@ namespace UnrealMcp
 		Manifest->SetStringField(TEXT("cardsPath"), MakeProjectRelativePath(CardsPath));
 			Manifest->SetNumberField(TEXT("cardCount"), Cards.Num());
 			Manifest->SetNumberField(TEXT("sourceDocumentsJsonlCount"), SourceFiles.Num());
+			Manifest->SetNumberField(TEXT("sourceMarkdownCount"), SourceMarkdownFiles.Num());
+			Manifest->SetNumberField(TEXT("sourceMarkdownSkippedCount"), SourceMarkdownSkippedCount);
 			Manifest->SetNumberField(TEXT("skippedRows"), SkippedRows);
 			Manifest->SetNumberField(TEXT("activityLogFileCount"), ActivityLogFileCount);
 			Manifest->SetNumberField(TEXT("activityEventCount"), ActivityEventCount);
@@ -1884,6 +2106,7 @@ namespace UnrealMcp
 			Manifest->SetBoolField(TEXT("includeActivityLog"), bIncludeActivityLog);
 			Manifest->SetBoolField(TEXT("includeSkills"), bIncludeSkills);
 		Manifest->SetArrayField(TEXT("sourceDocumentsJsonl"), SourceFileValues);
+		Manifest->SetArrayField(TEXT("sourceMarkdown"), SourceMarkdownFileValues);
 		if (!WriteJsonObjectToFile(Manifest, ManifestPath, FailureReason))
 		{
 			return MakeExecutionResult(FailureReason, StructuredContent, true);

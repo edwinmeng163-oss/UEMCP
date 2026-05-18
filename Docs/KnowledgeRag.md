@@ -39,8 +39,8 @@ Local runtime sources:
   state.
 - `Saved/UnrealMcp/ActivityLog/*.jsonl`: optional user-enabled activity records.
 - `Saved/UnrealMcp/Tasks/*.json`: Task Atlas workflow records derived from
-  ActivityLog. v0.17 keeps these local-only; `To RAG` promotion is a v0.18
-  placeholder.
+  ActivityLog. `To RAG` promotion writes searchable markdown sources under
+  `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/*.md`.
 - `Saved/UnrealMcp/SkillDrafts/**`: unpromoted distilled skill drafts.
 - `Saved/UnrealMcp/TestScaffolds/**`: generated tests and scaffold artifacts.
 - `Saved/UnrealMcp/SupervisorLogs/**`: restart/build/test handoff evidence.
@@ -78,6 +78,12 @@ Start with deterministic local retrieval before embeddings:
 1. Parse versioned docs, registry entries, test fixtures, skills, and selected
    local memory into normalized `KnowledgeCard` records. The versioned schema is
    `Schemas/UnrealMcpKnowledgeCard.schema.json`.
+   `unreal.knowledge_index_refresh` also scans markdown files under the
+   KnowledgeSources source root, including
+   `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/*.md` and equivalent
+   source-root subdirectories. Each markdown file becomes one inline
+   `task-atlas` KnowledgeCard using the first H1 as the title and frontmatter
+   `tags` when present.
 2. Store a generated index under `Saved/UnrealMcp/KnowledgeIndex/index.json`.
    The `cards.jsonl` companion file is written as UTF-8 JSONL so external
    scripts and package validators can inspect it without Unreal-specific text
