@@ -30,6 +30,27 @@ copy_clean_dir() {
   rsync --archive --delete "$@" "$src/" "$dest/"
 }
 
+# Resolve a scaffold source directory: prefer the local working copy under
+# Tools/UnrealMcpToolScaffolds/<id> (populated when a developer is actively
+# iterating on a scaffold draft), otherwise fall back to the committed canonical
+# starter under Tools/UnrealMcpToolScaffoldStarters/<id>. Clean checkouts never
+# contain the working copy; without this fallback the packager fails with
+# "Missing directory" on any first-time packaging run.
+resolve_scaffold_source() {
+  scaffold_id="$1"
+  candidate_working="$repo_root/Tools/UnrealMcpToolScaffolds/$scaffold_id"
+  candidate_starter="$repo_root/Tools/UnrealMcpToolScaffoldStarters/$scaffold_id"
+  if [ -d "$candidate_working" ]; then
+    printf '%s\n' "$candidate_working"
+    return 0
+  fi
+  if [ -d "$candidate_starter" ]; then
+    printf '%s\n' "$candidate_starter"
+    return 0
+  fi
+  die "Missing scaffold: neither $candidate_working nor $candidate_starter exists"
+}
+
 resolve_prebuilt_win64_dir() {
   [ -n "$prebuilt_binaries_path" ] || die "Full-experience packaging requires --prebuilt-binaries-path. Produce binaries on a Windows machine first; see Tools/bundle_prebuilt_binaries_win.md."
   [ -d "$prebuilt_binaries_path" ] || die "Prebuilt binaries path does not exist: $prebuilt_binaries_path"
@@ -233,8 +254,8 @@ if [ "$full_experience" -eq 1 ]; then
     --exclude 'Intermediate/' --exclude 'Saved/' --exclude 'DerivedDataCache/' --exclude '.DS_Store'
   rm -rf "$stage_parent/bridge-bundle-extract"
   copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffoldStarters" "$stage_tools/UnrealMcpToolScaffoldStarters" --exclude '.DS_Store' --exclude 'Saved/'
-  copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffolds/fps_bootstrap" "$stage_tools/UnrealMcpToolScaffolds/fps_bootstrap" --exclude '.DS_Store' --exclude 'Saved/'
-  copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" "$stage_tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" --exclude '.DS_Store' --exclude 'Saved/'
+  copy_clean_dir "$(resolve_scaffold_source fps_bootstrap)" "$stage_tools/UnrealMcpToolScaffolds/fps_bootstrap" --exclude '.DS_Store' --exclude 'Saved/'
+  copy_clean_dir "$(resolve_scaffold_source verify_input_drives_pawn)" "$stage_tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" --exclude '.DS_Store' --exclude 'Saved/'
 
   mkdir -p "$stage_parent/Docs"
   cp "$first_launch_doc" "$stage_parent/Docs/FIRST_LAUNCH.md"
@@ -299,8 +320,8 @@ else
     --exclude 'node_modules/' --exclude 'runtime/' --exclude 'Intermediate/' \
     --exclude 'Saved/' --exclude 'DerivedDataCache/' --exclude '.DS_Store'
   copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffoldStarters" "$stage_scaffold_starters" --exclude '.DS_Store' --exclude 'Saved/'
-  copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffolds/fps_bootstrap" "$stage_tools/UnrealMcpToolScaffolds/fps_bootstrap" --exclude '.DS_Store' --exclude 'Saved/'
-  copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" "$stage_tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" --exclude '.DS_Store' --exclude 'Saved/'
+  copy_clean_dir "$(resolve_scaffold_source fps_bootstrap)" "$stage_tools/UnrealMcpToolScaffolds/fps_bootstrap" --exclude '.DS_Store' --exclude 'Saved/'
+  copy_clean_dir "$(resolve_scaffold_source verify_input_drives_pawn)" "$stage_tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" --exclude '.DS_Store' --exclude 'Saved/'
 
   cp "$install_resource" "$stage_plugin/INSTALL.md"
   cp "$first_launch_doc" "$stage_docs/FIRST_LAUNCH.md"

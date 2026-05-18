@@ -124,15 +124,19 @@ There are two flavors:
 This matches the current Mac zip — pure source, the Win user builds locally on first launch. **This is what we ship now.**
 
 ```powershell
-pwsh -File Tools\package_plugin.ps1 -Version 0.19.0
+pwsh -File Tools\package_plugin.ps1 -Version 0.19.1
 ```
 
 Output:
 ```
-Zip path: Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip
+Zip path: Saved\UnrealMcp\Packages\UnrealMcp-v0.19.1-win-ue56-ue57-projectroot.zip
 Zip size: ~1 MiB
 SHA-256: <hash>
 ```
+
+**Note** (fixed in v0.19.1+): On clean checkouts the script automatically falls back from `Tools\UnrealMcpToolScaffolds\<id>` (the developer working dir, gitignored) to `Tools\UnrealMcpToolScaffoldStarters\<id>` (the canonical committed copy). No manual staging copy needed. If you're packaging from a tag older than v0.19.1, see §5 "Pre-v0.19.1 scaffold fallback" for the workaround.
+
+**Note** (fixed in v0.19.1+): The packager now emits zip entries with forward-slash paths. Older zips produced with `Compress-Archive` had backslash entries that looked empty to Mac/Linux tools and to `verify_package_integrity.py` on those platforms — see §5 "Pre-v0.19.1 path separator" if you see a verifier-PASS-on-Win but ERROR-on-Mac mismatch.
 
 #### Flavor B: full-experience (with prebuilt Win64 binaries)
 
@@ -250,6 +254,41 @@ git checkout main
 ---
 
 ## 5. Common pitfalls
+
+### Pre-v0.19.1 scaffold fallback (no longer needed at v0.19.1+)
+
+If you are packaging a tag older than `v0.19.1` and hit:
+
+```
+Error: Missing directory: <repo>\Tools\UnrealMcpToolScaffolds\fps_bootstrap
+```
+
+stage the canonical starters into the working-copy location before packaging:
+
+```powershell
+New-Item -ItemType Directory -Force -Path Tools\UnrealMcpToolScaffolds | Out-Null
+Copy-Item Tools\UnrealMcpToolScaffoldStarters\fps_bootstrap Tools\UnrealMcpToolScaffolds\fps_bootstrap -Recurse -Force
+Copy-Item Tools\UnrealMcpToolScaffoldStarters\verify_input_drives_pawn Tools\UnrealMcpToolScaffolds\verify_input_drives_pawn -Recurse -Force
+```
+
+After packaging, remove `Tools\UnrealMcpToolScaffolds` to keep the worktree clean.
+
+### Pre-v0.19.1 path separator (no longer needed at v0.19.1+)
+
+If `verify_package_integrity.py` PASSes on Windows but reports missing files on Mac/Linux for a zip you built from an older tag, the zip likely has backslash entry names from `Compress-Archive`. Rebuild from v0.19.1+ which uses `New-PortableZip`, or rewrite the zip with forward slashes:
+
+```python
+import zipfile, os
+src = "input.zip"; dst = "fixed.zip"
+with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+    for e in zin.infolist():
+        data = zin.read(e.filename)
+        i = zipfile.ZipInfo(e.filename.replace("\\", "/"))
+        i.date_time = e.date_time
+        zout.writestr(i, data)
+```
+
+
 
 ### Git checkout from worktree paths
 Don't run `git checkout` from inside `.claude\worktrees\` — that's a developer artifact, not the canonical project root. Always run from the repository root (`C:\src\UEvolve` or wherever you cloned).

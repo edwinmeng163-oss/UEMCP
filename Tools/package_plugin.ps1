@@ -85,6 +85,69 @@ function Copy-CleanDirectory {
     }
 }
 
+# Resolve a scaffold source directory: prefer the local working copy under
+# Tools/UnrealMcpToolScaffolds/<id>, otherwise fall back to the committed
+# canonical starter under Tools/UnrealMcpToolScaffoldStarters/<id>. Clean
+# checkouts never contain the working copy; without this fallback the packager
+# fails with "Missing directory" on any first-time packaging run.
+function Resolve-ScaffoldSource {
+    param([string]$RepoRoot, [string]$ScaffoldId)
+    $working = Join-Path $RepoRoot "Tools/UnrealMcpToolScaffolds/$ScaffoldId"
+    $starter = Join-Path $RepoRoot "Tools/UnrealMcpToolScaffoldStarters/$ScaffoldId"
+    if (Test-Path -LiteralPath $working -PathType Container) {
+        return $working
+    }
+    if (Test-Path -LiteralPath $starter -PathType Container) {
+        return $starter
+    }
+    Die "Missing scaffold: neither $working nor $starter exists"
+}
+
+# Create a portable zip with forward-slash entry paths. PowerShell's
+# Compress-Archive uses backslashes on Windows, producing zips that look
+# empty to Unix/Mac tools (and to verify_package_integrity.py on those
+# platforms). This helper writes entries directly via System.IO.Compression
+# with normalized paths so the same zip works cross-platform.
+function New-PortableZip {
+    param([string]$SourceDir, [string]$DestZip, [string[]]$ExcludeRelativePaths = @())
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path -LiteralPath $DestZip) {
+        Remove-Item -LiteralPath $DestZip -Force
+    }
+    $resolvedSource = (Resolve-Path -LiteralPath $SourceDir).Path
+    $sourceLen = $resolvedSource.Length
+    if (-not $resolvedSource.EndsWith([IO.Path]::DirectorySeparatorChar)) {
+        $sourceLen += 1
+    }
+    $zip = [System.IO.Compression.ZipFile]::Open($DestZip, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        Get-ChildItem -LiteralPath $resolvedSource -Recurse -File | ForEach-Object {
+            $relativeRaw = $_.FullName.Substring($sourceLen)
+            $relative = $relativeRaw.Replace([IO.Path]::DirectorySeparatorChar, '/').Replace('\', '/')
+            $skip = $false
+            foreach ($pattern in $ExcludeRelativePaths) {
+                if ($relative -like $pattern) { $skip = $true; break }
+            }
+            if ($skip) { return }
+            $entry = $zip.CreateEntry($relative, [System.IO.Compression.CompressionLevel]::Optimal)
+            $entryStream = $entry.Open()
+            try {
+                $fileStream = [System.IO.File]::OpenRead($_.FullName)
+                try {
+                    $fileStream.CopyTo($entryStream)
+                } finally {
+                    $fileStream.Dispose()
+                }
+            } finally {
+                $entryStream.Dispose()
+            }
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+
 function Assert-RequiredDirectory {
     param([string]$Path, [string]$Message)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
@@ -297,8 +360,8 @@ try {
             Remove-Item -LiteralPath $bridgeExtractDir -Recurse -Force
         }
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffoldStarters") (Join-Path $stageTools "UnrealMcpToolScaffoldStarters") @(".DS_Store", "Saved")
-        Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffolds/fps_bootstrap") (Join-Path $stageTools "UnrealMcpToolScaffolds/fps_bootstrap") @(".DS_Store", "Saved")
-        Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffolds/verify_input_drives_pawn") (Join-Path $stageTools "UnrealMcpToolScaffolds/verify_input_drives_pawn") @(".DS_Store", "Saved")
+        Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "fps_bootstrap") (Join-Path $stageTools "UnrealMcpToolScaffolds/fps_bootstrap") @(".DS_Store", "Saved")
+        Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "verify_input_drives_pawn") (Join-Path $stageTools "UnrealMcpToolScaffolds/verify_input_drives_pawn") @(".DS_Store", "Saved")
 
         $stageDocs = Join-Path $stageParent "Docs"
         New-Item -ItemType Directory -Force -Path $stageDocs | Out-Null
@@ -375,8 +438,8 @@ try {
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpTests") (Join-Path $stageTools "UnrealMcpTests") @(".DS_Store", "Saved")
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpCodexBridge") (Join-Path $stageTools "UnrealMcpCodexBridge") @("node_modules", "runtime", "Intermediate", "Saved", "DerivedDataCache", ".DS_Store")
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffoldStarters") $stageScaffoldStarters @(".DS_Store", "Saved")
-        Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffolds/fps_bootstrap") (Join-Path $stageTools "UnrealMcpToolScaffolds/fps_bootstrap") @(".DS_Store", "Saved")
-        Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffolds/verify_input_drives_pawn") (Join-Path $stageTools "UnrealMcpToolScaffolds/verify_input_drives_pawn") @(".DS_Store", "Saved")
+        Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "fps_bootstrap") (Join-Path $stageTools "UnrealMcpToolScaffolds/fps_bootstrap") @(".DS_Store", "Saved")
+        Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "verify_input_drives_pawn") (Join-Path $stageTools "UnrealMcpToolScaffolds/verify_input_drives_pawn") @(".DS_Store", "Saved")
 
         Copy-Item -LiteralPath $installResource -Destination (Join-Path $stagePlugin "INSTALL.md") -Force
         New-Item -ItemType Directory -Force -Path $stageDocs | Out-Null
@@ -458,11 +521,11 @@ try {
     $shaPath = "$zipPath.sha256"
 
     Remove-Item -LiteralPath $zipPath, $shaPath -Force -ErrorAction SilentlyContinue
-    if ($FullExperience) {
-        Compress-Archive -Path (Join-Path $stageParent "*") -DestinationPath $zipPath -CompressionLevel Optimal
-    } else {
-        Compress-Archive -Path (Join-Path $stageParent "*") -DestinationPath $zipPath -CompressionLevel Optimal
-    }
+    # Compress-Archive on Windows PowerShell 5.1 uses backslash entry paths,
+    # producing zips that look empty to Mac/Linux tools and to the cross-
+    # platform package verifier. Use New-PortableZip to emit forward-slash
+    # entries regardless of host OS / PowerShell version.
+    New-PortableZip -SourceDir $stageParent -DestZip $zipPath
 
     # The sidecar uses the same two-space format produced by shasum.
     $shaValue = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
