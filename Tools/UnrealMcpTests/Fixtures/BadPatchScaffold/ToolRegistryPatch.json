@@ -15,7 +15,7 @@
   "preflightSupport": false,
   "postcheckSupport": false,
   "testCoverage": "category",
-  "owner": "UEvolve Tests",
+  "owner": "UEAtelier Tests",
   "docsPath": "Docs/SelfExtensionPipeline.md",
   "notes": "Bad generated patch fixture; not intended for real integration."
 }

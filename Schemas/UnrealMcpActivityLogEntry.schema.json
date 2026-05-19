@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://uevolve.local/schemas/UnrealMcpActivityLogEntry.schema.json",
   "title": "UEvolve.UnrealMcpActivityLogEntry.v2",
-  "description": "A local-first UEvolve ActivityLog JSONL entry used by closed-loop RAG session evidence.",
+  "description": "A local-first UEAtelier ActivityLog JSONL entry used by closed-loop RAG session evidence.",
   "type": "object",
   "additionalProperties": false,
   "required": [

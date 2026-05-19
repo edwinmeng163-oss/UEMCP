@@ -6,7 +6,7 @@
 
 This guide tells a Windows collaborator how to produce a `UnrealMcp-vX.Y.Z-win-*.zip` and attach it to an existing GitHub release. PM does the Mac zip and creates the release; this side packages the Windows companion.
 
-> Audience: a Windows machine that has UE 5.6 and/or UE 5.7 installed, with the UEvolve repository cloned.
+> Audience: a Windows machine that has UE 5.6 and/or UE 5.7 installed, with the UEAtelier repository cloned.
 
 ---
 
@@ -34,7 +34,7 @@ gh auth login
 Verify you can see the project's releases:
 
 ```powershell
-gh release list --repo edwinmeng163-oss/UEvolve --limit 5
+gh release list --repo edwinmeng163-oss/UEAtelier --limit 5
 ```
 
 ### 1.3 Clone (only once)
@@ -42,7 +42,7 @@ gh release list --repo edwinmeng163-oss/UEvolve --limit 5
 ```powershell
 cd C:\src        # or wherever you keep code
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 ```
 
 If you already have it, just `git fetch --tags origin`.
@@ -177,7 +177,7 @@ The Mac zip is already attached to each release. You add the Win zip + sha256 si
 
 ```powershell
 gh release upload v0.19.0 `
-    --repo edwinmeng163-oss/UEvolve `
+    --repo edwinmeng163-oss/UEAtelier `
     Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip `
     Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip.sha256
 ```
@@ -185,7 +185,7 @@ gh release upload v0.19.0 `
 Verify online:
 
 ```powershell
-gh release view v0.19.0 --repo edwinmeng163-oss/UEvolve
+gh release view v0.19.0 --repo edwinmeng163-oss/UEAtelier
 ```
 
 You should see 4 assets attached (2 Mac + 2 Win).
@@ -196,7 +196,7 @@ You should see 4 assets attached (2 Mac + 2 Win).
 
 ```powershell
 gh release upload v0.19.0 `
-    --repo edwinmeng163-oss/UEvolve `
+    --repo edwinmeng163-oss/UEAtelier `
     --clobber `
     Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip `
     Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip.sha256
@@ -241,7 +241,7 @@ foreach ($v in $versions) {
     if ($LASTEXITCODE -ne 0) { throw "verify failed for v$v" }
 
     # Upload
-    gh release upload "v$v" --repo edwinmeng163-oss/UEvolve $zip "$zip.sha256"
+    gh release upload "v$v" --repo edwinmeng163-oss/UEAtelier $zip "$zip.sha256"
 
     Write-Host "=== v$v done ===" -ForegroundColor Green
 }
@@ -280,7 +280,7 @@ The script-side fallback landed on `main` after v0.19.1, so all future tags pack
 
 
 ### Git checkout from worktree paths
-Don't run `git checkout` from inside `.claude\worktrees\` — that's a developer artifact, not the canonical project root. Always run from the repository root (`C:\src\UEvolve` or wherever you cloned).
+Don't run `git checkout` from inside `.claude\worktrees\` — that's a developer artifact, not the canonical project root. Always run from the repository root (`C:\src\UEAtelier` or wherever you cloned).
 
 ### Long path issues
 Windows default MAX_PATH is 260 characters. UE's Intermediate directory generates deep paths. If you hit `path too long` errors:

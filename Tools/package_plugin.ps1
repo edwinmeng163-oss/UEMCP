@@ -4,7 +4,7 @@ project-root full-experience zip with prebuilt UE 5.6.1 Win64 binaries.
 
 This PowerShell port is syntax-only verified on macOS. Stage 2 real Win64
 verification on collaborator hardware is pending; track the pilot release at:
-https://github.com/edwinmeng163-oss/UEvolve/releases/tag/v0.12.0-pilot-mac-ue56-ue57
+https://github.com/edwinmeng163-oss/UEAtelier/releases/tag/v0.12.0-pilot-mac-ue56-ue57
 #>
 
 param(

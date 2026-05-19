@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://uevolve.local/schemas/UnrealMcpKnowledgeCard.schema.json",
-  "title": "UEvolve KnowledgeCard",
-  "description": "A normalized local-first RAG card used by UEvolve knowledge_search, tool_recommend, tool_gap_analyze, and workflow_recommend.",
+  "title": "UEAtelier KnowledgeCard",
+  "description": "A normalized local-first RAG card used by UEAtelier knowledge_search, tool_recommend, tool_gap_analyze, and workflow_recommend.",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -71,11 +71,11 @@ codex "$(cat /tmp/my-prompt.md)"
 `codex-agent start` 内部已走 `codex "$(cat …)"` 而非 `codex exec`（参见 `~/.codex-orchestrator/src/tmux.ts`），用 codex-agent 派代理自动满足本规则。
 
 ### `--dir` 必须指向项目根，禁止 worktree 路径
-项目根：`/Users/ender/Documents/Git/UEvolve`。
+项目根：`/Users/ender/Documents/Git/UEAtelier`。
 **禁止**：把 `.claude/worktrees/*` 或任何非项目根目录作为 cwd / `--dir`（app 按 cwd 精确分组，worktree 不会匹配项目条目）。
 
-- 直接调 codex：`codex --dir /Users/ender/Documents/Git/UEvolve "$(cat /tmp/my-prompt.md)"`
-- 用 codex-agent：`codex-agent start … --dir /Users/ender/Documents/Git/UEvolve`（默认值是当前 cwd，从 worktree spawn 时**必须**显式覆盖）
+- 直接调 codex：`codex --dir /Users/ender/Documents/Git/UEAtelier "$(cat /tmp/my-prompt.md)"`
+- 用 codex-agent：`codex-agent start … --dir /Users/ender/Documents/Git/UEAtelier`（默认值是当前 cwd，从 worktree spawn 时**必须**显式覆盖）
 
 ### 找回隐藏 session
 若需复播被 app 隐藏的旧 session（如历史 `exec` session），用 `codex resume <thread_id>`。Thread ID 在 `~/.codex/sessions/` 下。
@@ -229,7 +229,7 @@ Real failure modes from the 2026-05-17 Tier 2 cycle that closed the Win example-
 Built-in memory lives at `~/.hermes/memories/MEMORY.md` (NOT `~/.hermes/MEMORY.md` — that path is ignored). It is shared across all projects on this machine and is fact-log style with `§` separators between facts.
 
 - Limit is `memory_char_limit` in `~/.hermes/config.yaml` (currently 20000; raise if memory grows).
-- PM updates this file directly after meaningful project events. Keep UEvolve section under one clear `## UEvolve project memory` header so cross-project facts (rts-server, Homebrew paths, Docker socket, etc.) stay separate and intact.
+- PM updates this file directly after meaningful project events. Keep UEAtelier section under one clear `## UEAtelier project memory` header so cross-project facts (rts-server, Homebrew paths, Docker socket, etc.) stay separate and intact.
 - Verify reloads by spawning a fresh `hermes chat` (no `--resume`) with a "cold-start sanity check" prompt asking about project identity / dispatch / current HEAD; if Hermes says "missing from context", the file location or limit is wrong.
 
 ## Key References

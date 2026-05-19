@@ -1,6 +1,6 @@
 # Unreal MCP Knowledge Sources
 
-This folder stores versioned source manifests for UEvolve's local knowledge/RAG
+This folder stores versioned source manifests for UEAtelier's local knowledge/RAG
 bootstrap. It should contain source lists, schemas, and small metadata files, not
 downloaded third-party documentation payloads.
 

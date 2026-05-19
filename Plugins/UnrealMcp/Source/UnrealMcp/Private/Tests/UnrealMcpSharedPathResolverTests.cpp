@@ -76,15 +76,15 @@ bool FUnrealMcpToolsReadPathResolverPureTest::RunTest(const FString& Parameters)
 	}
 
 	{
-		const auto Exists = MakeExistsPredicate({ TEXT("/Shared/UEvolve/Tools/UnrealMcpToolRegistry/tools.json") });
+		const auto Exists = MakeExistsPredicate({ TEXT("/Shared/UEAtelier/Tools/UnrealMcpToolRegistry/tools.json") });
 		const UnrealMcp::FToolsReadResolution Resolution = UnrealMcp::ResolveToolsReadSubpath_Pure(
 			TEXT("/User/CopiedGame"),
-			TEXT("/Shared/UEvolve/Plugins/UnrealMcp"),
+			TEXT("/Shared/UEAtelier/Plugins/UnrealMcp"),
 			TEXT("UnrealMcpToolRegistry/tools.json"),
 			Exists);
 		TestTrue(TEXT("Copied project uses plugin BaseDir anchor to find shared Tools."), Resolution.bFound);
 		TestTrue(TEXT("Copied project fallback source kind"), Resolution.SourceKind == ESource::SharedRepoRoot);
-		TestEqual(TEXT("Copied project fallback path"), Resolution.Path, TEXT("/Shared/UEvolve/Tools/UnrealMcpToolRegistry/tools.json"));
+		TestEqual(TEXT("Copied project fallback path"), Resolution.Path, TEXT("/Shared/UEAtelier/Tools/UnrealMcpToolRegistry/tools.json"));
 	}
 
 	{
@@ -157,7 +157,7 @@ bool FUnrealMcpToolsReadPathResolverPureTest::RunTest(const FString& Parameters)
 		const TArray<FString> InvalidSubpaths = {
 			TEXT("../UnrealMcpToolRegistry/tools.json"),
 			TEXT("/abs/UnrealMcpToolRegistry/tools.json"),
-			TEXT("C:/UEvolve/Tools/UnrealMcpToolRegistry/tools.json"),
+			TEXT("C:/UEAtelier/Tools/UnrealMcpToolRegistry/tools.json"),
 			TEXT("//server/share/Tools/UnrealMcpToolRegistry/tools.json")
 		};
 		for (const FString& InvalidSubpath : InvalidSubpaths)

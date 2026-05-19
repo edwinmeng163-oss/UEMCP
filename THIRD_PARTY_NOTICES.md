@@ -1,10 +1,10 @@
 # Third-Party Notices
 
-This repository contains original UEvolve source code, scripts, and documentation, plus Unreal Engine project content and Epic-provided template assets.
+This repository contains original UEAtelier source code, scripts, and documentation, plus Unreal Engine project content and Epic-provided template assets.
 
-## UEvolve Original Work
+## UEAtelier Original Work
 
-Original source code, scripts, and documentation authored specifically for UEvolve are licensed under the MIT License in `LICENSE`.
+Original source code, scripts, and documentation authored specifically for UEAtelier are licensed under the MIT License in `LICENSE`.
 
 This includes, unless otherwise noted:
 

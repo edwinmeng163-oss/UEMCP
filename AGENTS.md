@@ -1,4 +1,4 @@
-# UEvolve Agent Handoff
+# UEAtelier Agent Handoff
 
 This file is the first-read briefing for any AI agent that opens this
 repository. It summarizes the current project intent, structure, tool system,
@@ -6,7 +6,7 @@ self-extension workflow, RAG layer, testing strategy, and safe working rules.
 
 ## Project Identity
 
-UEvolve is an Unreal Editor MCP self-extension workbench.
+UEAtelier is an Unreal Editor MCP self-extension workbench.
 
 The main deliverable is the editor plugin at:
 

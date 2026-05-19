@@ -1,11 +1,11 @@
 # Fab Submission Checklist
 
-This document is the pre-submission readiness checklist for publishing UEvolve on Fab (formerly Epic Marketplace). It maps each Fab review item to the file or process in this repository that supplies the evidence. Walk it top to bottom before opening a Fab submission.
+This document is the pre-submission readiness checklist for publishing UEAtelier on Fab (formerly Epic Marketplace). It maps each Fab review item to the file or process in this repository that supplies the evidence. Walk it top to bottom before opening a Fab submission.
 
 ## 1. Pre-submission overview
 
 - Submission portal: https://fab.com, Epic's marketplace that replaced Unreal Engine Marketplace, Sketchfab, Quixel Bridge, and ArtStation Marketplace in late 2024.
-- Submission category: Code Plugins, because UEvolve is a code-bearing Unreal Engine editor plugin.
+- Submission category: Code Plugins, because UEAtelier is a code-bearing Unreal Engine editor plugin.
 - Required developer account: Epic Games account with completed Fab seller onboarding.
 - Seller tax setup: W-9 or W-8BEN tax form must be on file before paid or free listing publication.
 - Review SLA: first review is typically 5-10 business days.
@@ -54,7 +54,7 @@ Before submission, update the `.uplugin` description only after the PM approves 
 ## 4. Pricing and licensing
 
 - Recommended pricing tier: free until v1.0 GA.
-- Rationale: UEvolve is a beta plugin, active development is ongoing, and the current value is workflow proof plus early adopter feedback rather than a polished commercial product.
+- Rationale: UEAtelier is a beta plugin, active development is ongoing, and the current value is workflow proof plus early adopter feedback rather than a polished commercial product.
 - Pricing decision owner: PM.
 - Current license evidence: root `LICENSE` exists in this checkout.
 - Pre-submission license action: confirm the root `LICENSE` is the intended public license for Fab distribution.
@@ -109,7 +109,7 @@ Fab does not require third-party test reports for code plugins, but including a 
 - C++ path resolver test reference: `Plugins/UnrealMcp/Source/UnrealMcp/Private/Tests/UnrealMcpSharedPathResolverTests.cpp`.
 - Package integrity reference: `Tools/verify_package_integrity.py --strict`.
 - Current release evidence: package integrity was reported PASS as of v0.15.1.
-- Submission recommendation: prepare a short listing paragraph that says UEvolve is covered by registry validation, package integrity checks, JSON MCP smoke fixtures, and Unreal automation tests for install doctor and shared path resolution.
+- Submission recommendation: prepare a short listing paragraph that says UEAtelier is covered by registry validation, package integrity checks, JSON MCP smoke fixtures, and Unreal automation tests for install doctor and shared path resolution.
 - Keep the test summary factual; do not imply Epic has certified the plugin before Fab review completes.
 
 ## 8. PII / secret scrub
@@ -139,16 +139,16 @@ If anything unexpected surfaces, redact it before packaging and rerun the grep c
 
 - Public support email: TBD.
 - Gap: PM must register a `support@uevolve.*` address or designate a personal email on file.
-- Issue tracker: https://github.com/edwinmeng163-oss/UEvolve/issues.
+- Issue tracker: https://github.com/edwinmeng163-oss/UEAtelier/issues.
 - Listing action: link the issue tracker in the Fab support section.
 - Update cadence: declare an explicit beta cadence, such as monthly patches and quarterly major versions.
 - Recommended beta triage target: respond to GitHub issues within 72 hours.
 - Recommended post-GA triage target: respond to GitHub issues within 48 hours.
-- Support boundary: make clear that UEvolve automates Unreal Editor locally and does not provide general Unreal project consulting.
+- Support boundary: make clear that UEAtelier automates Unreal Editor locally and does not provide general Unreal project consulting.
 
-## 10. Self-extension disclosure (UEvolve-specific)
+## 10. Self-extension disclosure (UEAtelier-specific)
 
-UEvolve's self-extension pipeline is unusual for a Fab plugin and must be disclosed clearly.
+UEAtelier's self-extension pipeline is unusual for a Fab plugin and must be disclosed clearly.
 
 - The plugin includes tools that can write to its own C++ source through the `apply_scaffold` family.
 - Apply paths are bounded to the plugin-source domain by the path-resolution policy.
@@ -169,7 +169,7 @@ UEvolve's self-extension pipeline is unusual for a Fab plugin and must be disclo
 - The plugin itself should not make outbound network calls for its core MCP server behavior.
 - Optional bridge behavior: the bridge speaks stdio or Unix socket to Codex Desktop / Codex App Server.
 - Codex Desktop or other external AI clients make their own outbound calls under their own consent, account, and network rules.
-- Listing language should distinguish UEvolve's local listener from the network behavior of whichever AI assistant connects to it.
+- Listing language should distinguish UEAtelier's local listener from the network behavior of whichever AI assistant connects to it.
 - Firewall note: users may see local-loopback prompts depending on platform policy, endpoint security tooling, or corporate device management.
 
 ## 12. Cross-platform support disclosure
@@ -230,7 +230,7 @@ Fab expects code plugins as a zip archive.
 - Exception: include `Binaries/` only if Fab explicitly requires a binary redistribution package for the submission type.
 - Repo verifier evidence: `Tools/verify_package_integrity.py`.
 - Verifier invariant: `excluded_paths_absent` enforces most package-exclusion rules.
-- UEvolve-specific issue: the current package layout is project-root, not plugin-root.
+- UEAtelier-specific issue: the current package layout is project-root, not plugin-root.
 - Current project-root package includes shared `Tools/`, `Docs/`, `Schemas/`, and `Plugins/UnrealMcp/`.
 - Fab follow-up requirement: build a plugin-only repackage path.
 - Do not upload the current project-root zip to Fab without confirming Fab accepts the extra top-level support directories.
@@ -276,4 +276,4 @@ Fab expects code plugins as a zip archive.
 
 | Date | Version | Author | Notes |
 |---|---|---|---|
-| 2026-05-18 | initial | UEvolve PM | Created during v0.15.1 C5 Phase 2 wrap |
+| 2026-05-18 | initial | UEAtelier PM | Created during v0.15.1 C5 Phase 2 wrap |

@@ -1,3 +1,3 @@
-// Copyright (c) UEvolve contributors.
+// Copyright (c) UEAtelier contributors.
 
 #pragma once

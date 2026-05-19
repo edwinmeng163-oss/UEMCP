@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Docs/Images/uevolve-banner.png" alt="UEvolve — Unreal MCP Self-Extension Workbench" width="100%" />
+  <img src="Docs/Images/uevolve-banner.png" alt="UEAtelier — Unreal MCP Self-Extension Workbench" width="100%" />
 </p>
 
-# UEvolve
+# UEAtelier
 
 **Unreal Editor MCP Self-Extension Workbench**
 
@@ -19,14 +19,14 @@ Its main deliverable is the **Unreal MCP** editor plugin under `Plugins/UnrealMc
 
 ## English Overview
 
-UEvolve is an Unreal Editor 5.6 / 5.7 MCP self-extension workbench.
+UEAtelier is an Unreal Editor 5.6 / 5.7 MCP self-extension workbench.
 
 It is more than a plain wrapper that lets AI call Unreal Editor tools.
-UEvolve productizes the act of adding new MCP capabilities under safety rails:
+UEAtelier productizes the act of adding new MCP capabilities under safety rails:
 audit, dry run, backup manifest, UBT compile, fixture suite, rollback, project
 memory, and supervisor recovery.
 
-Latest release: **[v0.22.1 — UE 5.6 Win MSVC C4459 fix + CI Windows packaging (Mac + Win)](https://github.com/edwinmeng163-oss/UEvolve/releases/tag/v0.22.1)** (public, source-only, ~1 MiB each). Mac and Windows zips both attached; same source compiles cleanly on UE 5.6 and UE 5.7. Extract the projectroot zip next to your `<YourProject>.uproject` (NOT under `Plugins/`); UBT compiles on first editor launch.
+Latest release: **[v0.22.1 — UE 5.6 Win MSVC C4459 fix + CI Windows packaging (Mac + Win)](https://github.com/edwinmeng163-oss/UEAtelier/releases/tag/v0.22.1)** (public, source-only, ~1 MiB each). Mac and Windows zips both attached; same source compiles cleanly on UE 5.6 and UE 5.7. Extract the projectroot zip next to your `<YourProject>.uproject` (NOT under `Plugins/`); UBT compiles on first editor launch.
 
 Current core capabilities:
 
@@ -50,14 +50,14 @@ Deployment section later in this README.
 
 ## 中文概览
 
-UEvolve 是一个面向 Unreal Editor 5.6 / 5.7 的 MCP 自扩展工作台。
+UEAtelier 是一个面向 Unreal Editor 5.6 / 5.7 的 MCP 自扩展工作台。
 
 它不只是让 AI 调用 Unreal Editor 工具的普通 wrapper。
-UEvolve 试图把“新增 MCP 能力”本身产品化，并用安全护栏保护这件事：
+UEAtelier 试图把“新增 MCP 能力”本身产品化，并用安全护栏保护这件事：
 audit、dry run、备份 manifest、UBT 编译、fixture 测试套件、rollback、
 project memory 和 supervisor 恢复链路。
 
-最新 release：**[v0.22.1 — UE 5.6 Win MSVC C4459 fix + CI Windows packaging（Mac + Win）](https://github.com/edwinmeng163-oss/UEvolve/releases/tag/v0.22.1)**（公开、source-only、各约 1 MiB）。Mac 和 Windows zip 都已上传；同一份 source 在 UE 5.6 和 UE 5.7 上都能干净编译。把 projectroot zip 解压到 `<YourProject>.uproject` 同级目录（不要解到 `Plugins/` 下），UBT 在首次启动编辑器时自动编译。
+最新 release：**[v0.22.1 — UE 5.6 Win MSVC C4459 fix + CI Windows packaging（Mac + Win）](https://github.com/edwinmeng163-oss/UEAtelier/releases/tag/v0.22.1)**（公开、source-only、各约 1 MiB）。Mac 和 Windows zip 都已上传；同一份 source 在 UE 5.6 和 UE 5.7 上都能干净编译。把 projectroot zip 解压到 `<YourProject>.uproject` 同级目录（不要解到 `Plugins/` 下），UBT 在首次启动编辑器时自动编译。
 
 当前核心能力：
 
@@ -80,14 +80,14 @@ README 后面的 Deployment 部分。
 
 ## 日本語概要
 
-UEvolve は Unreal Editor 5.6 / 5.7 向けの MCP self-extension workbench です。
+UEAtelier は Unreal Editor 5.6 / 5.7 向けの MCP self-extension workbench です。
 
 これは AI に Unreal Editor tools を呼び出させるだけの plain wrapper ではありません。
-UEvolve は新しい MCP capabilities を追加する行為そのものを製品化し、
+UEAtelier は新しい MCP capabilities を追加する行為そのものを製品化し、
 audit、dry run、backup manifest、UBT compile、fixture suite、rollback、
 project memory、supervisor recovery という安全レールの下で扱います。
 
-最新リリース: **[v0.22.1 — UE 5.6 Win MSVC C4459 fix + CI Windows packaging（Mac + Win）](https://github.com/edwinmeng163-oss/UEvolve/releases/tag/v0.22.1)**（公開、source-only、各約 1 MiB）。Mac と Windows の zip が両方添付されており、同一ソースで UE 5.6 と UE 5.7 の両方が clean にコンパイルできます。projectroot zip を `<YourProject>.uproject` と同じ階層に展開してください（`Plugins/` 配下には展開しません）。UBT が初回エディタ起動時にコンパイルします。
+最新リリース: **[v0.22.1 — UE 5.6 Win MSVC C4459 fix + CI Windows packaging（Mac + Win）](https://github.com/edwinmeng163-oss/UEAtelier/releases/tag/v0.22.1)**（公開、source-only、各約 1 MiB）。Mac と Windows の zip が両方添付されており、同一ソースで UE 5.6 と UE 5.7 の両方が clean にコンパイルできます。projectroot zip を `<YourProject>.uproject` と同じ階層に展開してください（`Plugins/` 配下には展開しません）。UBT が初回エディタ起動時にコンパイルします。
 
 現在の中核機能:
 
@@ -363,7 +363,7 @@ The chat panel includes a small `AI Settings / Project Skills` bar:
 - `Read Memory` calls `unreal.project_memory_view` for recent project memory entries.
 - `Write Task Memory` saves the current task text, selected skill, and apply mode to `chat.current_task`.
 
-![UEvolve Chat Toolbar and Workbench overview](Docs/Images/chat-toolbar-workbench.svg)
+![UEAtelier Chat Toolbar and Workbench overview](Docs/Images/chat-toolbar-workbench.svg)
 
 Examples:
 
@@ -387,7 +387,7 @@ AI-assisted request example:
 inspect the current project and summarize the maps, selected actors, and available Blueprint assets
 ```
 
-When an AI turn gets close to tool-loop limits, UEvolve writes a resume checkpoint to
+When an AI turn gets close to tool-loop limits, UEAtelier writes a resume checkpoint to
 `chat.active_task`. If the limit is reached, the turn pauses with a concrete next
 step instead of failing hard; read `chat.active_task`, continue one bounded step, and
 verify before exploring further.
@@ -499,7 +499,7 @@ Build/test handoff note:
 
 ## Local Knowledge And RAG Bootstrap
 
-UEvolve keeps RAG source manifests versioned, but keeps downloaded third-party
+UEAtelier keeps RAG source manifests versioned, but keeps downloaded third-party
 documentation payloads local. The first official Unreal Engine documentation
 seed list lives at:
 
@@ -616,12 +616,12 @@ Clone and pull LFS assets:
 
 ```bash
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 git lfs install
 git lfs pull
 ```
 
-To use UEvolve in an existing Unreal project, use the installer helper:
+To use UEAtelier in an existing Unreal project, use the installer helper:
 
 ```bash
 python3 Tools/install_unrealmcp_to_project.py --project "/path/to/YourProject/YourProject.uproject"
@@ -668,7 +668,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## Deployment Guide / 部署指南
 
-UEvolve is an Unreal Editor plugin workflow rather than a packaged game/server deployment. The repository root is the canonical local development checkout: `UEvolve.uproject` loads the workbench plugin, `Plugins/UnrealMcp` is the reusable plugin, and `Examples/UEvolveExample` (UE 5.6.1) and `Examples/UEvolveExample57` (UE 5.7.4) are two sample projects for validation — pick the one matching your installed engine.
+UEAtelier is an Unreal Editor plugin workflow rather than a packaged game/server deployment. The repository root is the canonical local development checkout: `UEvolve.uproject` loads the workbench plugin, `Plugins/UnrealMcp` is the reusable plugin, and `Examples/UEvolveExample` (UE 5.6.1) and `Examples/UEvolveExample57` (UE 5.7.4) are two sample projects for validation — pick the one matching your installed engine.
 
 There are four common entry points:
 
@@ -700,7 +700,7 @@ git lfs version
 
 ```bash
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 git lfs install
 git lfs pull
 # Install the repo-tracked pre-commit hook (one-time; sets core.hooksPath locally).
@@ -716,11 +716,11 @@ The pre-commit hook runs `python3 Tools/validate_tool_registry.py` and `python3 
 
 ### 3. Install Into An Existing Project
 
-Use this path when you want UEvolve inside your own Unreal project rather than the repository's root development host.
+Use this path when you want UEAtelier inside your own Unreal project rather than the repository's root development host.
 
 ```mermaid
 flowchart LR
-    A["Clone UEvolve"] --> B["Copy or symlink Plugins/UnrealMcp"]
+    A["Clone UEAtelier"] --> B["Copy or symlink Plugins/UnrealMcp"]
     B --> C["Copy Tools, Schemas, and Docs"]
     C --> D["Enable UnrealMcp and PythonScriptPlugin"]
     D --> E["Build your Editor target"]
@@ -829,7 +829,7 @@ Recommended Windows environment:
 Recommended clone location:
 
 ```text
-C:\UnrealProjects\UEvolve
+C:\UnrealProjects\UEAtelier
 ```
 
 Avoid these locations when possible:
@@ -842,8 +842,8 @@ Avoid these locations when possible:
 Clone on Windows:
 
 ```powershell
-git clone https://github.com/edwinmeng163-oss/UEvolve.git C:\UnrealProjects\UEvolve
-cd C:\UnrealProjects\UEvolve
+git clone https://github.com/edwinmeng163-oss/UEvolve.git C:\UnrealProjects\UEAtelier
+cd C:\UnrealProjects\UEAtelier
 git lfs install
 git lfs pull
 ```
@@ -888,7 +888,7 @@ Build from Command Prompt:
 
 If your engine is installed somewhere else, change the `UE_5.7` path accordingly.
 
-For an existing project such as `EasyMapper5_7`, build that project's editor target instead of the root UEvolve host:
+For an existing project such as `EasyMapper5_7`, build that project's editor target instead of the root UEAtelier host:
 
 ```powershell
 & "E:\3D_SOFTWARE\UE_5.7\Engine\Build\BatchFiles\Build.bat" `
@@ -1035,7 +1035,7 @@ Use these as short "follow-along" checklists when recording a setup video or wal
 
 macOS:
 
-1. Clone and enter the repository: `git clone https://github.com/edwinmeng163-oss/UEvolve.git && cd UEvolve`.
+1. Clone and enter the repository: `git clone https://github.com/edwinmeng163-oss/UEvolve.git && cd UEAtelier`.
 2. Pull binary assets: `git lfs install && git lfs pull`.
 3. Open the root host: `./open_uevolve.command`, or double-click `UEvolve.uproject`.
 4. Allow Unreal to rebuild modules if prompted, then wait until the editor finishes loading.
@@ -1045,8 +1045,8 @@ macOS:
 
 Windows:
 
-1. Clone to a short path: `git clone https://github.com/edwinmeng163-oss/UEvolve.git C:\UnrealProjects\UEvolve`.
-2. Enter the checkout and pull assets: `cd C:\UnrealProjects\UEvolve`, then `git lfs install` and `git lfs pull`.
+1. Clone to a short path: `git clone https://github.com/edwinmeng163-oss/UEvolve.git C:\UnrealProjects\UEAtelier`.
+2. Enter the checkout and pull assets: `cd C:\UnrealProjects\UEAtelier`, then `git lfs install` and `git lfs pull`.
 3. Build from PowerShell with the `Build.bat` command above, or open `UEvolve.uproject` and allow the rebuild prompt.
 4. If build fails with Live Coding active, close Unreal Editor, disable Live Coding, and rebuild.
 5. Start the root host with `.\open_uevolve.ps1`, or double-click `UEvolve.uproject`.
@@ -1139,7 +1139,7 @@ Do not commit API keys to Git. User-specific editor settings are ignored by `.gi
 
 ## License Notice
 
-Original UEvolve source code, scripts, and documentation are licensed under the [MIT License](LICENSE).
+Original UEAtelier source code, scripts, and documentation are licensed under the [MIT License](LICENSE).
 
 Important:
 
@@ -1152,5 +1152,5 @@ Important:
 GitHub:
 
 ```text
-https://github.com/edwinmeng163-oss/UEvolve
+https://github.com/edwinmeng163-oss/UEAtelier
 ```

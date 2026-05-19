@@ -14,7 +14,7 @@
   "preflightSupport": true,
   "postcheckSupport": true,
   "testCoverage": "manual",
-  "owner": "UEvolve Core",
+  "owner": "UEAtelier Core",
   "docsPath": "Tools/UnrealMcpToolScaffoldStarters/verify_input_drives_pawn/README.md",
   "reason": "Starter scaffold for functional FPS input verification; starts or uses PIE, injects input, and returns measured movement/rotation evidence.",
   "summaryTemplate": "Verified {args.inputAxis} on {args.pawnClass}: pass={result.pass} delta={result.actualLocationDelta}",

@@ -108,7 +108,7 @@ TSharedRef<IUnrealMcpAssistantHandle, ESPMode::ThreadSafe> FUnrealMcpModule::Exe
 	if (!Settings->bEnableAiAssistant)
 	{
 		return CompleteAssistantTurnWithError(
-			TEXT("AI assistant is disabled. Enable it in Project Settings > Plugins > Unreal MCP > AI."),
+			TEXT("AI assistant is disabled. Enable it in Project Settings > Plugins > UEAtelier > AI."),
 			MoveTemp(OnComplete));
 	}
 

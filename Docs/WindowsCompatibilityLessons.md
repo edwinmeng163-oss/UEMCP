@@ -182,7 +182,7 @@ Diagnostic signal: runtime response of a tool you just changed lacks any new str
 { "Name": "AIAssistant", "Enabled": true }
 ```
 
-The plugin is useful when present but isn't required for UEvolve itself.
+The plugin is useful when present but isn't required for UEAtelier itself.
 
 **Fix** (`57ce634`):
 
@@ -214,7 +214,7 @@ The Tier 2 path resolver fell back to whichever one existed, so the Mac dev host
 
 ## 12-15. Codex App Server bridge (issue #2 comment 8)
 
-Tier 4 (`e08a995`) fixed four bridge issues simultaneously. See full diagnosis in github.com/edwinmeng163-oss/UEvolve/issues/2#issuecomment-... (by edwinmeng163-oss, 2026-05-16T23:18Z):
+Tier 4 (`e08a995`) fixed four bridge issues simultaneously. See full diagnosis in github.com/edwinmeng163-oss/UEAtelier/issues/2#issuecomment-... (by edwinmeng163-oss, 2026-05-16T23:18Z):
 
 ### 12. Bundled `runtime/bun.exe` ignored
 
@@ -381,7 +381,7 @@ See #8 for the diagnostic signal (runtime response missing your new structured-c
 
 ## Issue thread
 
-[github.com/edwinmeng163-oss/UEvolve/issues/2](https://github.com/edwinmeng163-oss/UEvolve/issues/2) — Windows UE 5.6 validation report. Closed after 4 retest rounds + 1 schema-symlink follow-up. Comments preserve the diagnostic trail.
+[github.com/edwinmeng163-oss/UEAtelier/issues/2](https://github.com/edwinmeng163-oss/UEAtelier/issues/2) — Windows UE 5.6 validation report. Closed after 4 retest rounds + 1 schema-symlink follow-up. Comments preserve the diagnostic trail.
 
 ---
 
@@ -432,7 +432,7 @@ Bun version: 1.x.x
 Codex binary: C:\Users\<you>\AppData\Local\OpenAI\Codex\bin\<hash>\codex.exe
 unrealmcp already current in C:\Users\<you>\.codex\config.toml
 Registered MCP server 'unrealmcp' with Codex; ...
-UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
+UEAtelier Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=stdio endpoint=stdio://
 Codex app-server args: app-server --listen stdio:// ...
 ```

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch curated official documentation pages into a local UEvolve RAG cache.
+"""Fetch curated official documentation pages into a local UEAtelier RAG cache.
 
 The fetched page content is for local indexing only. By default this script
 writes under Saved/UnrealMcp so official docs are not redistributed through Git.
@@ -27,7 +27,7 @@ from typing import Iterable
 DEFAULT_SEED_FILE = Path("Tools/UnrealMcpKnowledge/Sources/unreal_engine_official_docs_5_7.json")
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_DELAY_SECONDS = 0.4
-DEFAULT_USER_AGENT = "UEvolve-RAG-Fetcher/0.1 (+https://github.com/edwinmeng163-oss/UEvolve)"
+DEFAULT_USER_AGENT = "UEAtelier-RAG-Fetcher/0.1 (+https://github.com/edwinmeng163-oss/UEAtelier)"
 ALLOWED_HOSTS = {"dev.epicgames.com"}
 ALLOWED_PATH_PREFIXES = ("/documentation/en-us/unreal-engine",)
 DOCUMENTATION_API_URL = "https://dev.epicgames.com/community/api/documentation/document.json"

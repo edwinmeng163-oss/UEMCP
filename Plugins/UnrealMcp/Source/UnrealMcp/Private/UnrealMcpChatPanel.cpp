@@ -950,7 +950,7 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 			.AutoHeight()
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("Title", "Unreal MCP Chat"))
+				.Text(LOCTEXT("Title", "UEAtelier Chat"))
 				.Font(FAppStyle::GetFontStyle("HeadingMedium"))
 			]
 			+ SVerticalBox::Slot()
@@ -1261,7 +1261,7 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 						[
 							SNew(SButton)
 							.Text(LOCTEXT("AiSettingsButton", "AI Settings"))
-							.ToolTipText(LOCTEXT("AiSettingsTooltip", "Open Project Settings > Plugins > Unreal MCP, where the OpenAI API key and model are configured."))
+							.ToolTipText(LOCTEXT("AiSettingsTooltip", "Open Project Settings > Plugins > UEAtelier, where the OpenAI API key and model are configured."))
 							.OnClicked(this, &SUnrealMcpChatPanel::HandleOpenAiSettingsClicked)
 						]
 						+ SHorizontalBox::Slot()
@@ -1642,7 +1642,7 @@ FReply SUnrealMcpChatPanel::HandleRateTaskClicked(TSharedPtr<FUnrealMcpChatEntry
 	}
 	if (TaskId.IsEmpty())
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("No Task Atlas task could be resolved for this assistant message."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("No Task Atlas task could be resolved for this assistant message."), true);
 		return FReply::Handled();
 	}
 
@@ -1728,7 +1728,7 @@ FReply SUnrealMcpChatPanel::HandleToolsOverviewClicked()
 {
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -1740,7 +1740,7 @@ FReply SUnrealMcpChatPanel::HandleToolsOverviewClicked()
 		return FReply::Handled();
 	}
 
-	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tools"), BuildToolsOverviewText(Result));
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tools"), BuildToolsOverviewText(Result));
 	return FReply::Handled();
 }
 
@@ -1748,7 +1748,7 @@ FReply SUnrealMcpChatPanel::HandleTaskAtlasClicked()
 {
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -1768,12 +1768,12 @@ FReply SUnrealMcpChatPanel::HandleOpenAiSettingsClicked()
 	ISettingsModule* SettingsModule = FModuleManager::LoadModulePtr<ISettingsModule>(TEXT("Settings"));
 	if (!SettingsModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Unable to load the Settings module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Unable to load the Settings module."), true);
 		return FReply::Handled();
 	}
 
 	SettingsModule->ShowViewer(TEXT("Project"), TEXT("Plugins"), TEXT("UnrealMcp"));
-	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("Opened Project Settings > Plugins > Unreal MCP. Configure the OpenAI API key, model, and endpoint there."));
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("Opened Project Settings > Plugins > UEAtelier. Configure the OpenAI API key, model, and endpoint there."));
 	return FReply::Handled();
 }
 
@@ -1794,13 +1794,13 @@ FReply SUnrealMcpChatPanel::HandleReadSelectedSkillClicked()
 	const FString SkillName = GetSelectedSkillName();
 	if (SkillName.IsEmpty())
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Select a project skill before reading it."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Select a project skill before reading it."), true);
 		return FReply::Handled();
 	}
 
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -1818,13 +1818,13 @@ FReply SUnrealMcpChatPanel::HandleApplySelectedSkillClicked()
 	const FString SkillName = GetSelectedSkillName();
 	if (SkillName.IsEmpty())
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Select a project skill before applying it."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Select a project skill before applying it."), true);
 		return FReply::Handled();
 	}
 
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -1882,7 +1882,7 @@ FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
 	}
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -1891,7 +1891,7 @@ FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
 	if (ListResult.bIsError || !ListResult.StructuredContent.IsValid())
 	{
 		AppendToolExecutionResult(TEXT("unreal.tools.list_exportable"), *ListArguments, ListResult);
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tool Package"), ListResult.Text, true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tool Package"), ListResult.Text, true);
 		return FReply::Handled();
 	}
 
@@ -1921,7 +1921,7 @@ FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
 
 	if (ExportableTools.Num() == 0)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tool Package"), TEXT("No tools to export. Generate one with unreal.scaffold_mcp_tool first."));
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tool Package"), TEXT("No tools to export. Generate one with unreal.scaffold_mcp_tool first."));
 		return FReply::Handled();
 	}
 
@@ -1934,7 +1934,7 @@ FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
 	ToolName = ToolName.TrimStartAndEnd();
 	if (ToolName.IsEmpty())
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Enter a tool name before exporting a package."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Enter a tool name before exporting a package."), true);
 		return FReply::Handled();
 	}
 
@@ -1943,7 +1943,7 @@ FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
 	Arguments->SetBoolField(TEXT("dryRun"), bDryRun);
 	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.tools.export_package"), *Arguments);
 	AppendToolExecutionResult(TEXT("unreal.tools.export_package"), *Arguments, Result);
-	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.export_package"), Result), Result.bIsError);
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.export_package"), Result), Result.bIsError);
 	return FReply::Handled();
 }
 
@@ -1955,7 +1955,7 @@ FReply SUnrealMcpChatPanel::HandleImportToolPackageClicked()
 	}
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -1968,7 +1968,7 @@ FReply SUnrealMcpChatPanel::HandleImportToolPackageClicked()
 	PackagePath = PackagePath.TrimStartAndEnd();
 	if (PackagePath.IsEmpty())
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Choose or enter a package zip before importing."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Choose or enter a package zip before importing."), true);
 		return FReply::Handled();
 	}
 
@@ -1977,7 +1977,7 @@ FReply SUnrealMcpChatPanel::HandleImportToolPackageClicked()
 	Arguments->SetBoolField(TEXT("dryRun"), bDryRun);
 	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.tools.import_package"), *Arguments);
 	AppendToolExecutionResult(TEXT("unreal.tools.import_package"), *Arguments, Result);
-	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.import_package"), Result), Result.bIsError);
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.import_package"), Result), Result.bIsError);
 	return FReply::Handled();
 }
 
@@ -1985,7 +1985,7 @@ FReply SUnrealMcpChatPanel::HandleReadMemoryClicked()
 {
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -2002,7 +2002,7 @@ FReply SUnrealMcpChatPanel::HandleWriteCurrentTaskMemoryClicked()
 {
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		return FReply::Handled();
 	}
 
@@ -2013,7 +2013,7 @@ FReply SUnrealMcpChatPanel::HandleWriteCurrentTaskMemoryClicked()
 	}
 	if (Task.IsEmpty())
 	{
-		Task = TEXT("Continue the current Unreal MCP chat task.");
+		Task = TEXT("Continue the current UEAtelier chat task.");
 	}
 
 	TSharedPtr<FJsonObject> ContentObject = MakeShared<FJsonObject>();
@@ -2069,7 +2069,7 @@ void SUnrealMcpChatPanel::HandleProviderSelectionChanged(TSharedPtr<FString> New
 				if (UnrealMcpChat::IsCodexCliUnsupportedOnThisPlatform(*Provider))
 				{
 					if (ProviderComboBox.IsValid()) { ProviderComboBox->SetSelectedItem(SelectedProviderId); }
-					AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), UnrealMcpChat::CodexCliUnsupportedOnWindowsTooltip().ToString());
+					AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), UnrealMcpChat::CodexCliUnsupportedOnWindowsTooltip().ToString());
 					return;
 				}
 			}
@@ -2247,7 +2247,7 @@ void SUnrealMcpChatPanel::SetActiveProviderById(const FString& NewId)
 	RefreshModelOptionsForActiveProvider();
 
 	const FString DisplayName = Provider->DisplayName.TrimStartAndEnd().IsEmpty() ? Provider->Id : Provider->DisplayName.TrimStartAndEnd();
-	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), FString::Printf(TEXT("Provider switched to %s. The change applies to the next request."), *DisplayName));
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), FString::Printf(TEXT("Provider switched to %s. The change applies to the next request."), *DisplayName));
 }
 
 void SUnrealMcpChatPanel::RememberRecentModel(const FString& ProviderId, const FString& Model)
@@ -2311,7 +2311,7 @@ void SUnrealMcpChatPanel::StartAiConnectionTest()
 	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
 	if (!Settings)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Unable to load Unreal MCP settings."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Unable to load UEAtelier settings."), true);
 		return;
 	}
 
@@ -2430,7 +2430,7 @@ void SUnrealMcpChatPanel::RefreshSkillOptions(bool bAppendResult)
 	{
 		if (bAppendResult)
 		{
-			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("The chat panel is not connected to the module."), true);
+			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("The chat panel is not connected to the module."), true);
 		}
 		return;
 	}
@@ -2984,19 +2984,19 @@ void SUnrealMcpChatPanel::SendCommand(const FString& CommandText)
 
 		if (SteeringInstruction.IsEmpty())
 		{
-			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Usage: /steer <guidance while AI is running>"), true);
+			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Usage: /steer <guidance while AI is running>"), true);
 			return;
 		}
 
 		if (!bAssistantRequestInFlight || !ActiveAssistantHandle.IsValid())
 		{
-			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("/steer can only be used while an AI request is running. Use plain text or /ask to start a new AI turn."), true);
+			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("/steer can only be used while an AI request is running. Use plain text or /ask to start a new AI turn."), true);
 			return;
 		}
 
 		if (!ActiveAssistantHandle->Steer(SteeringInstruction))
 		{
-			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), TEXT("Unable to queue steer guidance for the active AI request."), true);
+			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), TEXT("Unable to queue steer guidance for the active AI request."), true);
 		}
 		return;
 	}
@@ -3004,14 +3004,14 @@ void SUnrealMcpChatPanel::SendCommand(const FString& CommandText)
 	if (!OwnerModule)
 	{
 		AppendMessage(EUnrealMcpChatEntryType::User, TEXT("You"), TrimmedCommand);
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("The chat panel is not connected to the module."), true);
 		return;
 	}
 
 	if (bAssistantRequestInFlight)
 	{
 		AppendMessage(EUnrealMcpChatEntryType::User, TEXT("You"), TrimmedCommand);
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("An AI request is already in progress. Wait for it to finish, press Stop, or use /steer <guidance> to guide the active run."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("An AI request is already in progress. Wait for it to finish, press Stop, or use /steer <guidance> to guide the active run."), true);
 		return;
 	}
 
@@ -3023,7 +3023,7 @@ void SUnrealMcpChatPanel::SendCommand(const FString& CommandText)
 		AppendMessage(EUnrealMcpChatEntryType::User, TEXT("You"), TrimmedCommand);
 		LastAssistantResponseId.Reset();
 		bHasInjectedPersistedContextThisSession = false;
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("AI conversation state reset."));
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("AI conversation state reset."));
 		return;
 	}
 
@@ -3034,7 +3034,7 @@ void SUnrealMcpChatPanel::SendCommand(const FString& CommandText)
 
 		if (UserPrompt.IsEmpty())
 		{
-			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("Usage: /ask <prompt>"), true);
+			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("Usage: /ask <prompt>"), true);
 			return;
 		}
 
@@ -3073,14 +3073,14 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 {
 	if (!OwnerModule)
 	{
-		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), TEXT("The chat panel is not connected to the module."), true);
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), TEXT("The chat panel is not connected to the module."), true);
 		return;
 	}
 
 	AnnotateTaskAtlasEvent(TEXT("user_intent"), UserPrompt);
 	bAssistantRequestInFlight = true;
 	ActiveAssistantRequestStartTime = FDateTime::UtcNow();
-	ActiveAssistantEntry = AppendMessage(EUnrealMcpChatEntryType::Assistant, TEXT("Unreal MCP AI"), FString());
+	ActiveAssistantEntry = AppendMessage(EUnrealMcpChatEntryType::Assistant, TEXT("UEAtelier AI"), FString());
 	if (ActiveAssistantEntry.IsValid())
 	{
 		ActiveAssistantEntry->Title = TEXT("Assistant");
@@ -3220,11 +3220,11 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 				}
 				else if (Result.bWasCancelled)
 				{
-					PinnedThis->AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP"), Result.Text.IsEmpty() ? TEXT("Generation stopped.") : Result.Text);
+					PinnedThis->AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier"), Result.Text.IsEmpty() ? TEXT("Generation stopped.") : Result.Text);
 				}
 				else if (Result.bIsError && (!PinnedThis->ActiveAssistantEntry.IsValid() || !PinnedThis->ActiveAssistantEntry->Body.Equals(Result.Text, ESearchCase::CaseSensitive)))
 				{
-					PinnedThis->AppendMessage(EUnrealMcpChatEntryType::System, TEXT("Unreal MCP Error"), Result.Text, true);
+					PinnedThis->AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Error"), Result.Text, true);
 				}
 
 				if (PinnedThis->ActiveAssistantEntry.IsValid()
@@ -4000,7 +4000,7 @@ FString SUnrealMcpChatPanel::BuildToolsOverviewText(const FUnrealMcpExecutionRes
 		TEXT("functionalHealthy=%s, documentationHealthy=%s"),
 		bFunctionalHealthy ? TEXT("true") : TEXT("false"),
 		bDocumentationHealthy ? TEXT("true") : TEXT("false")));
-	Lines.Add(TEXT("Legend: self-extension tools mutate or protect UEvolve's own MCP capabilities; AI/CLI dynamic tools run scripts, builds, external processes, or dynamic commands; legacy tools are hidden compatibility entries or aliases; built-in tools are normal editor/project tools."));
+	Lines.Add(TEXT("Legend: self-extension tools mutate or protect UEAtelier's own MCP capabilities; AI/CLI dynamic tools run scripts, builds, external processes, or dynamic commands; legacy tools are hidden compatibility entries or aliases; built-in tools are normal editor/project tools."));
 
 	UnrealMcpChat::AppendToolGroup(Lines, TEXT("Self Extension Tools"), SelfExtensionLines);
 	UnrealMcpChat::AppendToolGroup(Lines, TEXT("AI / CLI Dynamic Tools"), CliDynamicLines);
@@ -4421,7 +4421,7 @@ void SUnrealMcpChatPanel::ResetHistory(bool bAddReadyMessage)
 	{
 		AppendMessage(
 			EUnrealMcpChatEntryType::System,
-			TEXT("Unreal MCP"),
+			TEXT("UEAtelier"),
 			TEXT("Ready. Type plain text or /ask to use the AI assistant, /steer <guidance> to guide a running generation, press Stop to cancel, and use /help for direct commands. Tool calls will appear as cards and this transcript is persisted in Saved/UnrealMcp/ChatHistory.json."));
 	}
 }

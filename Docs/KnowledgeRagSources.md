@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-UEvolve's current RAG layer can explain tools, docs, tests, and official Unreal
+UEAtelier's current RAG layer can explain tools, docs, tests, and official Unreal
 documentation, but it cannot yet answer session-grounded requests such as
 "按上次的方式布置 FPS 场景". The current index refresh writes cards from official
 docs, versioned markdown, and the ToolRegistry only
@@ -78,7 +78,7 @@ always-on console hook
 
 - Viewport mouse trajectory: no stable public API at the right semantic level,
   high volume, and low task-disambiguation value.
-- Keystrokes: privacy red line. UEvolve should not record arbitrary user input.
+- Keystrokes: privacy red line. UEAtelier should not record arbitrary user input.
 - Screenshots: large payloads and usually require a vision model before they are
   useful to lexical RAG.
 - Per-`FUICommandList` instrumentation: broad integration cost with weak

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate UEvolve's explicit MCP ToolRegistry files.
+"""Validate UEAtelier's explicit MCP ToolRegistry files.
 
 This intentionally uses only the Python standard library so Windows/macOS users
 can run it before opening Unreal Editor or as a lightweight CI step.
@@ -117,7 +117,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def validate_registry_shape(registry: dict[str, Any], schema: dict[str, Any], issues: list[str]) -> None:
     """Small dependency-free schema check for CI and fresh workstations."""
-    if schema.get("title") != "UEvolve MCP Tool Registry":
+    if schema.get("title") != "UEAtelier MCP Tool Registry":
         issues.append("schema.json: unexpected or missing title.")
     if not isinstance(registry.get("schemaVersion"), int):
         issues.append("tools.json: schemaVersion must be an integer.")

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/unreal-mcp/schemas/UEvolve.UnrealMcpExtensionManifest.v2.schema.json",
-  "title": "UEvolve Unreal MCP Extension Apply Manifest v2",
+  "title": "UEAtelier Unreal MCP Extension Apply Manifest v2",
   "description": "Manifest written by unreal.mcp_apply_scaffold after descriptor-first source integration. v2 is the current writer shape; legacy v1 manifests remain readable.",
   "type": "object",
   "additionalProperties": true,

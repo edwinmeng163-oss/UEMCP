@@ -1,4 +1,4 @@
-# UEvolve Release Notes & Setup Guide — 2026-05
+# UEAtelier Release Notes & Setup Guide — 2026-05
 
 > Trilingual: [中文](#中文) · [English](#english) · [日本語](#日本語)
 > Target audience: new contributors cloning the repo, including Windows users.
@@ -68,7 +68,7 @@
 
 ### Engine Compatibility / 引擎兼容性
 
-UEvolve plugin 当前支持 Unreal Engine 5.6 和 5.7。同一套 C++ 源码以 UE 5.6 作为最低支持版本；`UEvolve.uproject` 默认 `EngineAssociation` 设为 `5.6`，5.7 用户可以通过右键项目文件选择 **Switch Unreal Engine Version** 升级本地工程绑定。本次代码审计没有发现需要 5.7 专用 API shim 的 plugin 调用；请在 UE 5.6 环境中执行最终编译验证。
+UEAtelier plugin 当前支持 Unreal Engine 5.6 和 5.7。同一套 C++ 源码以 UE 5.6 作为最低支持版本；`UEvolve.uproject` 默认 `EngineAssociation` 设为 `5.6`，5.7 用户可以通过右键项目文件选择 **Switch Unreal Engine Version** 升级本地工程绑定。本次代码审计没有发现需要 5.7 专用 API shim 的 plugin 调用；请在 UE 5.6 环境中执行最终编译验证。
 
 - **Pre-commit / linter**：提交前运行 `python3 Tools/check_ue56_compat.py`，检查已知 UE 5.7-only API，避免代码在 UE 5.7 机器上通过却在 UE 5.6 用户环境中失败。
 
@@ -96,7 +96,7 @@ npm install -g @openai/codex-cli                               # Codex CLI（或
 
 # 2. 拉代码
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 
 # 3. 生成 Xcode 工程并编译
 /Users/Shared/Epic\ Games/UE_5.7/Engine/Build/BatchFiles/Mac/GenerateProjectFiles.sh -project="$(pwd)/UEvolve.uproject" -game
@@ -117,7 +117,7 @@ npm install -g @openai/codex-cli
 
 # 2. 拉代码 + 编译
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 /path/to/UE_5.7/Engine/Build/BatchFiles/Linux/Build.sh UEvolveEditor Linux Development \
   -Project="$(pwd)/UEvolve.uproject" -waitmutex
 ```
@@ -137,7 +137,7 @@ cd UEvolve
 
 # 2. 拉代码
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 
 # 3. 编译
 "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" UEvolveEditor Win64 Development `
@@ -207,7 +207,7 @@ powershell -ExecutionPolicy Bypass -File Tools\UnrealMcpCodexBridge\start-bridge
 
 ```text
 Codex binary: /opt/homebrew/bin/codex
-UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
+UEAtelier Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=unix endpoint=/var/.../codex.sock
 # Windows 上会显示 transport=ws endpoint=ws://127.0.0.1:<port>
 ```
@@ -311,7 +311,7 @@ A Provider/Model selector at the top of the chat panel switches between configur
 
 ### Engine Compatibility
 
-The UEvolve plugin supports Unreal Engine 5.6 and 5.7 from the same source tree. UE 5.6 is the lower bound, so `UEvolve.uproject` defaults `EngineAssociation` to `5.6`; UE 5.7 users can switch the local project association through **Switch Unreal Engine Version**. This code-only audit found no plugin API calls that require UE 5.7-specific conditional shims; final compile validation still needs to run in a UE 5.6 installation.
+The UEAtelier plugin supports Unreal Engine 5.6 and 5.7 from the same source tree. UE 5.6 is the lower bound, so `UEvolve.uproject` defaults `EngineAssociation` to `5.6`; UE 5.7 users can switch the local project association through **Switch Unreal Engine Version**. This code-only audit found no plugin API calls that require UE 5.7-specific conditional shims; final compile validation still needs to run in a UE 5.6 installation.
 
 - **Pre-commit / linter**: Before committing, run `python3 Tools/check_ue56_compat.py` to catch known UE 5.7-only APIs so code that passes on a UE 5.7 machine does not regress UE 5.6 users.
 
@@ -337,7 +337,7 @@ curl -fsSL https://bun.sh/install | bash
 npm install -g @openai/codex-cli
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 
 /Users/Shared/Epic\ Games/UE_5.7/Engine/Build/BatchFiles/Mac/GenerateProjectFiles.sh \
   -project="$(pwd)/UEvolve.uproject" -game
@@ -355,7 +355,7 @@ curl -fsSL https://bun.sh/install | bash
 npm install -g @openai/codex-cli
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 /path/to/UE_5.7/Engine/Build/BatchFiles/Linux/Build.sh \
   UEvolveEditor Linux Development -Project="$(pwd)/UEvolve.uproject" -waitmutex
 ```
@@ -373,7 +373,7 @@ cd UEvolve
 # npm install -g @openai/codex-cli   (or install Codex Desktop instead)
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 
 & "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" `
   UEvolveEditor Win64 Development -Project="$PWD\UEvolve.uproject" -waitmutex
@@ -438,7 +438,7 @@ Expected startup:
 
 ```text
 Codex binary: /opt/homebrew/bin/codex
-UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
+UEAtelier Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=unix endpoint=/var/.../codex.sock     # POSIX
 # or:
 Codex app-server transport=ws endpoint=ws://127.0.0.1:<port>     # Windows or override
@@ -541,7 +541,7 @@ In the chat panel:
 
 ### Engine Compatibility / エンジン互換性
 
-UEvolve plugin は Unreal Engine 5.6 と 5.7 の両方を同じソースツリーでサポートします。最低対応バージョンは UE 5.6 のため、`UEvolve.uproject` の既定 `EngineAssociation` は `5.6` です。UE 5.7 のユーザーは **Switch Unreal Engine Version** でローカルプロジェクトの関連付けを更新できます。今回のコードのみの監査では UE 5.7 専用の conditional shim が必要な plugin API 呼び出しは見つかっていません。最終確認は UE 5.6 環境でのコンパイルで行ってください。
+UEAtelier plugin は Unreal Engine 5.6 と 5.7 の両方を同じソースツリーでサポートします。最低対応バージョンは UE 5.6 のため、`UEvolve.uproject` の既定 `EngineAssociation` は `5.6` です。UE 5.7 のユーザーは **Switch Unreal Engine Version** でローカルプロジェクトの関連付けを更新できます。今回のコードのみの監査では UE 5.7 専用の conditional shim が必要な plugin API 呼び出しは見つかっていません。最終確認は UE 5.6 環境でのコンパイルで行ってください。
 
 - **Pre-commit / linter**: コミット前に `python3 Tools/check_ue56_compat.py` を実行し、既知の UE 5.7-only API を検出してください。UE 5.7 環境では通る変更が UE 5.6 ユーザー環境で壊れることを防ぎます。
 
@@ -567,7 +567,7 @@ curl -fsSL https://bun.sh/install | bash
 npm install -g @openai/codex-cli
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 
 /Users/Shared/Epic\ Games/UE_5.7/Engine/Build/BatchFiles/Mac/GenerateProjectFiles.sh \
   -project="$(pwd)/UEvolve.uproject" -game
@@ -585,7 +585,7 @@ curl -fsSL https://bun.sh/install | bash
 npm install -g @openai/codex-cli
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 /path/to/UE_5.7/Engine/Build/BatchFiles/Linux/Build.sh \
   UEvolveEditor Linux Development -Project="$(pwd)/UEvolve.uproject" -waitmutex
 ```
@@ -603,7 +603,7 @@ cd UEvolve
 # npm install -g @openai/codex-cli  （または Codex Desktop アプリを使用）
 
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 
 & "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" `
   UEvolveEditor Win64 Development -Project="$PWD\UEvolve.uproject" -waitmutex
@@ -668,7 +668,7 @@ powershell -ExecutionPolicy Bypass -File Tools\UnrealMcpCodexBridge\start-bridge
 
 ```text
 Codex binary: /opt/homebrew/bin/codex
-UEvolve Codex Bridge listening at ws://127.0.0.1:8766/uevolve
+UEAtelier Codex Bridge listening at ws://127.0.0.1:8766/uevolve
 Codex app-server transport=unix endpoint=/var/.../codex.sock     # POSIX
 # あるいは：
 Codex app-server transport=ws endpoint=ws://127.0.0.1:<port>     # Windows またはオーバーライド時

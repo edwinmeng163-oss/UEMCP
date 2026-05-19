@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build UEvolve KnowledgeCard JSONL from versioned sources.
+"""Build UEAtelier KnowledgeCard JSONL from versioned sources.
 
 This mirrors the C++ knowledge_index_refresh path for CI/offline checks. It
 intentionally ignores Saved/* so a clean checkout can validate the baseline RAG
@@ -294,7 +294,7 @@ def build_cards(project_dir: Path, max_chunk_chars: int, overlap_chars: int) -> 
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build UEvolve KnowledgeCard JSONL from versioned sources.")
+    parser = argparse.ArgumentParser(description="Build UEAtelier KnowledgeCard JSONL from versioned sources.")
     parser.add_argument("--project-dir", default=".", help="Project directory. Defaults to the current working directory.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output cards.jsonl path, relative to project-dir unless absolute.")
     parser.add_argument("--max-chunk-chars", type=int, default=DEFAULT_MAX_CHUNK_CHARS, help="Maximum characters per text chunk.")

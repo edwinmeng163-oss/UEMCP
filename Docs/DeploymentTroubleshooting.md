@@ -1,6 +1,6 @@
 # Deployment Troubleshooting
 
-This page is versioned local knowledge for UEvolve RAG. It captures issues seen when installing the Unreal MCP plugin into another Unreal project.
+This page is versioned local knowledge for UEAtelier RAG. It captures issues seen when installing the Unreal MCP plugin into another Unreal project.
 
 ## Project-Level Install
 

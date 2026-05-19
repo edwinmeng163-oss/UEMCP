@@ -511,7 +511,7 @@ namespace UnrealMcp
 				const FString EventCountsOutput = EventCountsText.IsEmpty() ? TEXT("- No event counts available.\n") : EventCountsText;
 				return FString::Printf(
 				TEXT("# %s\n\n")
-				TEXT("Use this skill when repeating a workflow distilled from UEvolve / Unreal MCP activity logs.\n\n")
+				TEXT("Use this skill when repeating a workflow distilled from UEAtelier / Unreal MCP activity logs.\n\n")
 				TEXT("## Learned Goal\n%s\n\n")
 				TEXT("## Session\n- Session ID: `%s`\n- Source: `Saved/UnrealMcp/ActivityLog/*.jsonl`\n\n")
 				TEXT("## Workflow\n%s\n\n")
@@ -1215,7 +1215,7 @@ namespace UnrealMcp
 					const FString SummaryText = Summary.TrimStartAndEnd().IsEmpty() ? TEXT("No summary provided.") : Summary.TrimStartAndEnd();
 					DraftText = FString::Printf(
 						TEXT("# %s\n\n")
-						TEXT("Use this skill when repeating the following UEvolve / Unreal MCP workflow.\n\n")
+						TEXT("Use this skill when repeating the following UEAtelier / Unreal MCP workflow.\n\n")
 						TEXT("## Goal\n%s\n\n")
 						TEXT("## Summary\n%s\n\n")
 						TEXT("## Reusable Steps\n- Inspect current project state.\n- Apply the workflow carefully with dry runs where available.\n- Save, test, and document the result.\n"),

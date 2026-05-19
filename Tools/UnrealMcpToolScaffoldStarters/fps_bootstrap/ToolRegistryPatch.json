@@ -14,7 +14,7 @@
   "preflightSupport": true,
   "postcheckSupport": true,
   "testCoverage": "manual",
-  "owner": "UEvolve Core",
+  "owner": "UEAtelier Core",
   "docsPath": "Tools/UnrealMcpToolScaffoldStarters/fps_bootstrap/README.md",
   "reason": "Starter scaffold for the v0.13 FPS bring-up replacement; applies through unreal.mcp_apply_scaffold so backup, manifest, build, test, and rollback records are preserved.",
   "summaryTemplate": "Bootstrapped FPS player on {args.pawnBlueprintPath} (verifyPass={result.verified.runtimeVerify})",

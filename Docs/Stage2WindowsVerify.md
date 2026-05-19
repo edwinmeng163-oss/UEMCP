@@ -1,4 +1,4 @@
-ROLE: Stage 2 — end-to-end Windows verification of the v0.12.0-pilot package. The Windows machine currently has only Unreal Engine installed; it does NOT have the UnrealMcp plugin, the UEvolve repo, or any prior build artifacts. This prompt walks you through:
+ROLE: Stage 2 — end-to-end Windows verification of the v0.12.0-pilot package. The Windows machine currently has only Unreal Engine installed; it does NOT have the UnrealMcp plugin, the UEAtelier repo, or any prior build artifacts. This prompt walks you through:
 
 1. cloning the repo,
 2. running `Tools/package_plugin.ps1` to produce the Windows-named zip locally (this also exercises the .ps1 itself, which has only been syntax-verified on macOS so far),
@@ -14,7 +14,7 @@ CONTEXT
 - UE install: assumed at `C:\Program Files\Epic Games\UE_5.7\`. If yours is elsewhere (e.g. `D:\Epic\UE_5.7\`), substitute the absolute path everywhere it appears below. Same logic applies if you want to test UE 5.6 instead — substitute `UE_5.6` everywhere.
 - TP_Blank template: `<UE>\Templates\TP_Blank\` — present in every standard UE install.
 - Prerequisite tooling on the Windows machine: Git for Windows, Python 3.x (in `PATH`), PowerShell 5.1 or newer (default on Windows 10/11), and Visual Studio 2022 with the "Game Development with C++" workload + Windows 10/11 SDK + .NET 6+ SDK. Without VS 2022's C++ toolchain UBT cannot link `UnrealEditor-UnrealMcp.dll`.
-- Workspace dir: pick somewhere writable that's not under `Program Files` (avoids UAC surprises). Examples below use `C:\Work\UEvolve` for the clone and `C:\Temp\UEvolvePilotTest` for the test project — substitute whatever fits your machine.
+- Workspace dir: pick somewhere writable that's not under `Program Files` (avoids UAC surprises). Examples below use `C:\Work\UEAtelier` for the clone and `C:\Temp\UEvolvePilotTest` for the test project — substitute whatever fits your machine.
 - Sandbox / agent runner: if you are dispatching this as a codex-agent, use `-m gpt-5.5 -r xhigh -s danger-full-access` (UBT writes engine intermediate, the editor launch + process management need `Stop-Process` / `taskkill`). danger-full-access still does not authorize commits or pushes (this prompt forbids them explicitly below). If you are running by hand, open PowerShell with normal-user privileges; no `Start-Process -Verb RunAs` needed.
 
 STEPS
@@ -25,7 +25,7 @@ STEPS
 New-Item -ItemType Directory -Force C:\Work | Out-Null
 cd C:\Work
 git clone https://github.com/edwinmeng163-oss/UEvolve.git
-cd UEvolve
+cd UEAtelier
 git log -1 --oneline
 ```
 
@@ -140,7 +140,7 @@ PASS criteria: the `Select-String` returns nothing. The preceding `Remove-Item` 
 
 ```powershell
 New-Item -ItemType Directory -Force "$proj\Plugins" | Out-Null
-Expand-Archive -Path "C:\Work\UEvolve\Saved\UnrealMcp\Packages\UnrealMcp-v0.12.0-pilot-win-ue56-ue57-source.zip" -DestinationPath "$proj\Plugins" -Force
+Expand-Archive -Path "C:\Work\UEAtelier\Saved\UnrealMcp\Packages\UnrealMcp-v0.12.0-pilot-win-ue56-ue57-source.zip" -DestinationPath "$proj\Plugins" -Force
 Test-Path "$proj\Plugins\UnrealMcp\UnrealMcp.uplugin"
 Test-Path "$proj\Plugins\UnrealMcp\Resources\ToolRegistry\tools.json"
 Test-Path "$proj\Plugins\UnrealMcp\INSTALL.md"
@@ -249,7 +249,7 @@ PASS: the final `Get-Process` returns nothing (your test editor is gone). Other 
 Remove-Item -Recurse -Force C:\Temp\UEvolvePilotTest
 ```
 
-The clone at `C:\Work\UEvolve` may stay (it has the verified zip in `Saved\UnrealMcp\Packages\`, which is gitignored and harmless). If you want a fully clean machine afterwards, also `Remove-Item -Recurse -Force C:\Work\UEvolve` — but the verified zip there is the actual artifact we may want to upload to GitHub as a second release asset, so consider keeping it.
+The clone at `C:\Work\UEAtelier` may stay (it has the verified zip in `Saved\UnrealMcp\Packages\`, which is gitignored and harmless). If you want a fully clean machine afterwards, also `Remove-Item -Recurse -Force C:\Work\UEAtelier` — but the verified zip there is the actual artifact we may want to upload to GitHub as a second release asset, so consider keeping it.
 
 ## Stage 2b: Full-Experience Zip Verification
 
@@ -257,10 +257,10 @@ This path verifies `UnrealMcp-v0.12.0-pilot-full-win-ue561.zip`, which extracts 
 
 ### Phase 1 — Build UE 5.6.1 Win64 plugin binaries
 
-Use the same clone at `C:\Work\UEvolve`, but build against UE 5.6.1:
+Use the same clone at `C:\Work\UEAtelier`, but build against UE 5.6.1:
 
 ```powershell
-$repo = "C:\Work\UEvolve"
+$repo = "C:\Work\UEAtelier"
 $buildLog = "C:\Temp\uevolve-stage2b-build.log"
 cd $repo
 & "C:\Program Files\Epic Games\UE_5.6\Engine\Build\BatchFiles\Build.bat" `
@@ -277,7 +277,7 @@ PASS: build exit code is `0`, the build log reports success, and both binary fil
 ### Phase 3 — Bundle the offline Codex bridge
 
 ```powershell
-cd C:\Work\UEvolve
+cd C:\Work\UEAtelier
 powershell -ExecutionPolicy Bypass -File Tools\bundle_bridge_for_release.ps1 *>&1 |
     Tee-Object -FilePath C:\Temp\uevolve-stage2b-bridge-bundle.log
 Test-Path Saved\UnrealMcp\Packages\UnrealMcp-CodexBridge-win-bundle.tar
@@ -288,11 +288,11 @@ PASS: the helper prints `Bridge bundle: ...` and the tarball exists. If Bun was 
 ### Phase 4 — Package the full-experience zip
 
 ```powershell
-cd C:\Work\UEvolve
+cd C:\Work\UEAtelier
 $bridgeBundle = "Saved\UnrealMcp\Packages\UnrealMcp-CodexBridge-win-bundle.tar"
 powershell -ExecutionPolicy Bypass -File Tools\package_plugin.ps1 `
     -FullExperience `
-    -PrebuiltBinariesPath "C:\Work\UEvolve" `
+    -PrebuiltBinariesPath "C:\Work\UEAtelier" `
     -BridgeBundlePath $bridgeBundle `
     -EngineTag ue561 *>&1 |
     Tee-Object -FilePath C:\Temp\uevolve-stage2b-package.log
@@ -326,7 +326,7 @@ $json | Add-Member -NotePropertyName Plugins -NotePropertyValue @(
 ) -Force
 $json | ConvertTo-Json -Depth 10 | Set-Content $uproj -Encoding UTF8
 
-Expand-Archive -Path "C:\Work\UEvolve\Saved\UnrealMcp\Packages\UnrealMcp-v0.12.0-pilot-full-win-ue561.zip" `
+Expand-Archive -Path "C:\Work\UEAtelier\Saved\UnrealMcp\Packages\UnrealMcp-v0.12.0-pilot-full-win-ue561.zip" `
     -DestinationPath $proj -Force
 $checkJson = Get-Content $uproj -Raw | ConvertFrom-Json
 $moduleCount = 0
@@ -412,7 +412,7 @@ Get-ChildItem "$projCpp\Source" -Recurse -Include *.cs,*.cpp,*.h | ForEach-Objec
 Remove-Item "$projCpp\Config\TemplateDefs.ini" -ErrorAction SilentlyContinue
 Get-ChildItem $projCpp -Recurse -File | Select-String -Pattern 'TP_Blank' -SimpleMatch | Select-Object -First 5
 
-Expand-Archive -Path "C:\Work\UEvolve\Saved\UnrealMcp\Packages\UnrealMcp-v0.12.0-pilot-full-win-ue561.zip" `
+Expand-Archive -Path "C:\Work\UEAtelier\Saved\UnrealMcp\Packages\UnrealMcp-v0.12.0-pilot-full-win-ue561.zip" `
     -DestinationPath $projCpp -Force
 Test-Path "$projCpp\Source"
 Test-Path "$projCpp\first_launch_build.cmd"
@@ -490,6 +490,6 @@ CONSTRAINTS
 - If EXT BUILD fails: report first error line + final summary, then STOP. Do not iterate.
 - If EXT SMOKE never reaches a boot marker in 10 min: kill the editor, report the last 50 lines of `$smokeLog`.
 - If tools/list returns < 100 tools: FAIL with actual count + JSON head.
-- The verified zip at `C:\Work\UEvolve\Saved\UnrealMcp\Packages\` is the artifact that the Mac-side PM will upload as a second release asset on GitHub. Do not delete it until told.
+- The verified zip at `C:\Work\UEAtelier\Saved\UnrealMcp\Packages\` is the artifact that the Mac-side PM will upload as a second release asset on GitHub. Do not delete it until told.
 
-DONE when: three PASS lines reported with evidence, `C:\Temp\UEvolvePilotTest` is removed, no UE editor process tied to that path remains, the .ps1-produced zip is preserved at `C:\Work\UEvolve\Saved\UnrealMcp\Packages\` for upload.
+DONE when: three PASS lines reported with evidence, `C:\Temp\UEvolvePilotTest` is removed, no UE editor process tied to that path remains, the .ps1-produced zip is preserved at `C:\Work\UEAtelier\Saved\UnrealMcp\Packages\` for upload.

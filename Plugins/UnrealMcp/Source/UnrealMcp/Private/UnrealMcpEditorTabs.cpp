@@ -21,15 +21,15 @@ void FUnrealMcpModule::RegisterTabSpawner()
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		UnrealMcp::ChatTabName,
 		FOnSpawnTab::CreateRaw(this, &FUnrealMcpModule::SpawnChatTab))
-		.SetDisplayName(LOCTEXT("ChatTabTitle", "Unreal MCP Chat"))
-		.SetTooltipText(LOCTEXT("ChatTabTooltip", "Open the Unreal MCP command chat window."))
+		.SetDisplayName(LOCTEXT("ChatTabTitle", "UEAtelier Chat"))
+		.SetTooltipText(LOCTEXT("ChatTabTooltip", "Open the UEAtelier command chat window."))
 		.SetMenuType(ETabSpawnerMenuType::Hidden);
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		UnrealMcp::WorkbenchTabName,
 		FOnSpawnTab::CreateRaw(this, &FUnrealMcpModule::SpawnWorkbenchTab))
-		.SetDisplayName(LOCTEXT("WorkbenchTabTitle", "Unreal MCP Workbench"))
-		.SetTooltipText(LOCTEXT("WorkbenchTabTooltip", "Open the Unreal MCP self-extension workbench."))
+		.SetDisplayName(LOCTEXT("WorkbenchTabTitle", "UEAtelier Workbench"))
+		.SetTooltipText(LOCTEXT("WorkbenchTabTooltip", "Open the UEAtelier self-extension workbench."))
 		.SetMenuType(ETabSpawnerMenuType::Hidden);
 }
 
@@ -51,13 +51,13 @@ void FUnrealMcpModule::RegisterMenus()
 		FToolMenuSection& Section = Menu->FindOrAddSection(TEXT("UnrealMcp"));
 		Section.AddMenuEntry(
 			TEXT("OpenUnrealMcpChat"),
-			LOCTEXT("OpenChatMenuLabel", "Unreal MCP Chat"),
-			LOCTEXT("OpenChatMenuTooltip", "Open the Unreal MCP command chat window."),
+			LOCTEXT("OpenChatMenuLabel", "UEAtelier Chat"),
+			LOCTEXT("OpenChatMenuTooltip", "Open the UEAtelier command chat window."),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateRaw(this, &FUnrealMcpModule::OpenChatTab)));
 		Section.AddMenuEntry(
 			TEXT("OpenUnrealMcpWorkbench"),
-			LOCTEXT("OpenWorkbenchMenuLabel", "Unreal MCP Workbench"),
+			LOCTEXT("OpenWorkbenchMenuLabel", "UEAtelier Workbench"),
 			LOCTEXT("OpenWorkbenchMenuTooltip", "Open the thin self-extension workbench console."),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateRaw(this, &FUnrealMcpModule::OpenWorkbenchTab)));

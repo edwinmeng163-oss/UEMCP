@@ -1,4 +1,4 @@
-// Copyright (c) UEvolve contributors.
+// Copyright (c) UEAtelier contributors.
 
 using UnrealBuildTool;
 

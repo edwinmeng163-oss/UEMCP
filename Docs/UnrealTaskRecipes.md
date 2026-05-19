@@ -1,6 +1,6 @@
 # Unreal Task Recipes
 
-This page gives UEvolve RAG compact, action-oriented recipes for common Unreal Editor tasks. Prefer these recipes before falling back to arbitrary Python or console commands.
+This page gives UEAtelier RAG compact, action-oriented recipes for common Unreal Editor tasks. Prefer these recipes before falling back to arbitrary Python or console commands.
 
 ## First-Person Ground Character
 

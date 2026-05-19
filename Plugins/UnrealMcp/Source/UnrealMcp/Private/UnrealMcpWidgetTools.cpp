@@ -146,7 +146,7 @@ namespace UnrealMcp
 			{
 				return ExistingWidgetBlueprint;
 			}
-			if (!ObjectPath.StartsWith(TEXT("/Game/__UEvolve"), ESearchCase::CaseSensitive))
+			if (!ObjectPath.StartsWith(TEXT("/Game/__UEAtelier"), ESearchCase::CaseSensitive))
 			{
 				return nullptr;
 			}

@@ -283,7 +283,7 @@ namespace UnrealMcp
 			Object->SetBoolField(TEXT("preflightSupport"), Entry.Policy.bPreflightSupport);
 			Object->SetBoolField(TEXT("postcheckSupport"), Entry.Policy.bPostcheckSupport);
 			Object->SetStringField(TEXT("testCoverage"), Entry.Policy.TestCoverage.IsEmpty() ? TEXT("missing") : Entry.Policy.TestCoverage);
-			Object->SetStringField(TEXT("owner"), Entry.Policy.Owner.IsEmpty() ? TEXT("UEvolve Core") : Entry.Policy.Owner);
+			Object->SetStringField(TEXT("owner"), Entry.Policy.Owner.IsEmpty() ? TEXT("UEAtelier Core") : Entry.Policy.Owner);
 			Object->SetStringField(TEXT("docsPath"), Entry.Policy.DocsPath.IsEmpty() ? TEXT("README.md#tool-coverage") : Entry.Policy.DocsPath);
 			Object->SetStringField(TEXT("reason"), Entry.Policy.Reason);
 			Object->SetStringField(TEXT("notes"), Entry.Notes);

@@ -201,7 +201,7 @@ void SUnrealMcpWorkbenchPanel::Construct(const FArguments& InArgs, FUnrealMcpMod
 			.AutoHeight()
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("Title", "Unreal MCP Workbench"))
+				.Text(LOCTEXT("Title", "UEAtelier Workbench"))
 				.Font(FAppStyle::GetFontStyle("HeadingMedium"))
 			]
 			+ SVerticalBox::Slot()

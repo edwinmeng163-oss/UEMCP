@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/edwinmeng163-oss/UEvolve/Tools/UnrealMcpToolRegistry/schema.json",
-  "title": "UEvolve MCP Tool Registry",
+  "$id": "https://github.com/edwinmeng163-oss/UEAtelier/Tools/UnrealMcpToolRegistry/schema.json",
+  "title": "UEAtelier MCP Tool Registry",
   "type": "object",
   "additionalProperties": false,
   "required": [

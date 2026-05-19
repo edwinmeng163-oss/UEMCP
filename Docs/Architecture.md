@@ -164,4 +164,4 @@ For non-trivial Chat work, prefer this loop:
 7. `unreal.verify_task_outcome` turns the plan, tool visibility, snapshot diff, and textual evidence into a pass/fail result.
 8. `unreal.mcp_classify_error` categorizes failures into UBT, MCP protocol, schema, UE Python, HTTP endpoint, OpenAI API, or editor-state issues with next-step suggestions.
 
-Automated happy-path tests use `unreal.mcp_prepare_test_sandbox` to create or reset `/Game/__UEvolve*` disposable content before writing test assets. The same tool can also remove level actors whose labels start with `UEvolveMcpTest_`, which gives Actor write tools a repeatable sandbox without touching unrelated user actors.
+Automated happy-path tests use `unreal.mcp_prepare_test_sandbox` to create or reset `/Game/__UEAtelier*` disposable content before writing test assets. The same tool can also remove level actors whose labels start with `UEvolveMcpTest_`, which gives Actor write tools a repeatable sandbox without touching unrelated user actors.

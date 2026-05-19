@@ -1,7 +1,7 @@
 # Packaging Integrity Verifier
 
 `Tools/verify_package_integrity.py` is the C5 chunk 1a standalone verifier for
-UEvolve project-root packages. It checks the staged or zipped package before a
+UEAtelier project-root packages. It checks the staged or zipped package before a
 release handoff catches hidden install defects such as registry mirror drift,
 Windows git-symlink stubs, missing install docs, stale generated state, and
 missing full Windows runtime files.

@@ -166,7 +166,7 @@ You can change the port, path, allowed origins, and optional auth token in:
 
 ## Install Into An Existing Project
 
-UEvolve is usually installed as a project-level plugin, not an engine-level plugin. From a UEvolve checkout, install into a target project with:
+UEAtelier is usually installed as a project-level plugin, not an engine-level plugin. From a UEAtelier checkout, install into a target project with:
 
 ```bash
 python3 Tools/install_unrealmcp_to_project.py --project "/path/to/YourProject/YourProject.uproject"
@@ -935,5 +935,5 @@ Example environment variables:
 Example host command:
 
 ```bash
-python3 /absolute/path/to/UEvolve/Tools/unreal_mcp_stdio_proxy.py
+python3 /absolute/path/to/UEAtelier/Tools/unreal_mcp_stdio_proxy.py
 ```

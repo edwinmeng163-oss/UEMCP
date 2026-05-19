@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate UEvolve project-root package integrity.
+"""Validate UEAtelier project-root package integrity.
 
 This verifier is intentionally stdlib-only so it can run in CI, from package
 scripts, or through Unreal's embedded Python for smoke fixtures.
@@ -309,7 +309,7 @@ def check_schema_canonical_alias_equal(root: Path) -> CheckResult:
             "warning",
             "No plugin schema alias was found to compare against the canonical schema.",
             {"canonical": rel_path(root, canonical), "aliasCandidates": alias_rels},
-            "Package Plugins/UnrealMcp/Resources/ToolRegistry/schema.json when building current UEvolve packages.",
+            "Package Plugins/UnrealMcp/Resources/ToolRegistry/schema.json when building current UEAtelier packages.",
         )
 
     mismatches: List[str] = []
@@ -862,7 +862,7 @@ def make_payload(summary: Dict[str, Any], checks: Sequence[CheckResult]) -> Dict
 
 
 def print_pretty(summary: Dict[str, Any], checks: Sequence[CheckResult]) -> None:
-    print("UEvolve package integrity verifier %s" % VALIDATOR_VERSION)
+    print("UEAtelier package integrity verifier %s" % VALIDATOR_VERSION)
     print("Mode: %s" % summary["mode"])
     print("Scope: %s" % summary["scope"])
     print("Overall: %s (%s blocking, %s warnings)" % (
@@ -879,7 +879,7 @@ def print_pretty(summary: Dict[str, Any], checks: Sequence[CheckResult]) -> None
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate UEvolve package integrity.")
+    parser = argparse.ArgumentParser(description="Validate UEAtelier package integrity.")
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--root", help="Validate an extracted project-root package, repo root, or package root.")
     input_group.add_argument("--zip", dest="zip_path", help="Extract and validate a project-root package zip.")

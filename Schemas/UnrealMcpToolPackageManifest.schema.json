@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/edwinmeng163-oss/UEvolve/Schemas/UnrealMcpToolPackageManifest.schema.json",
-  "title": "UEvolve Tool Package Manifest",
+  "$id": "https://github.com/edwinmeng163-oss/UEAtelier/Schemas/UnrealMcpToolPackageManifest.schema.json",
+  "title": "UEAtelier Tool Package Manifest",
   "type": "object",
   "additionalProperties": false,
   "required": [

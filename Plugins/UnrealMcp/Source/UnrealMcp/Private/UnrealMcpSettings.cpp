@@ -253,7 +253,7 @@ const FAiProviderConfig* UUnrealMcpSettings::FindActiveProvider() const
 #if WITH_EDITOR
 FText UUnrealMcpSettings::GetSectionText() const
 {
-	return LOCTEXT("SectionText", "Unreal MCP");
+	return LOCTEXT("SectionText", "UEAtelier");
 }
 
 FText UUnrealMcpSettings::GetSectionDescription() const

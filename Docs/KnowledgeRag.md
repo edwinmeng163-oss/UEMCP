@@ -1,6 +1,6 @@
-# UEvolve Knowledge And RAG Plan
+# UEAtelier Knowledge And RAG Plan
 
-UEvolve's self-extension loop needs more than a larger prompt. The assistant has
+UEAtelier's self-extension loop needs more than a larger prompt. The assistant has
 to know which tools exist, when to compose them, when a new tool is justified,
 and which failure patterns have already been solved. This document defines the
 local-first knowledge layer that should support that behavior.

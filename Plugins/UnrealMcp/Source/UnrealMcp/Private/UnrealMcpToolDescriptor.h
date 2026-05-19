@@ -90,7 +90,7 @@ struct FUnrealMcpToolDescriptor
 	EUnrealMcpToolTestCoverage TestCoverage = EUnrealMcpToolTestCoverage::Missing;
 
 	UPROPERTY()
-	FString Owner = TEXT("UEvolve Core");
+	FString Owner = TEXT("UEAtelier Core");
 
 	UPROPERTY()
 	FString DocsPath = TEXT("README.md#tool-coverage");

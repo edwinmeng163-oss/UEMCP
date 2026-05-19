@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install UEvolve's UnrealMcp plugin workflow into an existing Unreal project.
+"""Install UEAtelier's UnrealMcp plugin workflow into an existing Unreal project.
 
 This helper is intentionally conservative: it copies only the reusable plugin
 and workflow folders, skips generated/local artifacts, and updates the target
@@ -45,7 +45,7 @@ def find_repo_root(start: Path) -> Path:
     for candidate in (start, *start.parents):
         if all((candidate / marker).exists() for marker in ROOT_MARKERS):
             return candidate
-    fail(f"Could not find UEvolve repo root from {start}")
+    fail(f"Could not find UEAtelier repo root from {start}")
 
 
 def resolve_project_path(value: str) -> Path:
@@ -151,7 +151,7 @@ def ensure_plugins_enabled(uproject: Path, dry_run: bool) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Install UEvolve's UnrealMcp plugin workflow into an existing Unreal project."
+        description="Install UEAtelier's UnrealMcp plugin workflow into an existing Unreal project."
     )
     parser.add_argument(
         "--project",
@@ -161,7 +161,7 @@ def main() -> int:
     parser.add_argument(
         "--repo-root",
         default=None,
-        help="UEvolve repository root. Defaults to auto-detecting from this script.",
+        help="UEAtelier repository root. Defaults to auto-detecting from this script.",
     )
     parser.add_argument(
         "--dry-run",
@@ -176,9 +176,9 @@ def main() -> int:
     project_dir = project_file.parent
 
     if (project_dir / "Engine" / "Plugins").exists():
-        fail("Target looks like an Unreal Engine root, not a project root. Install UEvolve as a project plugin.")
+        fail("Target looks like an Unreal Engine root, not a project root. Install UEAtelier as a project plugin.")
 
-    print(f"UEvolve repo: {repo_root}")
+    print(f"UEAtelier repo: {repo_root}")
     print(f"Target project: {project_file}")
 
     copy_tree_clean(repo_root / PLUGIN_RELATIVE, project_dir / PLUGIN_RELATIVE, repo_root, args.dry_run)

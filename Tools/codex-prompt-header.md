@@ -1,4 +1,4 @@
-# Codex Prompt Header (UEvolve convention)
+# Codex Prompt Header (UEAtelier convention)
 
 > Cat this file in front of every codex-agent task prompt. It encodes the
 > always-on conventions for this repo so the per-task prompt can stay focused
@@ -11,7 +11,7 @@
 
 ---
 
-## Repo conventions you must honor (UEvolve)
+## Repo conventions you must honor (UEAtelier)
 
 - This is a UE 5.6 / 5.7 dual-engine editor plugin that also targets both
   Windows and macOS users. C++ must compile on both engines on both

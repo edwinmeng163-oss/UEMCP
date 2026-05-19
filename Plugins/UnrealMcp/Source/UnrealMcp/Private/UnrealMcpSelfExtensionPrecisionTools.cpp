@@ -1056,9 +1056,9 @@ namespace UnrealMcp
 		const bool bResetActors = GetBoolArgument(Arguments, TEXT("resetActors"), false);
 		const FString ActorLabelPrefix = GetStringArgument(Arguments, TEXT("actorLabelPrefix"), TEXT("UEvolveMcpTest_"));
 		const bool bDryRun = GetBoolArgument(Arguments, TEXT("dryRun"), false);
-		if (!ContentPath.StartsWith(TEXT("/Game/__UEvolve"), ESearchCase::CaseSensitive))
+		if (!ContentPath.StartsWith(TEXT("/Game/__UEAtelier"), ESearchCase::CaseSensitive))
 		{
-			return MakeExecutionResult(TEXT("contentPath must be under /Game/__UEvolve* for sandbox safety."), nullptr, true);
+			return MakeExecutionResult(TEXT("contentPath must be under /Game/__UEAtelier* for sandbox safety."), nullptr, true);
 		}
 		if (bResetActors && !ActorLabelPrefix.StartsWith(TEXT("UEvolveMcpTest_"), ESearchCase::CaseSensitive))
 		{

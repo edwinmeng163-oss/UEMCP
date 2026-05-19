@@ -38,7 +38,7 @@ namespace UnrealMcp
 			Descriptor.HandlerName = Name;
 			Descriptor.SourceFile = SourceFile;
 			Descriptor.RiskLevel = Risk;
-			Descriptor.Owner = TEXT("UEvolve Core");
+			Descriptor.Owner = TEXT("UEAtelier Core");
 			Descriptor.DocsPath = TEXT("README.md#tool-coverage");
 			Descriptor.Reason = TEXT("Code descriptor default; reviewed registry JSON may override exposure, risk, owner, docs, and test metadata.");
 			return Descriptor;
@@ -1570,7 +1570,7 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-				Properties->SetObjectField(TEXT("contentPath"), MakeStringProperty(TEXT("Sandbox Content Browser path. Must be under /Game/__UEvolve*."), TEXT("/Game/__UEvolveMcpTest")));
+				Properties->SetObjectField(TEXT("contentPath"), MakeStringProperty(TEXT("Sandbox Content Browser path. Must be under /Game/__UEAtelier*."), TEXT("/Game/__UEvolveMcpTest")));
 				Properties->SetObjectField(TEXT("reset"), MakeBoolProperty(TEXT("Whether to delete and recreate the sandbox directory."), true));
 				Properties->SetObjectField(TEXT("resetActors"), MakeBoolProperty(TEXT("Whether to delete level actors whose labels start with actorLabelPrefix."), false));
 				Properties->SetObjectField(TEXT("actorLabelPrefix"), MakeStringProperty(TEXT("Safe actor label prefix for disposable actor tests. Must start with UEvolveMcpTest_ when resetActors=true."), TEXT("UEvolveMcpTest_")));
@@ -1580,7 +1580,7 @@ namespace UnrealMcp
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.mcp_prepare_test_sandbox"),
 					TEXT("Prepare MCP Test Sandbox"),
-					TEXT("Creates or resets constrained /Game/__UEvolve* asset and UEvolveMcpTest_* actor sandboxes for disposable happy-path tests."),
+					TEXT("Creates or resets constrained /Game/__UEAtelier* asset and UEvolveMcpTest_* actor sandboxes for disposable happy-path tests."),
 					TEXT("self-extension"),
 					TEXT("UnrealMcpSelfExtensionPrecisionTools.cpp"),
 					EUnrealMcpToolRisk::Medium);

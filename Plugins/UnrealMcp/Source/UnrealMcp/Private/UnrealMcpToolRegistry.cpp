@@ -301,7 +301,7 @@ namespace UnrealMcp
 			Policy.RiskLevel = RiskLevel;
 			Policy.Reason = Reason;
 			Policy.TestCoverage = TEXT("missing");
-			Policy.Owner = TEXT("UEvolve Core");
+			Policy.Owner = TEXT("UEAtelier Core");
 			Policy.DocsPath = TEXT("README.md#tool-coverage");
 			return Policy;
 		}
