@@ -27,17 +27,17 @@ http://127.0.0.1:8765/mcp
 Editor UI entry points:
 
 ```text
-Window > Unreal MCP Chat
-Window > Unreal MCP Workbench
-Task Atlas button inside Unreal MCP Chat
+Window > UEAtelier Chat
+Window > UEAtelier Workbench
+Task Atlas button inside UEAtelier Chat
 ```
 
 Current plugin metadata:
 
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
-FriendlyName: Unreal MCP
-VersionName: 0.15.0
+FriendlyName: UEAtelier
+VersionName: 0.23.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
