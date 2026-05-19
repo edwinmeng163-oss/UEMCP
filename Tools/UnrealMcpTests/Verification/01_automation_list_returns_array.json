@@ -1,0 +1,31 @@
+{
+  "name": "automation_list_returns_array",
+  "description": "List-only fixture documenting that automation_list returns a bounded tests array plus totalCount/truncated.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "tests": "array",
+    "totalCount": "number",
+    "truncated": "boolean",
+    "firstItemShape": {
+      "fullName": "string",
+      "displayName": "string",
+      "flags": "array"
+    }
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2001,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.automation_list",
+      "arguments": {
+        "filter": "UnrealMcp",
+        "includeDetails": true,
+        "limit": 25
+      }
+    }
+  }
+}

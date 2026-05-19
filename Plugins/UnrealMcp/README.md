@@ -291,9 +291,9 @@ The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
 tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
 v0.19 `Make Tool` scaffold draft creation.
-The plugin registry currently contains 155 registered MCP tools across actors,
+The plugin registry currently contains 158 registered MCP tools across actors,
 blueprint, editor, material, memory, scaffold, self-extension, skills,
-task-atlas, and widget categories.
+task-atlas, verification, and widget categories.
 
 The chat panel supports both direct slash commands and AI-assisted requests, and uses the same tool execution layer as the HTTP MCP server.
 

@@ -225,6 +225,7 @@ namespace UnrealMcp
 				TEXT("self-extension"),
 				TEXT("skills"),
 				TEXT("task-atlas"),
+				TEXT("verification"),
 				TEXT("widget")
 			};
 			return KnownCategories.Contains(Category);

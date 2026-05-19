@@ -95,9 +95,10 @@ Start here:
 5. `Docs/SelfExtensionPipeline.md`
 6. `Docs/KnowledgeRag.md`
 7. `Docs/SecurityModel.md`
-8. `Tools/UnrealMcpToolRegistry/tools.json`
-9. `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpToolRegistrar.cpp`
-10. The category source file for the area you are changing.
+8. `Docs/Verification.md`
+9. `Tools/UnrealMcpToolRegistry/tools.json`
+10. `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpToolRegistrar.cpp`
+11. The category source file for the area you are changing.
 
 If the task is about install/deployment:
 
@@ -194,6 +195,7 @@ Docs/
   TaskAtlas.md
   ToolNaming.md
   UnrealTaskRecipes.md
+  Verification.md
   WindowsCompatibilityLessons.md
 
 Plugins/UnrealMcp/
@@ -391,6 +393,12 @@ Task Atlas:
   through the configured Anthropic provider while preserving pinned and
   user-edited tasks
 
+Verification:
+
+- list runnable UE Automation Framework tests with `unreal.automation_list`
+- queue one exact automation test asynchronously with `unreal.automation_run`
+- poll persisted automation run state with `unreal.automation_report`
+
 ## Tool Registry Status
 
 The explicit ToolRegistry is central. Do not bypass it.
@@ -414,7 +422,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 155 entries across:
+At the time this file was written, the registry contained 158 entries across:
 
 - actors
 - blueprint
@@ -425,6 +433,7 @@ At the time this file was written, the registry contained 155 entries across:
 - self-extension
 - skills
 - task-atlas
+- verification
 - widget
 
 This count includes the v0.14 Python runtime smoke tool, the three v0.15
@@ -450,7 +459,9 @@ v0.15 chunk 5 migration tools (`unreal.asset_move`,
 foundation tools (`unreal.activity_log_annotate`, `unreal.task_list`,
 `unreal.task_describe`, `unreal.task_rate`, and `unreal.task_pin`), and the
 v0.19 Part C Task Atlas LLM backfill tool
-(`unreal.task_label_backfill`). Earlier handoff text lagged at 119 entries.
+(`unreal.task_label_backfill`), and the three v0.20 C1a verification
+foundation tools (`unreal.automation_list`, `unreal.automation_run`, and
+`unreal.automation_report`). Earlier handoff text lagged at 119 entries.
 
 Current project status: v0.17 Task Atlas foundation landed; ActivityLog
 annotations, local task JSON extraction/list/detail/rating/pinning, Chat rating
@@ -458,6 +469,8 @@ hooks, and the Task Atlas Slate window are in place. v0.18 Task Atlas
 promote actions now make To Skills and To RAG functional; v0.19 is complete
 with Part A Make Tool scaffold drafts, Part B Markdown ingestion/RAG indexing
 for promoted workflows, and Part C LLM retrospective label backfill.
+v0.20 C1a B1 is now in place with the `verification` category and async
+Automation Framework list/run/report polling foundation.
 v0.19.1 patched a latent unity-build symbol collision that blocked UE 5.6
 dev-host builds against `UEvolve.uproject` (fixed by setting `bUseUnity =
 false` for the UnrealMcp module); same source now compiles cleanly on UE
@@ -561,6 +574,9 @@ UnrealMcpTaskAtlasTools.cpp/.h
 UnrealMcpTaskLabelBackfillTool.cpp/.h
   LLM retrospective Task Atlas label backfill with pinned/user-edited safeguards
 
+UnrealMcpAutomationTools.cpp/.h
+  verification category tools for UE Automation Framework discovery, async run queueing, polling reports, state files, and stale recovery
+
 UnrealMcpKnowledgeBridge.h
   shared bridge for knowledge-index card writes
 
@@ -574,6 +590,7 @@ UnrealMcpSelfExtension*.cpp
 UnrealMcpMemoryTools.cpp
 UnrealMcpSkillTools.cpp
 UnrealMcpTaskAtlasTools.cpp
+UnrealMcpAutomationTools.cpp
 UnrealMcpKnowledgeTools.cpp
 UnrealMcpWorkflowTools.cpp
   category handlers
@@ -588,7 +605,7 @@ UnrealMcpAssistantRun.cpp/.h
   AI Responses API interaction, tool loop, context compression, timeouts
 
 Private/Tests/*.cpp
-  module-private automation tests such as engine-compat smoke coverage
+  module-private automation tests such as engine-compat and automation-tools smoke coverage
 ```
 
 The largest current files are still ChatPanel, ActorTools, KnowledgeTools,
@@ -951,6 +968,7 @@ Tools/UnrealMcpTests/Actors
 Tools/UnrealMcpTests/Blueprint
 Tools/UnrealMcpTests/Scaffold
 Tools/UnrealMcpTests/SelfExtension
+Tools/UnrealMcpTests/Verification
 Tools/UnrealMcpTests/Widget
 ```
 

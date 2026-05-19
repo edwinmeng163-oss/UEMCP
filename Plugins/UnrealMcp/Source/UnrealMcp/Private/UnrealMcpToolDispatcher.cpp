@@ -2,6 +2,7 @@
 
 #include "UnrealMcpPythonToolBridge.h"
 #include "UnrealMcpActorTools.h"
+#include "UnrealMcpAutomationTools.h"
 #include "UnrealMcpBlueprintTools.h"
 #include "UnrealMcpEditorTools.h"
 #include "UnrealMcpMaterialInstanceTools.h"
@@ -229,6 +230,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 	else if (Category == TEXT("task-atlas"))
 	{
 		if (UnrealMcp::TryExecuteTaskAtlasTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("verification"))
+	{
+		if (UnrealMcp::TryExecuteAutomationTool(ToolName, Arguments, CategoryResult))
 		{
 			return CategoryResult;
 		}

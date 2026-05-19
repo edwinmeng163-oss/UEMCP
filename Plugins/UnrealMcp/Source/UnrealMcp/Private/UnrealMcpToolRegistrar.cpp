@@ -1005,6 +1005,69 @@ namespace UnrealMcp
 			}
 		}
 
+		void RegisterVerificationMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
+		{
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("filter"), MakeStringProperty(TEXT("Optional case-insensitive substring filter matched against fullName and displayName."), FString()));
+				Properties->SetObjectField(TEXT("includeDetails"), MakeBoolProperty(TEXT("Include category and best-effort requirement metadata."), false));
+				Properties->SetObjectField(TEXT("limit"), MakeNumberProperty(TEXT("Maximum automation tests to return."), 200.0));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.automation_list"),
+					TEXT("List Automation Tests"),
+					TEXT("Lists runnable Unreal Automation Framework tests with canonical fullName, display name, flags, and optional details."),
+					TEXT("verification"),
+					TEXT("UnrealMcpAutomationTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.20 C1a verification foundation read-only automation test discovery.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("fullName"), MakeStringProperty(TEXT("Exact canonical FAutomationTestFramework test name to run."), FString()));
+				Properties->SetObjectField(TEXT("timeoutSeconds"), MakeNumberProperty(TEXT("Wall-clock timeout before reports surface timed_out and stale recovery can later free the slot."), 120.0));
+				Properties->SetObjectField(TEXT("tags"), MakeStringArrayProperty(TEXT("Caller metadata echoed into the run report; not passed to UE Automation filters.")));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.automation_run"),
+					TEXT("Run Automation Test"),
+					TEXT("Queues one Unreal Automation Framework test and returns immediately with a runId for polling."),
+					TEXT("verification"),
+					TEXT("UnrealMcpAutomationTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.20 C1a verification foundation async single automation test runner with state-file reports.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("fullName") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("runId"), MakeStringProperty(TEXT("Automation runId returned by unreal.automation_run."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.automation_report"),
+					TEXT("Get Automation Run Report"),
+					TEXT("Returns the current or persisted report for an async automation test run."),
+					TEXT("verification"),
+					TEXT("UnrealMcpAutomationTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.20 C1a verification foundation read-only automation run polling/report tool.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("runId") }));
+			}
+		}
+
 		void RegisterSelfExtensionMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -1513,6 +1576,7 @@ namespace UnrealMcp
 			RegisterScaffoldMcpToolDescriptors(Registrar);
 			RegisterSkillSessionMcpToolDescriptors(Registrar);
 			RegisterTaskAtlasMcpToolDescriptors(Registrar);
+			RegisterVerificationMcpToolDescriptors(Registrar);
 			RegisterSelfExtensionMcpToolDescriptors(Registrar);
 		}
 	}

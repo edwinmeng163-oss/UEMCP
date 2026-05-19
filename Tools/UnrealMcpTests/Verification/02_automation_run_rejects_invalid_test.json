@@ -1,0 +1,27 @@
+{
+  "name": "automation_run_rejects_invalid_test",
+  "description": "automation_run should reject an exact fullName that is not registered in FAutomationTestFramework.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "expectToolCallStructuredFields": {
+    "errorKind": "TestNotFound"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2002,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.automation_run",
+      "arguments": {
+        "fullName": "UnrealMcp.Automation.DoesNotExist",
+        "timeoutSeconds": 5,
+        "tags": [
+          "fixture",
+          "metadata-only"
+        ]
+      }
+    }
+  }
+}

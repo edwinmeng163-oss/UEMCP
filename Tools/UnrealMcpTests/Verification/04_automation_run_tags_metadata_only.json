@@ -1,0 +1,29 @@
+{
+  "name": "automation_run_tags_metadata_only",
+  "description": "List-only fixture documenting that automation_run tags are caller metadata echoed into reports, not UE Automation filters.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "precondition": "Use a valid fullName from unreal.automation_list.",
+    "tagsBehavior": "tags are stored verbatim in Saved/UnrealMcp/AutomationRuns/<runId>.json and echoed by automation_report; they are not passed to FAutomationTestFramework filtering APIs.",
+    "reportField": "tags"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2004,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.automation_run",
+      "arguments": {
+        "fullName": "UnrealMcp.AutomationTools.InternalPass",
+        "timeoutSeconds": 30,
+        "tags": [
+          "release-gate",
+          "manual"
+        ]
+      }
+    }
+  }
+}

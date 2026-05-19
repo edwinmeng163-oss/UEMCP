@@ -3736,6 +3736,283 @@
       "notes": "C++ only. Reads during PIE because it does not mutate editor or world state."
     },
     {
+      "name": "unreal.automation_list",
+      "category": "verification",
+      "handlerName": "unreal.automation_list",
+      "title": "List Automation Tests",
+      "description": "Lists runnable Unreal Automation Framework tests with canonical fullName, display name, flags, and optional details.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.20 C1a verification foundation read-only automation test discovery.",
+      "summaryTemplate": "Listed Unreal Automation tests",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "Optional case-insensitive substring filter matched against fullName and displayName."
+          },
+          "includeDetails": {
+            "type": "boolean",
+            "default": false
+          },
+          "limit": {
+            "type": "number",
+            "default": 200
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tests",
+          "totalCount",
+          "truncated"
+        ],
+        "properties": {
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fullName",
+                "displayName",
+                "flags"
+              ],
+              "properties": {
+                "fullName": { "type": "string" },
+                "displayName": { "type": "string" },
+                "prettyName": { "type": "string" },
+                "flags": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "category": { "type": "string" },
+                "requiresPie": { "type": "boolean" },
+                "requiresEditor": { "type": "boolean" }
+              }
+            }
+          },
+          "totalCount": { "type": "number" },
+          "truncated": { "type": "boolean" }
+        }
+      },
+      "notes": "Uses FAutomationTestFramework::GetValidTestNames. includeDetails adds category and best-effort requirement hints."
+    },
+    {
+      "name": "unreal.automation_run",
+      "category": "verification",
+      "handlerName": "unreal.automation_run",
+      "title": "Run Automation Test",
+      "description": "Queues one Unreal Automation Framework test and returns immediately with a runId for polling.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.20 C1a verification foundation async single automation test runner with state-file reports.",
+      "summaryTemplate": "Queued automation test {args.fullName}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fullName"
+        ],
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "description": "Exact canonical FAutomationTestFramework test name."
+          },
+          "timeoutSeconds": {
+            "type": "number",
+            "default": 120
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Caller metadata stored in the report, not passed to UE Automation filters."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "acceptedAt",
+          "matchedTest",
+          "initialStatus",
+          "reportPath",
+          "pollingHint"
+        ],
+        "properties": {
+          "runId": { "type": "string" },
+          "acceptedAt": { "type": "string" },
+          "matchedTest": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fullName",
+              "displayName"
+            ],
+            "properties": {
+              "fullName": { "type": "string" },
+              "displayName": { "type": "string" }
+            }
+          },
+          "initialStatus": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running"
+            ]
+          },
+          "reportPath": { "type": "string" },
+          "pollingHint": { "type": "string" }
+        }
+      },
+      "notes": "Only one queued/running automation run is accepted at a time. tags are caller metadata only."
+    },
+    {
+      "name": "unreal.automation_report",
+      "category": "verification",
+      "handlerName": "unreal.automation_report",
+      "title": "Get Automation Run Report",
+      "description": "Returns the current or persisted report for an async automation test run.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.20 C1a verification foundation read-only automation run polling/report tool.",
+      "summaryTemplate": "Read automation report {args.runId}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "status",
+          "test",
+          "results",
+          "startedAt",
+          "logExcerpt",
+          "reportPath"
+        ],
+        "properties": {
+          "runId": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "timed_out",
+              "stale"
+            ]
+          },
+          "test": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fullName",
+              "displayName",
+              "flags"
+            ],
+            "properties": {
+              "fullName": { "type": "string" },
+              "displayName": { "type": "string" },
+              "flags": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "eventType",
+                "message"
+              ],
+              "properties": {
+                "eventType": {
+                  "type": "string",
+                  "enum": [
+                    "assertion_failed",
+                    "warning",
+                    "log_error",
+                    "log_warning",
+                    "info"
+                  ]
+                },
+                "message": { "type": "string" },
+                "location": { "type": "string" },
+                "frame": { "type": "number" }
+              }
+            }
+          },
+          "startedAt": { "type": "string" },
+          "endedAt": { "type": "string" },
+          "durationMs": { "type": "number" },
+          "logExcerpt": { "type": "string" },
+          "reportPath": { "type": "string" },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "notes": "The public report shape excludes internal state-file bookkeeping such as timeoutSecondsConfigured."
+    },
+    {
       "name": "unreal.project_settings_get",
       "category": "editor",
       "handlerName": "unreal.project_settings_get",

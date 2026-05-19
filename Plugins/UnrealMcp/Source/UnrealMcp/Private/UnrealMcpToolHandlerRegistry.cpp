@@ -46,6 +46,10 @@ namespace UnrealMcp
 			{
 				return TEXT("UnrealMcpTaskAtlasTools.cpp");
 			}
+			if (Category == TEXT("verification"))
+			{
+				return TEXT("UnrealMcpAutomationTools.cpp");
+			}
 			if (Category == TEXT("widget"))
 			{
 				return TEXT("UnrealMcpWidgetTools.cpp");

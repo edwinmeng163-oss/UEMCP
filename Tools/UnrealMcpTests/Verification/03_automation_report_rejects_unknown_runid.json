@@ -1,0 +1,22 @@
+{
+  "name": "automation_report_rejects_unknown_runid",
+  "description": "automation_report should reject a syntactically safe runId that has no in-memory or persisted state file.",
+  "category": "missing_required",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "expectToolCallStructuredFields": {
+    "errorKind": "RunNotFound"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2003,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.automation_report",
+      "arguments": {
+        "runId": "20990101T000000Z-ffffff"
+      }
+    }
+  }
+}
