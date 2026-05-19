@@ -194,9 +194,13 @@ namespace UnrealMcp
 
 		FString TailProjectLogExcerpt()
 		{
-			const FString LogPath = FPaths::Combine(FPaths::ProjectLogDir(), FString::Printf(TEXT("%s.log"), FApp::GetProjectName()));
+			// Renamed from local `LogPath` to avoid C4459 on Windows MSVC:
+			// `LogPath` is also a global log category declared in UE's
+			// EngineLogs.h. MSVC promotes the shadow to error; Mac clang
+			// only warns. Reported by Win packaging validation 2026-05-19.
+			const FString ProjectLogPath = FPaths::Combine(FPaths::ProjectLogDir(), FString::Printf(TEXT("%s.log"), FApp::GetProjectName()));
 			TArray<FString> Lines;
-			if (!FFileHelper::LoadFileToStringArray(Lines, *LogPath))
+			if (!FFileHelper::LoadFileToStringArray(Lines, *ProjectLogPath))
 			{
 				return FString();
 			}
