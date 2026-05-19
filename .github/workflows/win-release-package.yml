@@ -1,0 +1,142 @@
+name: Windows Release Package
+
+# Auto-builds the Windows source-only zip whenever a release tag is pushed,
+# and uploads it (plus the sha256 sidecar) to the matching GitHub release.
+# Replaces the manual Edwin-on-Windows workflow that produced v0.12 - v0.21.1
+# Windows zips.
+#
+# Manual trigger via workflow_dispatch is also supported for re-runs or
+# back-filling Windows zips on older tags.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.22.0) to (re-)package. Defaults to the current tag if push-triggered.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write  # for gh release upload --clobber
+
+jobs:
+  package:
+    name: Package Windows source-only zip
+    runs-on: windows-2022
+
+    steps:
+      - name: Resolve target tag
+        id: tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            $tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          } elseif ($env:DISPATCH_TAG -ne '' -and $env:DISPATCH_TAG -ne $null) {
+            $tag = $env:DISPATCH_TAG
+          } else {
+            Write-Error "No tag specified — push-trigger has no tag ref and workflow_dispatch input was empty."
+            exit 1
+          }
+          $version = $tag -replace '^v', ''
+          Write-Host "Target tag: $tag"
+          Write-Host "Version string: $version"
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+
+      - name: Checkout repository at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Enable Windows long paths
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          # Best-effort registry tweak — runner already has Developer Mode in most
+          # images, but this guarantees the LongPathsEnabled bit for this job.
+          try {
+            Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1
+          } catch {
+            Write-Host "::warning::LongPathsEnabled could not be set; continuing (most jobs do not need it)."
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Pre-package source validators
+        shell: pwsh
+        run: |
+          python Tools/validate_tool_registry.py
+          if ($LASTEXITCODE -ne 0) { throw "validate_tool_registry.py failed" }
+          python Tools/check_ue56_compat.py
+          if ($LASTEXITCODE -ne 0) { throw "check_ue56_compat.py failed" }
+          python Tools/verify_package_integrity.py --root . --mode source --repo-root . --strict
+          if ($LASTEXITCODE -ne 0) { throw "verify_package_integrity --root failed" }
+
+      - name: Run package_plugin.ps1
+        id: package
+        shell: pwsh
+        run: |
+          pwsh -File Tools/package_plugin.ps1 -Version ${{ steps.tag.outputs.version }}
+          if ($LASTEXITCODE -ne 0) { throw "package_plugin.ps1 failed" }
+          $zipPath = "Saved/UnrealMcp/Packages/UnrealMcp-v${{ steps.tag.outputs.version }}-win-ue56-ue57-projectroot.zip"
+          $shaPath = "$zipPath.sha256"
+          if (-not (Test-Path -LiteralPath $zipPath)) {
+            throw "Expected zip not found: $zipPath"
+          }
+          if (-not (Test-Path -LiteralPath $shaPath)) {
+            throw "Expected sha256 sidecar not found: $shaPath"
+          }
+          $zipFull = (Resolve-Path -LiteralPath $zipPath).Path
+          $shaFull = (Resolve-Path -LiteralPath $shaPath).Path
+          "zip_path=$zipFull" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha_path=$shaFull" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Produced: $zipFull"
+          Get-Content -LiteralPath $shaFull
+
+      - name: Verify produced zip
+        shell: pwsh
+        run: |
+          python Tools/verify_package_integrity.py --zip "${{ steps.package.outputs.zip_path }}" --mode source --repo-root . --strict
+          if ($LASTEXITCODE -ne 0) { throw "verify_package_integrity --zip failed" }
+
+      - name: Upload as workflow artifact
+        # Always upload so we can inspect even if the release upload step
+        # fails (e.g. release doesn't exist yet for a fresh tag).
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnrealMcp-${{ steps.tag.outputs.tag }}-win-zip
+          path: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.sha_path }}
+          retention-days: 30
+
+      - name: Attach to GitHub release (best-effort)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $zip = "${{ steps.package.outputs.zip_path }}"
+          $sha = "${{ steps.package.outputs.sha_path }}"
+
+          # Verify release exists; if not, the workflow artifact above still
+          # carries the zip for manual attachment.
+          $releaseInfo = gh release view $tag --repo ${{ github.repository }} 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Release $tag not found yet — skipping upload. The zip is available as a workflow artifact for manual attachment."
+            exit 0
+          }
+
+          gh release upload $tag $zip $sha --repo ${{ github.repository }} --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
+          Write-Host "Uploaded $zip and $sha to release $tag"

@@ -1,10 +1,12 @@
 # Windows Packaging Guide for UnrealMcp Releases
 
+> **Update (post-v0.22.0)**: The Windows source-only zip is now produced automatically by `.github/workflows/win-release-package.yml` on every `v*.*.*` tag push, then attached to the matching GitHub release via `gh release upload --clobber`. **No manual Windows packaging is required for new tags going forward.** The workflow runs on a `windows-2022` GitHub Actions runner so the zip retains `Compress-Archive`'s backslash entry paths (the canonical Windows-tested artifact shape). If the GitHub Actions run fails for any reason, the steps in this guide are the manual fallback.
+>
+> The guide below stays canonical for: (1) the manual fallback if the workflow fails, (2) back-filling Windows zips on tags that pre-date the workflow, and (3) the rare full-experience zip with prebuilt Win64 binaries (not produced by the workflow).
+
 This guide tells a Windows collaborator how to produce a `UnrealMcp-vX.Y.Z-win-*.zip` and attach it to an existing GitHub release. PM does the Mac zip and creates the release; this side packages the Windows companion.
 
 > Audience: a Windows machine that has UE 5.6 and/or UE 5.7 installed, with the UEvolve repository cloned.
->
-> Current backlog (as of v0.19.0): **v0.15.1, v0.15.2, v0.16.0, v0.17.0, v0.18.0, v0.19.0** all have Mac zips published but no Windows zip. Process each one with the steps below; you can batch all 6 into a single session.
 
 ---
 
