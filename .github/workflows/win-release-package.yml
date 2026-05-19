@@ -79,8 +79,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "validate_tool_registry.py failed" }
           python Tools/check_ue56_compat.py
           if ($LASTEXITCODE -ne 0) { throw "check_ue56_compat.py failed" }
-          python Tools/verify_package_integrity.py --root . --mode source --repo-root . --strict
-          if ($LASTEXITCODE -ne 0) { throw "verify_package_integrity --root failed" }
+          # Skip verify_package_integrity --root in pre-package: it requires
+          # Tools/UnrealMcpToolScaffolds/<id>/... working-copy paths that a
+          # clean CI checkout doesn't have (gitignored). The packager itself
+          # falls back to UnrealMcpToolScaffoldStarters; the post-package
+          # --zip check below is the canonical verification.
 
       - name: Run package_plugin.ps1
         id: package
