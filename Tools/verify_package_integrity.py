@@ -399,6 +399,22 @@ def check_required_files_present(root: Path, mode: str, scope: str) -> CheckResu
     for rel in required:
         path = root / rel
         if not path.exists():
+            # Scaffold working-copy fallback for repo-scope checks.
+            # `Tools/UnrealMcpToolScaffolds/<id>/...` is the developer-local
+            # working copy and is gitignored, so a clean CI/repo checkout
+            # never has it. The canonical committed copy lives at
+            # `Tools/UnrealMcpToolScaffoldStarters/<id>/...`. The packager
+            # (Tools/package_plugin.{sh,ps1}) already falls back to the
+            # starter at packaging time. The verifier must do the same when
+            # checking the live repo (scope == "repo") so a clean checkout
+            # passes pre-packaging validation. Zip-scope checks still
+            # require the path verbatim because packaging puts the file at
+            # the working-copy location inside the produced zip.
+            if scope == "repo" and rel.startswith("Tools/UnrealMcpToolScaffolds/"):
+                starter_rel = "Tools/UnrealMcpToolScaffoldStarters/" + rel[len("Tools/UnrealMcpToolScaffolds/"):]
+                starter_path = root / starter_rel
+                if starter_path.exists() and is_real_file(starter_path):
+                    continue
             missing.append(rel)
         elif not is_real_file(path):
             not_real_files.append(rel)
