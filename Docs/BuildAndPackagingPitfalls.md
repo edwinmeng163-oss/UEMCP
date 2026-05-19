@@ -262,6 +262,34 @@ A successful UBT `Result: Succeeded` means the plugin built. Content warnings on
 
 ---
 
+## 12. Mac-only build verify misses MSVC-promoted-to-error warnings
+
+### Trap
+Mac's clang and Windows MSVC have different warning-to-error promotion behavior. C4459 (declaration of '<name>' hides global declaration) is treated as a warning by clang under UE's flags but is promoted to **error** by MSVC. The most common shadow target is a UE global log category symbol (`LogPath`, `LogCore`, `LogAutomation`, ...).
+
+### Symptom
+- PM Mac build PASS (UE 5.6 + UE 5.7 both clean)
+- Edwin / Windows packaging validation: clean UE 5.6 UBT compile FAILS with `error C4459: declaration of 'LogPath' hides global declaration` against `EngineLogs.h`
+- The packager itself succeeds because it only stages source, doesn't compile
+
+### Real example (v0.22 B2 → v0.22.1 hotfix)
+v0.20 B2 watchdog work introduced `TailProjectLogExcerpt()` with a local `const FString LogPath = ...`. `EngineLogs.h` declares a global `LogPath` log category. Mac builds passed both UE 5.6 and UE 5.7. Edwin's Windows packaging validation caught the C4459 and supplied a one-line patch.
+
+### Avoidance
+When introducing any new local variable in plugin C++ that uses a common UE global identifier shape (especially `Log*` / `G*` / `U*` / `F*`), prefer a more specific local name:
+- `LogPath` → `ProjectLogPath`
+- `LogCore` → `LocalLogCore`
+- `World` → `EditorWorld` / `PieWorld` / `PreviewWorld`
+
+Or qualify the usage: `::LogPath` for the UE category at the global namespace.
+
+### CI mitigation
+The `.github/workflows/win-release-package.yml` workflow only packages source; it does NOT compile against UE. **Compilation correctness on Windows still depends on the Windows packaging collaborator's UBT step** (or, future-state, a Windows-runner-with-UE GitHub Actions matrix — not currently set up because the Epic UE install is gated by EULA).
+
+Until Windows compile-in-CI is established, treat Windows packaging validation as the canonical pre-release acceptance check for any change to plugin C++.
+
+---
+
 ## Summary checklist (use at every release)
 
 - [ ] `MyProjectEditor` target name confirmed for example hosts, `UEvolveEditor` for dev host
@@ -274,4 +302,5 @@ A successful UBT `Result: Succeeded` means the plugin built. Content warnings on
 - [ ] Codex prompts include `-m gpt-5.5 -r xhigh`; `-d` points at project root not worktree
 - [ ] Hermes brief saved to `/tmp/*.md` if multi-step
 - [ ] Don't repackage a Win-tested zip on Mac for "verifier passes" reasons
+- [ ] Grep new C++ locals for shadow risk against UE global names (`LogPath` / `GWorld` / etc.) — Mac clang skips this; MSVC errors
 - [ ] Each PM commit's Co-Authored-By trailer names who actually wrote the code (Codex when generated, Claude when reviewer-authored)
