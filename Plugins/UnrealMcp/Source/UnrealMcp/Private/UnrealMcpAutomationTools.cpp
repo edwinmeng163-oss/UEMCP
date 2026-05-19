@@ -20,6 +20,26 @@
 namespace UnrealMcp
 {
 	FUnrealMcpExecutionResult MakeExecutionResult(const FString& Text, const TSharedPtr<FJsonObject>& StructuredContent, bool bIsError);
+	bool MarkActivePieSmokeStaleFromAutomationLock(const FString& RunId, const FString& StaleReason);
+
+	FString LexToString(EUnrealMcpAutomationRunType RunType)
+	{
+		switch (RunType)
+		{
+		case EUnrealMcpAutomationRunType::PieSmoke:
+			return TEXT("pie_smoke");
+		case EUnrealMcpAutomationRunType::Automation:
+		default:
+			return TEXT("automation");
+		}
+	}
+
+	EUnrealMcpAutomationRunType ParseAutomationRunType(const FString& RunTypeText)
+	{
+		return RunTypeText == TEXT("pie_smoke")
+			? EUnrealMcpAutomationRunType::PieSmoke
+			: EUnrealMcpAutomationRunType::Automation;
+	}
 
 	namespace
 	{
@@ -34,37 +54,9 @@ namespace UnrealMcp
 		constexpr int32 LogExcerptLineLimit = 50;
 		constexpr int32 LogExcerptCharLimit = 4096;
 
-		struct FAutomationResultEvent
-		{
-			FString EventType;
-			FString Message;
-			FString Location;
-			int32 Frame = INDEX_NONE;
-		};
-
-		struct FAutomationRunState
-		{
-			FString RunId;
-			FString Status = TEXT("queued");
-			FString Reason;
-			FString FullName;
-			FString DisplayName;
-			FString PrettyName;
-			TArray<FString> Flags;
-			TArray<FString> Tags;
-			FDateTime AcceptedAtUtc;
-			FDateTime StartedAtUtc;
-			FDateTime EndedAtUtc;
-			FDateTime LastHeartbeatUtc;
-			FString StaleReason;
-			int32 TimeoutSeconds = DefaultAutomationTimeoutSeconds;
-			TArray<FAutomationResultEvent> Results;
-			bool bBestEffortCancelAttempted = false;
-		};
-
 		FCriticalSection GAutomationRunMutex;
 		bool bHasActiveAutomationRun = false;
-		FAutomationRunState GActiveAutomationRun;
+		FUnrealMcpAutomationRunState GActiveAutomationRun;
 		FTSTicker::FDelegateHandle GAutomationTickerHandle;
 		FDateTime LastPersistedHeartbeatUtc;
 
@@ -109,7 +101,7 @@ namespace UnrealMcp
 			return Status == TEXT("queued") || Status == TEXT("running");
 		}
 
-		FString NormalizeStatusForPublicReport(const FAutomationRunState& State, const FDateTime& NowUtc)
+		FString NormalizeStatusForPublicReport(const FUnrealMcpAutomationRunState& State, const FDateTime& NowUtc)
 		{
 			if (IsActiveStatus(State.Status) && State.StartedAtUtc.GetTicks() > 0)
 			{
@@ -122,7 +114,7 @@ namespace UnrealMcp
 			return State.Status;
 		}
 
-		FString GetStaleReason(const FAutomationRunState& State, const FDateTime& NowUtc)
+		FString GetStaleReason(const FUnrealMcpAutomationRunState& State, const FDateTime& NowUtc)
 		{
 			if (!IsActiveStatus(State.Status))
 			{
@@ -151,10 +143,10 @@ namespace UnrealMcp
 			return JsonValues;
 		}
 
-		TArray<TSharedPtr<FJsonValue>> MakeResultEventValues(const TArray<FAutomationResultEvent>& Results)
+		TArray<TSharedPtr<FJsonValue>> MakeResultEventValues(const TArray<FUnrealMcpAutomationResultEvent>& Results)
 		{
 			TArray<TSharedPtr<FJsonValue>> JsonValues;
-			for (const FAutomationResultEvent& Result : Results)
+			for (const FUnrealMcpAutomationResultEvent& Result : Results)
 			{
 				TSharedPtr<FJsonObject> ResultObject = MakeShared<FJsonObject>();
 				ResultObject->SetStringField(TEXT("eventType"), Result.EventType);
@@ -172,7 +164,7 @@ namespace UnrealMcp
 			return JsonValues;
 		}
 
-		TSharedPtr<FJsonObject> MakeStateTestObject(const FAutomationRunState& State)
+		TSharedPtr<FJsonObject> MakeStateTestObject(const FUnrealMcpAutomationRunState& State)
 		{
 			TSharedPtr<FJsonObject> TestObject = MakeShared<FJsonObject>();
 			TestObject->SetStringField(TEXT("fullName"), State.FullName);
@@ -185,7 +177,7 @@ namespace UnrealMcp
 			return TestObject;
 		}
 
-		TSharedPtr<FJsonObject> MakeMatchedTestObject(const FAutomationRunState& State)
+		TSharedPtr<FJsonObject> MakeMatchedTestObject(const FUnrealMcpAutomationRunState& State)
 		{
 			TSharedPtr<FJsonObject> TestObject = MakeShared<FJsonObject>();
 			TestObject->SetStringField(TEXT("fullName"), State.FullName);
@@ -193,7 +185,7 @@ namespace UnrealMcp
 			return TestObject;
 		}
 
-		TSharedPtr<FJsonObject> MakePublicReportTestObject(const FAutomationRunState& State)
+		TSharedPtr<FJsonObject> MakePublicReportTestObject(const FUnrealMcpAutomationRunState& State)
 		{
 			TSharedPtr<FJsonObject> TestObject = MakeMatchedTestObject(State);
 			TestObject->SetArrayField(TEXT("flags"), MakeStringArrayValues(State.Flags));
@@ -223,11 +215,12 @@ namespace UnrealMcp
 			return Excerpt;
 		}
 
-		TSharedPtr<FJsonObject> MakeStateJsonObject(const FAutomationRunState& State)
+		TSharedPtr<FJsonObject> MakeStateJsonObject(const FUnrealMcpAutomationRunState& State)
 		{
 			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
 			Object->SetNumberField(TEXT("internalSchemaVersion"), AutomationStateSchemaVersion);
 			Object->SetStringField(TEXT("runId"), State.RunId);
+			Object->SetStringField(TEXT("runType"), LexToString(State.RunType));
 			Object->SetStringField(TEXT("status"), State.Status);
 			Object->SetStringField(TEXT("reason"), State.Reason);
 			Object->SetObjectField(TEXT("test"), MakeStateTestObject(State));
@@ -255,14 +248,19 @@ namespace UnrealMcp
 			{
 				Object->SetArrayField(TEXT("tags"), MakeStringArrayValues(State.Tags));
 			}
+			if (State.PieReport.IsValid())
+			{
+				Object->SetObjectField(TEXT("pieReport"), State.PieReport);
+			}
 			return Object;
 		}
 
-		TSharedPtr<FJsonObject> MakePublicReportObject(const FAutomationRunState& State)
+		TSharedPtr<FJsonObject> MakePublicReportObject(const FUnrealMcpAutomationRunState& State)
 		{
 			const FDateTime NowUtc = FDateTime::UtcNow();
 			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
 			Object->SetStringField(TEXT("runId"), State.RunId);
+			Object->SetStringField(TEXT("runType"), LexToString(State.RunType));
 			Object->SetStringField(TEXT("status"), NormalizeStatusForPublicReport(State, NowUtc));
 			Object->SetObjectField(TEXT("test"), MakePublicReportTestObject(State));
 			Object->SetArrayField(TEXT("results"), MakeResultEventValues(State.Results));
@@ -278,10 +276,14 @@ namespace UnrealMcp
 			{
 				Object->SetArrayField(TEXT("tags"), MakeStringArrayValues(State.Tags));
 			}
+			if (State.RunType == EUnrealMcpAutomationRunType::PieSmoke && State.PieReport.IsValid())
+			{
+				Object->SetObjectField(TEXT("pieReport"), State.PieReport);
+			}
 			return Object;
 		}
 
-		bool SaveStateFile(const FAutomationRunState& State)
+		bool SaveStateFile(const FUnrealMcpAutomationRunState& State)
 		{
 			IFileManager::Get().MakeDirectory(*GetAutomationRunRoot(), true);
 			FString JsonText;
@@ -330,9 +332,9 @@ namespace UnrealMcp
 			return Values;
 		}
 
-		TArray<FAutomationResultEvent> ReadResultEvents(const TSharedPtr<FJsonObject>& Object)
+		TArray<FUnrealMcpAutomationResultEvent> ReadResultEvents(const TSharedPtr<FJsonObject>& Object)
 		{
-			TArray<FAutomationResultEvent> Results;
+			TArray<FUnrealMcpAutomationResultEvent> Results;
 			const TArray<TSharedPtr<FJsonValue>>* JsonValues = nullptr;
 			if (!Object.IsValid() || !Object->TryGetArrayField(TEXT("results"), JsonValues) || !JsonValues)
 			{
@@ -345,7 +347,7 @@ namespace UnrealMcp
 				{
 					continue;
 				}
-				FAutomationResultEvent Result;
+				FUnrealMcpAutomationResultEvent Result;
 				(*ResultObject)->TryGetStringField(TEXT("eventType"), Result.EventType);
 				(*ResultObject)->TryGetStringField(TEXT("message"), Result.Message);
 				(*ResultObject)->TryGetStringField(TEXT("location"), Result.Location);
@@ -359,7 +361,7 @@ namespace UnrealMcp
 			return Results;
 		}
 
-		bool LoadStateFromFile(const FString& RunId, FAutomationRunState& OutState)
+		bool LoadStateFromFile(const FString& RunId, FUnrealMcpAutomationRunState& OutState)
 		{
 			if (!IsSafeRunId(RunId))
 			{
@@ -371,10 +373,19 @@ namespace UnrealMcp
 				return false;
 			}
 
-			FAutomationRunState State;
+			FUnrealMcpAutomationRunState State;
 			Object->TryGetStringField(TEXT("runId"), State.RunId);
 			Object->TryGetStringField(TEXT("status"), State.Status);
 			Object->TryGetStringField(TEXT("reason"), State.Reason);
+			FString RunTypeText;
+			if (Object->TryGetStringField(TEXT("runType"), RunTypeText))
+			{
+				State.RunType = ParseAutomationRunType(RunTypeText);
+			}
+			else
+			{
+				State.RunType = EUnrealMcpAutomationRunType::Automation;
+			}
 			double TimeoutSeconds = static_cast<double>(DefaultAutomationTimeoutSeconds);
 			Object->TryGetNumberField(TEXT("timeoutSecondsConfigured"), TimeoutSeconds);
 			State.TimeoutSeconds = FMath::Clamp(static_cast<int32>(TimeoutSeconds), 1, MaxAutomationTimeoutSeconds);
@@ -408,6 +419,11 @@ namespace UnrealMcp
 			}
 			State.Tags = ReadStringArrayField(Object, TEXT("tags"));
 			State.Results = ReadResultEvents(Object);
+			const TSharedPtr<FJsonObject>* PieReportObject = nullptr;
+			if (Object->TryGetObjectField(TEXT("pieReport"), PieReportObject) && PieReportObject && PieReportObject->IsValid())
+			{
+				State.PieReport = *PieReportObject;
+			}
 			OutState = MoveTemp(State);
 			return !OutState.RunId.IsEmpty();
 		}
@@ -560,14 +576,14 @@ namespace UnrealMcp
 			return false;
 		}
 
-		FAutomationRunState MakeRunStateFromTestInfo(
+		FUnrealMcpAutomationRunState MakeRunStateFromTestInfo(
 			const FString& RunId,
 			const FAutomationTestInfo& TestInfo,
 			const TArray<FString>& Tags,
 			int32 TimeoutSeconds)
 		{
 			const FDateTime NowUtc = FDateTime::UtcNow();
-			FAutomationRunState State;
+			FUnrealMcpAutomationRunState State;
 			State.RunId = RunId;
 			State.Status = TEXT("queued");
 			State.FullName = TestInfo.GetTestName();
@@ -599,7 +615,7 @@ namespace UnrealMcp
 			return FString::Printf(TEXT("%s-%s"), *Timestamp, *Hex);
 		}
 
-		void AttemptBestEffortCancel(FAutomationRunState& State)
+		void AttemptBestEffortCancel(FUnrealMcpAutomationRunState& State)
 		{
 			if (State.bBestEffortCancelAttempted || IsEngineExitRequested())
 			{
@@ -609,8 +625,15 @@ namespace UnrealMcp
 			State.bBestEffortCancelAttempted = true;
 		}
 
-		void MarkStateStale(FAutomationRunState& State, const FString& StaleReason, bool bAttemptBestEffortCancel = true)
+		void MarkStateStale(FUnrealMcpAutomationRunState& State, const FString& StaleReason, bool bAttemptBestEffortCancel = true)
 		{
+			if (State.RunType == EUnrealMcpAutomationRunType::PieSmoke
+				&& MarkActivePieSmokeStaleFromAutomationLock(State.RunId, StaleReason))
+			{
+				LoadStateFromFile(State.RunId, State);
+				return;
+			}
+
 			State.Status = TEXT("stale");
 			State.StaleReason = StaleReason.TrimStartAndEnd().IsEmpty() ? TEXT("hard_timeout") : StaleReason.TrimStartAndEnd();
 			if (State.StaleReason == TEXT("hard_timeout"))
@@ -637,7 +660,7 @@ namespace UnrealMcp
 			SaveStateFile(State);
 		}
 
-		bool TryLoadActiveRunFromDisk(FAutomationRunState& OutState)
+		bool TryLoadActiveRunFromDisk(FUnrealMcpAutomationRunState& OutState)
 		{
 			TArray<FString> FileNames;
 			IFileManager::Get().FindFiles(FileNames, *FPaths::Combine(GetAutomationRunRoot(), TEXT("*.json")), true, false);
@@ -645,7 +668,7 @@ namespace UnrealMcp
 			for (int32 Index = FileNames.Num() - 1; Index >= 0; --Index)
 			{
 				const FString RunId = FPaths::GetBaseFilename(FileNames[Index]);
-				FAutomationRunState State;
+				FUnrealMcpAutomationRunState State;
 				if (!LoadStateFromFile(RunId, State) || !IsActiveStatus(State.Status))
 				{
 					continue;
@@ -662,17 +685,20 @@ namespace UnrealMcp
 			return false;
 		}
 
-		bool TryGetActiveRun(FAutomationRunState& OutState)
+		bool TryGetActiveRun(FUnrealMcpAutomationRunState& OutState)
 		{
+			FUnrealMcpAutomationRunState StaleState;
+			FString StaleReason;
 			{
 				FScopeLock Lock(&GAutomationRunMutex);
 				if (bHasActiveAutomationRun)
 				{
-					const FString StaleReason = GetStaleReason(GActiveAutomationRun, FDateTime::UtcNow());
+					StaleReason = GetStaleReason(GActiveAutomationRun, FDateTime::UtcNow());
 					if (!StaleReason.IsEmpty())
 					{
-						MarkStateStale(GActiveAutomationRun, StaleReason);
+						StaleState = GActiveAutomationRun;
 						bHasActiveAutomationRun = false;
+						LastPersistedHeartbeatUtc = FDateTime();
 					}
 					else
 					{
@@ -680,6 +706,11 @@ namespace UnrealMcp
 						return true;
 					}
 				}
+			}
+
+			if (!StaleState.RunId.IsEmpty())
+			{
+				MarkStateStale(StaleState, StaleReason);
 			}
 
 			if (TryLoadActiveRunFromDisk(OutState))
@@ -703,7 +734,7 @@ namespace UnrealMcp
 			}
 		}
 
-		void SetActiveRunState(const FAutomationRunState& State)
+		void SetActiveRunState(const FUnrealMcpAutomationRunState& State)
 		{
 			FScopeLock Lock(&GAutomationRunMutex);
 			GActiveAutomationRun = State;
@@ -714,12 +745,12 @@ namespace UnrealMcp
 			}
 		}
 
-		FAutomationRunState GetActiveRunStateCopy()
+		FUnrealMcpAutomationRunState GetActiveRunStateCopy()
 		{
 			FScopeLock Lock(&GAutomationRunMutex);
 			if (!bHasActiveAutomationRun)
 			{
-				return FAutomationRunState();
+				return FUnrealMcpAutomationRunState();
 			}
 			return GActiveAutomationRun;
 		}
@@ -738,12 +769,12 @@ namespace UnrealMcp
 			}
 		}
 
-		TArray<FAutomationResultEvent> ConvertExecutionEntries(const FAutomationTestExecutionInfo& ExecutionInfo)
+		TArray<FUnrealMcpAutomationResultEvent> ConvertExecutionEntries(const FAutomationTestExecutionInfo& ExecutionInfo)
 		{
-			TArray<FAutomationResultEvent> Results;
+			TArray<FUnrealMcpAutomationResultEvent> Results;
 			for (const FAutomationExecutionEntry& Entry : ExecutionInfo.GetEntries())
 			{
-				FAutomationResultEvent Result;
+				FUnrealMcpAutomationResultEvent Result;
 				Result.EventType = MapAutomationEventType(Entry.Event.Type);
 				Result.Message = Entry.Event.Message;
 				if (!Entry.Filename.IsEmpty() && Entry.LineNumber > 0)
@@ -760,7 +791,7 @@ namespace UnrealMcp
 			GAutomationTickerHandle.Reset();
 		}
 
-		void UpdateActiveRunHeartbeat(FAutomationRunState& State, const FDateTime& NowUtc)
+		void UpdateActiveRunHeartbeat(FUnrealMcpAutomationRunState& State, const FDateTime& NowUtc)
 		{
 			if (!IsActiveStatus(State.Status))
 			{
@@ -792,8 +823,13 @@ namespace UnrealMcp
 		bool TickActiveAutomationRun(float DeltaTime)
 		{
 			(void)DeltaTime;
-			FAutomationRunState State = GetActiveRunStateCopy();
+			FUnrealMcpAutomationRunState State = GetActiveRunStateCopy();
 			if (State.RunId.IsEmpty())
+			{
+				ResetAutomationTickerHandle();
+				return false;
+			}
+			if (State.RunType != EUnrealMcpAutomationRunType::Automation)
 			{
 				ResetAutomationTickerHandle();
 				return false;
@@ -952,12 +988,13 @@ namespace UnrealMcp
 
 		FUnrealMcpExecutionResult AutomationRunTool(const FJsonObject& Arguments)
 		{
-			FAutomationRunState ActiveRun;
+			FUnrealMcpAutomationRunState ActiveRun;
 			if (TryGetActiveRun(ActiveRun))
 			{
-				const FString Message = FString::Printf(TEXT("Automation run '%s' is still %s."), *ActiveRun.RunId, *ActiveRun.Status);
+				const FString Message = FString::Printf(TEXT("Run '%s' (%s) is still %s."), *ActiveRun.RunId, *LexToString(ActiveRun.RunType), *ActiveRun.Status);
 				TSharedPtr<FJsonObject> ErrorObject = MakeErrorObject(TEXT("RunAlreadyActive"), Message);
 				ErrorObject->SetStringField(TEXT("activeRunId"), ActiveRun.RunId);
+				ErrorObject->SetStringField(TEXT("activeRunType"), LexToString(ActiveRun.RunType));
 				return MakeExecutionResult(Message, ErrorObject, true);
 			}
 
@@ -980,7 +1017,7 @@ namespace UnrealMcp
 			const int32 TimeoutSeconds = GetIntArgument(Arguments, TEXT("timeoutSeconds"), DefaultAutomationTimeoutSeconds, 1, MaxAutomationTimeoutSeconds);
 			const TArray<FString> Tags = GetStringArrayArgument(Arguments, TEXT("tags"));
 			const FString RunId = MakeRunId();
-			FAutomationRunState State = MakeRunStateFromTestInfo(RunId, TestInfo, Tags, TimeoutSeconds);
+			FUnrealMcpAutomationRunState State = MakeRunStateFromTestInfo(RunId, TestInfo, Tags, TimeoutSeconds);
 			SaveStateFile(State);
 			SetActiveRunState(State);
 			LastPersistedHeartbeatUtc = State.LastHeartbeatUtc;
@@ -1008,7 +1045,7 @@ namespace UnrealMcp
 			}
 			RunId = RunId.TrimStartAndEnd();
 
-			FAutomationRunState State;
+			FUnrealMcpAutomationRunState State;
 			{
 				FScopeLock Lock(&GAutomationRunMutex);
 				if (bHasActiveAutomationRun && GActiveAutomationRun.RunId == RunId)
@@ -1039,6 +1076,61 @@ namespace UnrealMcp
 		}
 	}
 
+	FString MakeAutomationRunId()
+	{
+		return MakeRunId();
+	}
+
+	FString MakeAutomationReportRelativePath(const FString& RunId)
+	{
+		return MakeReportRelativePath(RunId);
+	}
+
+	FString MakeAutomationReportPath(const FString& RunId)
+	{
+		return MakeReportPath(RunId);
+	}
+
+	bool IsAutomationRunActiveStatus(const FString& Status)
+	{
+		return IsActiveStatus(Status);
+	}
+
+	FString GetAutomationRunStaleReason(const FUnrealMcpAutomationRunState& State, const FDateTime& NowUtc)
+	{
+		return GetStaleReason(State, NowUtc);
+	}
+
+	bool SaveAutomationRunStateFile(const FUnrealMcpAutomationRunState& State)
+	{
+		return SaveStateFile(State);
+	}
+
+	bool LoadAutomationRunStateFromFile(const FString& RunId, FUnrealMcpAutomationRunState& OutState)
+	{
+		return LoadStateFromFile(RunId, OutState);
+	}
+
+	bool TryGetActiveAutomationRunState(FUnrealMcpAutomationRunState& OutState)
+	{
+		return TryGetActiveRun(OutState);
+	}
+
+	void SetActiveAutomationRunState(const FUnrealMcpAutomationRunState& State)
+	{
+		SetActiveRunState(State);
+	}
+
+	FUnrealMcpAutomationRunState GetActiveAutomationRunStateCopy()
+	{
+		return GetActiveRunStateCopy();
+	}
+
+	void ClearActiveAutomationRunIfMatching(const FString& RunId)
+	{
+		ClearActiveRunIfMatching(RunId);
+	}
+
 	bool TryExecuteAutomationTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
 	{
 		if (ToolName == TEXT("unreal.automation_list"))
@@ -1061,7 +1153,7 @@ namespace UnrealMcp
 
 	void MarkActiveAutomationRunStaleOnShutdown()
 	{
-		FAutomationRunState State;
+		FUnrealMcpAutomationRunState State;
 		{
 			FScopeLock Lock(&GAutomationRunMutex);
 			if (!bHasActiveAutomationRun)
@@ -1075,9 +1167,14 @@ namespace UnrealMcp
 				return;
 			}
 
+			if (GActiveAutomationRun.RunType != EUnrealMcpAutomationRunType::Automation)
+			{
+				return;
+			}
+
 			State = GActiveAutomationRun;
 			bHasActiveAutomationRun = false;
-			GActiveAutomationRun = FAutomationRunState();
+			GActiveAutomationRun = FUnrealMcpAutomationRunState();
 			LastPersistedHeartbeatUtc = FDateTime();
 		}
 
@@ -1098,7 +1195,7 @@ namespace UnrealMcp
 	{
 		FScopeLock Lock(&GAutomationRunMutex);
 		bHasActiveAutomationRun = false;
-		GActiveAutomationRun = FAutomationRunState();
+		GActiveAutomationRun = FUnrealMcpAutomationRunState();
 		LastPersistedHeartbeatUtc = FDateTime();
 		bSuppressAutomationFrameworkStartForTests = false;
 		if (GAutomationTickerHandle.IsValid())
@@ -1113,6 +1210,30 @@ namespace UnrealMcp
 		bSuppressAutomationFrameworkStartForTests = bSuppress;
 	}
 
+	void SetActiveAutomationRunForTests(
+		const FString& RunId,
+		EUnrealMcpAutomationRunType RunType,
+		const FString& Status,
+		const FDateTime& StartedAtUtc,
+		int32 TimeoutSeconds)
+	{
+		FUnrealMcpAutomationRunState State;
+		State.RunId = RunId;
+		State.RunType = RunType;
+		State.Status = Status;
+		State.FullName = TEXT("UnrealMcp.AutomationTools.Synthetic");
+		State.DisplayName = State.FullName;
+		State.PrettyName = State.FullName;
+		State.Flags = { TEXT("EditorContext"), TEXT("EngineFilter") };
+		State.AcceptedAtUtc = StartedAtUtc;
+		State.StartedAtUtc = StartedAtUtc;
+		State.LastHeartbeatUtc = StartedAtUtc;
+		State.TimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1, MaxAutomationTimeoutSeconds);
+		SetActiveRunState(State);
+		SaveStateFile(State);
+		LastPersistedHeartbeatUtc = StartedAtUtc;
+	}
+
 	FString WriteAutomationRunStateForTests(
 		const FString& RunId,
 		const FString& Status,
@@ -1121,7 +1242,7 @@ namespace UnrealMcp
 		const FDateTime& StartedAtUtc,
 		int32 TimeoutSeconds)
 	{
-		FAutomationRunState State;
+		FUnrealMcpAutomationRunState State;
 		State.RunId = RunId;
 		State.Status = Status;
 		State.FullName = FullName;
@@ -1133,6 +1254,37 @@ namespace UnrealMcp
 		State.LastHeartbeatUtc = StartedAtUtc;
 		State.TimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1, MaxAutomationTimeoutSeconds);
 		SaveStateFile(State);
+		return MakeReportPath(RunId);
+	}
+
+	FString WriteLegacyAutomationRunStateForTests(
+		const FString& RunId,
+		const FString& Status,
+		const FString& FullName,
+		const FString& DisplayName,
+		const FDateTime& StartedAtUtc,
+		int32 TimeoutSeconds)
+	{
+		FUnrealMcpAutomationRunState State;
+		State.RunId = RunId;
+		State.Status = Status;
+		State.FullName = FullName;
+		State.DisplayName = DisplayName;
+		State.PrettyName = DisplayName;
+		State.Flags = { TEXT("EditorContext"), TEXT("EngineFilter") };
+		State.AcceptedAtUtc = StartedAtUtc;
+		State.StartedAtUtc = StartedAtUtc;
+		State.LastHeartbeatUtc = StartedAtUtc;
+		State.TimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1, MaxAutomationTimeoutSeconds);
+
+		IFileManager::Get().MakeDirectory(*GetAutomationRunRoot(), true);
+		TSharedPtr<FJsonObject> Object = MakeStateJsonObject(State);
+		Object->RemoveField(TEXT("runType"));
+		FString JsonText;
+		const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
+			TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&JsonText);
+		FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
+		FFileHelper::SaveStringToFile(JsonText, *MakeReportPath(RunId));
 		return MakeReportPath(RunId);
 	}
 

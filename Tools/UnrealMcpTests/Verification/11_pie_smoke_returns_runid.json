@@ -1,0 +1,33 @@
+{
+  "name": "pie_smoke_returns_runid",
+  "description": "Contract fixture documenting that pie_smoke returns immediately with a runId for automation_report polling.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "runId": "string",
+    "acceptedAt": "string",
+    "matchedMap": "optional string",
+    "initialStatus": "queued|running",
+    "reportPath": "Saved/UnrealMcp/AutomationRuns/<runId>.json",
+    "pollingHint": "Poll automation_report every 1-2 seconds; PIE smoke typically completes in 10-30 seconds.",
+    "reportTool": "unreal.automation_report",
+    "reportFields": {
+      "runType": "pie_smoke",
+      "pieReport": "object"
+    }
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2011,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.pie_smoke",
+      "arguments": {
+        "timeoutSeconds": 60,
+        "aliveWindowSeconds": 5
+      }
+    }
+  }
+}

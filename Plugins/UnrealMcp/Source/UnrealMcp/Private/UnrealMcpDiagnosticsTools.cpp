@@ -486,6 +486,47 @@ namespace UnrealMcp
 		}
 	}
 
+	TSharedPtr<FJsonObject> CaptureDiagnosticsSummarySince(const FDateTime& SinceUtc, int32 ExcerptLimit)
+	{
+		const int32 ClampedLimit = FMath::Max(1, ExcerptLimit);
+		const FDiagnosticsSnapshot Snapshot = CaptureDiagnosticsSnapshot();
+
+		int32 ErrorCount = 0;
+		int32 WarningCount = 0;
+		int32 MatchingCount = 0;
+		TArray<TSharedPtr<FJsonValue>> ExcerptValues;
+		for (const FDiagnosticEntry& Entry : Snapshot.Entries)
+		{
+			if (!ShouldIncludeDiagnosticEntry(Entry, SinceUtc, TSet<FString>()))
+			{
+				continue;
+			}
+
+			++MatchingCount;
+			if (Entry.Severity == EDiagnosticSeverity::Warning)
+			{
+				++WarningCount;
+			}
+			else
+			{
+				++ErrorCount;
+			}
+
+			if (ExcerptValues.Num() < ClampedLimit)
+			{
+				ExcerptValues.Add(MakeShared<FJsonValueObject>(MakeDiagnosticEntryObject(Entry)));
+			}
+		}
+
+		TSharedPtr<FJsonObject> DiagnosticsObject = MakeShared<FJsonObject>();
+		DiagnosticsObject->SetStringField(TEXT("startedAt"), SinceUtc.ToIso8601());
+		DiagnosticsObject->SetNumberField(TEXT("errorCount"), ErrorCount);
+		DiagnosticsObject->SetNumberField(TEXT("warningCount"), WarningCount);
+		DiagnosticsObject->SetArrayField(TEXT("excerpt"), ExcerptValues);
+		DiagnosticsObject->SetBoolField(TEXT("excerptTruncated"), MatchingCount > ExcerptValues.Num());
+		return DiagnosticsObject;
+	}
+
 	bool TryExecuteDiagnosticsTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
 	{
 		if (ToolName == TEXT("unreal.editor_diagnostics"))

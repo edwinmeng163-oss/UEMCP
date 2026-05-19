@@ -68,6 +68,11 @@ namespace UnrealMcp
 			{
 				return TEXT("UnrealMcpDiagnosticsTools.cpp");
 			}
+			if (ToolEntry.Category == TEXT("verification")
+				&& (ToolEntry.Name == TEXT("unreal.pie_smoke") || ToolEntry.HandlerName == TEXT("unreal.pie_smoke")))
+			{
+				return TEXT("UnrealMcpPieSmokeTools.cpp");
+			}
 			return ResolveCategoryDispatcherSource(ToolEntry.Category);
 		}
 

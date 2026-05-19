@@ -9,6 +9,7 @@ namespace UnrealMcp
 {
 	void RegisterDiagnosticsListener();
 	void UnregisterDiagnosticsListener();
+	TSharedPtr<FJsonObject> CaptureDiagnosticsSummarySince(const FDateTime& SinceUtc, int32 ExcerptLimit);
 	bool TryExecuteDiagnosticsTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
 
 #if WITH_DEV_AUTOMATION_TESTS

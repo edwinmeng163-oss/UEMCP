@@ -1,0 +1,35 @@
+{
+  "name": "pie_smoke_invalid_map_path",
+  "description": "Contract fixture documenting mapPath validation before PIE starts.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": true,
+  "expectedContract": {
+    "invalidPrefix": {
+      "errorKind": "InvalidMapPath",
+      "rule": "mapPath must start with /Game/"
+    },
+    "missingWorld": {
+      "errorKind": "MapNotFound",
+      "rule": "valid /Game/ path must exist in the asset registry as a UWorld"
+    },
+    "nonWorldAsset": {
+      "errorKind": "InvalidMapPath",
+      "rule": "existing asset must resolve to UWorld"
+    }
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2012,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.pie_smoke",
+      "arguments": {
+        "mapPath": "/NotGame/Maps/L_Invalid",
+        "timeoutSeconds": 60,
+        "aliveWindowSeconds": 5
+      }
+    }
+  }
+}

@@ -1078,6 +1078,36 @@ namespace UnrealMcp
 			}
 
 			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("mapPath"), MakeStringProperty(TEXT("Optional /Game/... UWorld asset path to open before PIE smoke."), FString()));
+				TSharedPtr<FJsonObject> TimeoutProperty = MakeNumberProperty(TEXT("Total wall-clock timeout. Defaults to 60 and is clamped to 10..300."), 60.0);
+				TimeoutProperty->SetNumberField(TEXT("minimum"), 10.0);
+				TimeoutProperty->SetNumberField(TEXT("maximum"), 300.0);
+				Properties->SetObjectField(TEXT("timeoutSeconds"), TimeoutProperty);
+				TSharedPtr<FJsonObject> AliveProperty = MakeNumberProperty(TEXT("PIE alive-window duration. Defaults to 5 and is clamped to 1..30; must be less than timeoutSeconds."), 5.0);
+				AliveProperty->SetNumberField(TEXT("minimum"), 1.0);
+				AliveProperty->SetNumberField(TEXT("maximum"), 30.0);
+				Properties->SetObjectField(TEXT("aliveWindowSeconds"), AliveProperty);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.pie_smoke"),
+					TEXT("Run PIE Smoke"),
+					TEXT("Queues a Play In Editor smoke verification run, observes BeginPIE/alive-window/EndPIE, then reports through automation_report."),
+					TEXT("verification"),
+					TEXT("UnrealMcpPieSmokeTools.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.22 C1b PIE smoke runtime verification with shared automation_report polling.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
 				const TArray<FString> DiagnosticClasses = {
 					TEXT("compile"),
 					TEXT("map_check"),

@@ -1,0 +1,25 @@
+{
+  "name": "pie_smoke_rejects_dirty_editor_map",
+  "description": "Contract fixture documenting that pie_smoke refuses to open a different map while the current editor map is dirty.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": true,
+  "expectedContract": {
+    "errorKind": "EditorMapDirty",
+    "rule": "If mapPath is provided, current editor map differs, and the current map package is dirty, pie_smoke must reject without auto-saving or discarding changes."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2013,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.pie_smoke",
+      "arguments": {
+        "mapPath": "/Game/Maps/L_TargetForSmoke",
+        "timeoutSeconds": 60,
+        "aliveWindowSeconds": 5
+      }
+    }
+  }
+}

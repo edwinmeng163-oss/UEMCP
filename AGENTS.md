@@ -398,6 +398,7 @@ Verification:
 - list runnable UE Automation Framework tests with `unreal.automation_list`
 - queue one exact automation test asynchronously with `unreal.automation_run`
 - poll persisted automation run state with `unreal.automation_report`
+- run a single-instance PIE runtime smoke with `unreal.pie_smoke`
 - read listener-backed Output Log diagnostics with `unreal.editor_diagnostics`
 
 ## Tool Registry Status
@@ -423,7 +424,7 @@ Tools/UnrealMcpToolRegistry/schema.json
 Schemas/UnrealMcpToolRegistry.schema.json
 ```
 
-At the time this file was written, the registry contained 159 entries across:
+At the time this file was written, the registry contained 160 entries across:
 
 - actors
 - blueprint
@@ -463,7 +464,8 @@ v0.19 Part C Task Atlas LLM backfill tool
 (`unreal.task_label_backfill`), and the three v0.20 C1a verification
 foundation tools (`unreal.automation_list`, `unreal.automation_run`, and
 `unreal.automation_report`), and the v0.21 Build Diagnostics tool
-(`unreal.editor_diagnostics`). Earlier handoff text lagged at 119 entries.
+(`unreal.editor_diagnostics`), and the v0.22 C1b PIE runtime smoke tool
+(`unreal.pie_smoke`). Earlier handoff text lagged at 119 entries.
 
 Current project status: v0.17 Task Atlas foundation landed; ActivityLog
 annotations, local task JSON extraction/list/detail/rating/pinning, Chat rating
@@ -477,6 +479,9 @@ v0.20 B2 hardens the automation watchdog with debounced heartbeats, stale
 reasons, shutdown stale marking, and adds Task Atlas dogfood gates A/B/D.
 v0.21 adds `unreal.editor_diagnostics`, a listener-backed in-memory Output Log
 diagnostics ring buffer in the existing `verification` category.
+v0.22 adds `unreal.pie_smoke`, a shared-lock single-instance PIE runtime smoke
+that reports through `unreal.automation_report` in the existing `verification`
+category.
 v0.19.1 patched a latent unity-build symbol collision that blocked UE 5.6
 dev-host builds against `UEvolve.uproject` (fixed by setting `bUseUnity =
 false` for the UnrealMcp module); same source now compiles cleanly on UE
@@ -581,7 +586,10 @@ UnrealMcpTaskLabelBackfillTool.cpp/.h
   LLM retrospective Task Atlas label backfill with pinned/user-edited safeguards
 
 UnrealMcpAutomationTools.cpp/.h
-  verification category tools for UE Automation Framework discovery, async run queueing, polling reports, state files, and stale recovery
+  verification category tools for UE Automation Framework discovery, async run queueing, polling reports, shared run-type state files, and stale recovery
+
+UnrealMcpPieSmokeTools.cpp/.h
+  verification category PIE runtime smoke lifecycle, shared automation lock use, state writer, delegate management, and dirty-package delta reports
 
 UnrealMcpDiagnosticsTools.cpp/.h
   verification category Output Log diagnostics listener, ring buffer, filtering, and suggested-readback hints

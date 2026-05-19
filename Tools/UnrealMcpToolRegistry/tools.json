@@ -3945,6 +3945,13 @@
         ],
         "properties": {
           "runId": { "type": "string" },
+          "runType": {
+            "type": "string",
+            "enum": [
+              "automation",
+              "pie_smoke"
+            ]
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -4007,10 +4014,186 @@
           "tags": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "pieReport": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "beganPlayObserved",
+              "aliveWindowSatisfied",
+              "pieEndedCleanly",
+              "diagnostics",
+              "packageDirtinessDelta",
+              "recoverabilityNote"
+            ],
+            "properties": {
+              "mapPath": { "type": "string" },
+              "beganPlayObserved": { "type": "boolean" },
+              "aliveWindowSatisfied": { "type": "boolean" },
+              "pieEndedCleanly": { "type": "boolean" },
+              "diagnostics": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "startedAt",
+                  "errorCount",
+                  "warningCount",
+                  "excerpt",
+                  "excerptTruncated"
+                ],
+                "properties": {
+                  "startedAt": { "type": "string" },
+                  "errorCount": { "type": "number" },
+                  "warningCount": { "type": "number" },
+                  "excerpt": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "ts",
+                        "severity",
+                        "class",
+                        "source",
+                        "message"
+                      ],
+                      "properties": {
+                        "ts": { "type": "string" },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "warning",
+                            "error",
+                            "fatal"
+                          ]
+                        },
+                        "class": {
+                          "type": "string",
+                          "enum": [
+                            "compile",
+                            "map_check",
+                            "content",
+                            "automation",
+                            "log_warning",
+                            "log_error"
+                          ]
+                        },
+                        "source": { "type": "string" },
+                        "message": { "type": "string" },
+                        "suggested": { "type": "string" }
+                      }
+                    }
+                  },
+                  "excerptTruncated": { "type": "boolean" }
+                }
+              },
+              "packageDirtinessDelta": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "dirtyAtStart",
+                  "dirtyAtEnd",
+                  "newlyDirty",
+                  "cleanedDuringPie"
+                ],
+                "properties": {
+                  "dirtyAtStart": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "dirtyAtEnd": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "newlyDirty": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "cleanedDuringPie": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              },
+              "recoverabilityNote": { "type": "string" }
+            }
           }
         }
       },
       "notes": "The public report shape excludes internal state-file bookkeeping such as timeoutSecondsConfigured."
+    },
+    {
+      "name": "unreal.pie_smoke",
+      "category": "verification",
+      "handlerName": "unreal.pie_smoke",
+      "title": "Run PIE Smoke",
+      "description": "Queues a Play In Editor smoke verification run, observes BeginPIE/alive-window/EndPIE, and returns a runId for automation_report polling.",
+      "exposure": "visible",
+      "riskLevel": "high",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.22 C1b PIE runtime smoke verification with shared automation_report polling.",
+      "summaryTemplate": "Queued PIE smoke",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mapPath": {
+            "type": "string",
+            "description": "Optional /Game/... UWorld asset path. If provided, the editor opens it before PIE when the current map differs and is not dirty."
+          },
+          "timeoutSeconds": {
+            "type": "number",
+            "default": 60,
+            "minimum": 10,
+            "maximum": 300,
+            "description": "Total wall-clock timeout. Values are clamped to 10..300."
+          },
+          "aliveWindowSeconds": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 30,
+            "description": "PIE alive-window duration. Values are clamped to 1..30 and must be less than timeoutSeconds."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runId",
+          "acceptedAt",
+          "initialStatus",
+          "reportPath",
+          "pollingHint"
+        ],
+        "properties": {
+          "runId": { "type": "string" },
+          "acceptedAt": { "type": "string" },
+          "matchedMap": { "type": "string" },
+          "initialStatus": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running"
+            ]
+          },
+          "reportPath": { "type": "string" },
+          "pollingHint": { "type": "string" }
+        }
+      },
+      "notes": "Shares the AutomationRuns state-file namespace and active-run lock with automation_run; poll with unreal.automation_report."
     },
     {
       "name": "unreal.editor_diagnostics",

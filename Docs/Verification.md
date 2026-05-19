@@ -2,13 +2,15 @@
 
 v0.20 C1a adds the first verification category tools for wrapping Unreal
 Engine's Automation Test framework from MCP, and v0.21 adds listener-backed
-editor diagnostics from the Output Log:
+editor diagnostics from the Output Log. v0.22 adds a PIE runtime smoke tool:
 
 - `unreal.automation_list` discovers currently runnable automation tests.
 - `unreal.automation_run` queues one exact test name and returns a run ID
   immediately.
 - `unreal.automation_report` polls the run state and reads persisted historical
   reports.
+- `unreal.pie_smoke` queues a single-instance Play In Editor smoke run and
+  reports through `unreal.automation_report`.
 - `unreal.editor_diagnostics` reads recent warning, error, and fatal Output Log
   diagnostics from an in-memory ring buffer.
 
@@ -122,7 +124,127 @@ Poll with:
 
 Polling every 1-2 seconds is expected. Reports expose only the public fields in
 the schema: status, test identity, result events, timing, a bounded log excerpt,
-report path, and optional caller tags.
+report path, `runType`, optional caller tags, and optional `pieReport`.
+
+## C1b PIE Smoke
+
+`unreal.pie_smoke` verifies that Play In Editor can boot, remain alive for a
+short window, and shut down to a sane editor state. It is a high-risk
+write-capable verification tool because PIE mutates editor world state. It uses
+the same `Saved/UnrealMcp/AutomationRuns/<runId>.json` namespace and the same
+single active-run lock as `unreal.automation_run`; callers poll with
+`unreal.automation_report`.
+
+Input:
+
+```json
+{
+  "mapPath": "/Game/Maps/L_Smoke",
+  "timeoutSeconds": 60,
+  "aliveWindowSeconds": 5
+}
+```
+
+`mapPath` is optional. When present it must start with `/Game/`, exist in the
+asset registry, and resolve to a `UWorld` asset. `timeoutSeconds` defaults to
+60 and is clamped to 10..300. `aliveWindowSeconds` defaults to 5 and is clamped
+to 1..30; after clamping it must be less than `timeoutSeconds`.
+
+The tool returns immediately:
+
+```json
+{
+  "runId": "20260519T120000Z-a1b2c3",
+  "acceptedAt": "2026-05-19T12:00:00Z",
+  "matchedMap": "/Game/Maps/L_Smoke.L_Smoke",
+  "initialStatus": "queued",
+  "reportPath": "Saved/UnrealMcp/AutomationRuns/20260519T120000Z-a1b2c3.json",
+  "pollingHint": "Poll automation_report every 1-2 seconds; PIE smoke typically completes in 10-30 seconds."
+}
+```
+
+Structured rejection kinds are:
+
+- `RunAlreadyActive`: another `automation` or `pie_smoke` run holds the shared
+  active-run lock. The error includes `activeRunId` and `activeRunType`.
+- `EditorMapDirty`: `mapPath` was provided, the current editor map differs, and
+  the current map package is dirty. The tool does not auto-save or discard.
+- `MapNotFound`: the requested `/Game/` map package or object path was not
+  found in the asset registry.
+- `InvalidMapPath`: the path does not start with `/Game/`, is malformed, or
+  points at an existing non-`UWorld` asset.
+- `InvalidArguments`: `aliveWindowSeconds >= timeoutSeconds` after clamping.
+
+Lifecycle:
+
+1. Validate and clamp arguments.
+2. Validate `mapPath` when supplied.
+3. Reject if the shared automation/PIE lock is active.
+4. Reject dirty-current-map conflicts before opening a different map.
+5. Acquire the shared active-run lock with `runType="pie_smoke"`.
+6. Capture `startedAt` immediately after lock acquisition and before any map
+   open so diagnostics include map-load warnings.
+7. Snapshot `dirtyAtStart`.
+8. Open `mapPath` if supplied and different from the current editor map.
+9. Register `BeginPIE` and `EndPIE` delegate handles.
+10. Request a single-instance PIE session on the game thread.
+11. Wait for `BeginPIE`.
+12. Poll for `aliveWindowSeconds`, requiring `GEditor->PlayWorld` to stay
+    non-null and `HasBegunPlay()` to be observed at least once.
+13. Request `EndPlayMap`.
+14. Wait for `EndPIE` and `PlayWorld == nullptr`.
+15. Unregister delegate handles.
+16. Snapshot `dirtyAtEnd`.
+17. Compute `newlyDirty` and `cleanedDuringPie`.
+18. Attach diagnostics with `ts >= startedAt`, oldest-first excerpt capped at
+    100 entries, and write `completed` only when BeginPIE, alive window, and
+    clean EndPIE all succeeded. Other terminal lifecycle outcomes are `failed`.
+
+`automation_report` includes `runType` for all new reports. If it reads a v0.20
+state file with no `runType`, it defaults to `"automation"` for backward
+compatibility. PIE smoke reports add `pieReport`:
+
+```json
+{
+  "runType": "pie_smoke",
+  "pieReport": {
+    "mapPath": "/Game/Maps/L_Smoke.L_Smoke",
+    "beganPlayObserved": true,
+    "aliveWindowSatisfied": true,
+    "pieEndedCleanly": true,
+    "diagnostics": {
+      "startedAt": "2026-05-19T12:00:00Z",
+      "errorCount": 0,
+      "warningCount": 0,
+      "excerpt": [],
+      "excerptTruncated": false
+    },
+    "packageDirtinessDelta": {
+      "dirtyAtStart": [],
+      "dirtyAtEnd": [],
+      "newlyDirty": [],
+      "cleanedDuringPie": []
+    },
+    "recoverabilityNote": "PIE crash is NOT recoverable in-process; use unreal_mcp_supervisor.py to restart the editor and re-run if needed."
+  }
+}
+```
+
+Dirty-package delta semantics are simple set differences over package paths:
+`newlyDirty = dirtyAtEnd - dirtyAtStart`, and
+`cleanedDuringPie = dirtyAtStart - dirtyAtEnd`. These fields are diagnostic
+evidence only; PIE smoke never saves or cleans packages.
+
+PIE lifecycle APIs, delegate registration/removal, `PlayWorld` access, and
+`RequestEndPlayMap` cleanup are marshalled onto the editor/game thread. Stale
+recovery follows the automation watchdog: `startedAt + timeoutSeconds + 60s`
+marks the run `stale` with `staleReason="hard_timeout"`, unregisters delegate
+handles, requests `EndPlayMap` best-effort, writes a partial `pieReport`, and
+releases the shared lock.
+
+PIE process crashes are not recoverable in-process. Use
+`Tools/unreal_mcp_supervisor.py` to restart the editor and re-run the smoke if
+the editor process exits or becomes unrecoverable.
 
 ## Watchdog Semantics
 

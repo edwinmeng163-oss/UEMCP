@@ -1,0 +1,31 @@
+{
+  "name": "pie_smoke_lock_symmetry",
+  "description": "Contract fixture documenting that pie_smoke and automation_run share one active-run lock.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": true,
+  "expectedContract": {
+    "pieSmokeRejectsAutomation": {
+      "errorKind": "RunAlreadyActive",
+      "activeRunType": "automation"
+    },
+    "automationRejectsPieSmoke": {
+      "errorKind": "RunAlreadyActive",
+      "activeRunType": "pie_smoke"
+    },
+    "sharedStateNamespace": "Saved/UnrealMcp/AutomationRuns/<runId>.json"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2014,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.pie_smoke",
+      "arguments": {
+        "timeoutSeconds": 60,
+        "aliveWindowSeconds": 5
+      }
+    }
+  }
+}

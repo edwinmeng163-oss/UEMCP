@@ -8,6 +8,7 @@
 #include "UnrealMcpAutomationTools.h"
 #include "UnrealMcpDiagnosticsTools.h"
 #include "UnrealMcpInstallDoctor.h"
+#include "UnrealMcpPieSmokeTools.h"
 #include "UnrealMcpSession.h"
 #include "UnrealMcpSkillTools.h"
 #include "Runtime/Launch/Resources/Version.h"
@@ -76,6 +77,7 @@ void FUnrealMcpModule::StartupModule()
 void FUnrealMcpModule::ShutdownModule()
 {
 	UnrealMcp::UnregisterDiagnosticsListener();
+	UnrealMcp::MarkActivePieSmokeStaleOnShutdown();
 	UnrealMcp::MarkActiveAutomationRunStaleOnShutdown();
 	if (SkillActivityTickerHandle.IsValid())
 	{

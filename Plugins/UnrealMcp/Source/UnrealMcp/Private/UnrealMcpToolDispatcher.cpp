@@ -8,6 +8,7 @@
 #include "UnrealMcpEditorTools.h"
 #include "UnrealMcpMaterialInstanceTools.h"
 #include "UnrealMcpMemoryTools.h"
+#include "UnrealMcpPieSmokeTools.h"
 #include "UnrealMcpScaffoldTools.h"
 #include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpSkillTools.h"
@@ -243,6 +244,10 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 			return CategoryResult;
 		}
 		if (UnrealMcp::TryExecuteAutomationTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+		if (UnrealMcp::TryExecutePieSmokeTool(ToolName, Arguments, CategoryResult))
 		{
 			return CategoryResult;
 		}
