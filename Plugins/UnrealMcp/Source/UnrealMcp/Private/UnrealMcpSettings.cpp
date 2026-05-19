@@ -268,6 +268,57 @@ void UUnrealMcpSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 	const FName MemberPropertyName = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
 	const FString PropertyNameString = PropertyName.ToString();
 	const FString MemberPropertyNameString = MemberPropertyName.ToString();
+
+	// Auto-fill canonical BaseUrl / Model / CodexBinaryPath when the user
+	// changes Kind on a provider entry. Only fills empty fields, never
+	// overwrites user input. This makes onboarding a new provider a
+	// one-dropdown action for the common cases (OpenAI / Anthropic / Codex).
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FAiProviderConfig, Kind))
+	{
+		const int32 ArrayIndex = PropertyChangedEvent.GetArrayIndex(TEXT("Providers"));
+		if (Providers.IsValidIndex(ArrayIndex))
+		{
+			FAiProviderConfig& Entry = Providers[ArrayIndex];
+			switch (Entry.Kind)
+			{
+				case EAiProviderKind::OpenAiResponses:
+					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://api.openai.com/v1/responses");
+					if (Entry.Model.IsEmpty()) Entry.Model = TEXT("gpt-5.1");
+					if (Entry.ReasoningEffort.IsEmpty()) Entry.ReasoningEffort = TEXT("medium");
+					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("OpenAI Responses");
+					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("openai-default");
+					break;
+				case EAiProviderKind::OpenAiChatCompat:
+					// Multi-vendor (Kimi / GLM / DeepSeek / Qwen / Ollama). Provide a
+					// non-functional placeholder URL that flags the user must edit it.
+					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://<vendor-host>/v1/chat/completions");
+					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("OpenAI-Compatible (edit BaseUrl + Model)");
+					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("openai-compat");
+					break;
+				case EAiProviderKind::AnthropicMessages:
+					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://api.anthropic.com/v1/messages");
+					if (Entry.Model.IsEmpty()) Entry.Model = TEXT("claude-sonnet-4-6");
+					if (Entry.ReasoningEffort.IsEmpty()) Entry.ReasoningEffort = TEXT("medium");
+					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("Anthropic Messages");
+					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("anthropic-default");
+					break;
+				case EAiProviderKind::Codex:
+					// Local subprocess; no URL. Suggest the conventional binary path.
+					if (Entry.CodexBinaryPath.IsEmpty()) Entry.CodexBinaryPath = TEXT("~/codex-orchestrator/bin/codex-agent");
+					if (Entry.CodexExtraArgs.IsEmpty()) Entry.CodexExtraArgs = TEXT("-m gpt-5.5 -r xhigh");
+					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("Codex CLI (local)");
+					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("codex-cli");
+					break;
+				case EAiProviderKind::CodexAppServer:
+					// Codex Desktop bridge default endpoint.
+					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("http://127.0.0.1:8766");
+					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("Codex Desktop / App Server");
+					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("codex-app-server");
+					break;
+			}
+		}
+	}
+
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, ActiveProviderId)
 		|| MemberPropertyName == GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, ActiveProviderId)
 		|| PropertyNameString.Contains(TEXT("Provider"))
