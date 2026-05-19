@@ -1,17 +1,95 @@
 # Verification Tools
 
 v0.20 C1a adds the first verification category tools for wrapping Unreal
-Engine's Automation Test framework from MCP:
+Engine's Automation Test framework from MCP, and v0.21 adds listener-backed
+editor diagnostics from the Output Log:
 
 - `unreal.automation_list` discovers currently runnable automation tests.
 - `unreal.automation_run` queues one exact test name and returns a run ID
   immediately.
 - `unreal.automation_report` polls the run state and reads persisted historical
   reports.
+- `unreal.editor_diagnostics` reads recent warning, error, and fatal Output Log
+  diagnostics from an in-memory ring buffer.
 
 These tools live in the `verification` ToolRegistry category. They are separate
 from `self-extension` because they are a general editor verification surface,
 not a source-apply pipeline helper.
+
+## Build Diagnostics
+
+`unreal.editor_diagnostics` is a read-only tool for separating actionable build,
+compile, map, content, automation, and log-severity diagnostics from general
+editor noise.
+
+The UnrealMcp module registers a `FOutputDevice` listener at the beginning of
+startup before the MCP server and install-doctor scheduling run. Shutdown
+unregisters the output device before automation stale marking or other module
+teardown work, so late editor-shutdown logging cannot target a destroyed
+listener object.
+
+The listener writes to an in-memory ring buffer:
+
+- Capacity is 5000 entries.
+- Entries are reset on each editor launch.
+- No JSONL or disk persistence is written in v0.21.
+- `ringBufferStartedAt` is the listener registration time.
+- `ringBufferOverflow=true` means the 5000-entry buffer has wrapped at least
+  once.
+- Commandlets attach the same listener and return whatever the buffer captured,
+  but editor-UI-dependent events may be absent in commandlet mode.
+
+The hot listener path is intentionally small: map verbosity to severity, map
+log category to class, copy the source/message, timestamp, and push under a
+critical section. It does not regex-match, substring-match, read files, or write
+files. Readers snapshot the buffer under the same lock and then filter/process
+outside the lock.
+
+Class mapping is computed from log category first:
+
+- `LogMapCheck` -> `map_check`
+- `LogBlueprintEditor`, `LogKismet`, `LogKismetCompiler`, `LogCompile` ->
+  `compile`
+- `LogLinker`, `LogPackageName`, `LogStreaming` -> `content`
+- `LogAutomation`, `LogAutomationController` -> `automation`
+
+Unknown categories fall back by severity:
+
+- `Warning` -> `log_warning`
+- `Error` and `Fatal` -> `log_error`
+- `Display`, `Log`, `Verbose`, and lower-severity output are not stored.
+
+Tool input:
+
+```json
+{
+  "since": "2026-05-19T12:00:00Z",
+  "classes": ["compile", "log_error"],
+  "limit": 200
+}
+```
+
+`since` is optional but must parse as an ISO-8601 UTC timestamp when present.
+Invalid values return `isError=true`. `classes` is optional and accepts only
+`compile`, `map_check`, `content`, `automation`, `log_warning`, or `log_error`.
+`limit` defaults to 200 and is clamped to 1..1000. Returned entries are
+chronological oldest-to-newest within the returned slice; when more entries
+match than `limit`, the newest matching entries are returned and
+`truncated=true`.
+
+`suggested` hints are computed at read time with fixed substring checks, not in
+the listener:
+
+- `Package Version: 0` or `Min Required Version:` -> open and save the asset to
+  refresh CustomVersion stamps.
+- `_ExternalActors_` and `was not available` -> save the parent umap to drop the
+  stale external-actor reference.
+- `Failed to load package` -> check for deleted/renamed packages or an
+  EngineAssociation mismatch.
+- `is not backwards compatible` -> open with the matching engine, resave, or
+  revert the source change.
+- `Live Coding` -> close Unreal Editor or disable Live Coding before running
+  UBT because plugin binaries may be locked.
 
 ## Async Lifecycle
 

@@ -1,0 +1,38 @@
+{
+  "name": "editor_diagnostics_class_filter",
+  "description": "List-only fixture documenting the diagnostic class filter enum and echoed filteredClasses field.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "classesEnum": [
+      "compile",
+      "map_check",
+      "content",
+      "automation",
+      "log_warning",
+      "log_error"
+    ],
+    "filteredClasses": [
+      "compile",
+      "log_error"
+    ],
+    "assertion": "Every returned entry has class compile or log_error."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2008,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.editor_diagnostics",
+      "arguments": {
+        "classes": [
+          "compile",
+          "log_error"
+        ],
+        "limit": 50
+      }
+    }
+  }
+}

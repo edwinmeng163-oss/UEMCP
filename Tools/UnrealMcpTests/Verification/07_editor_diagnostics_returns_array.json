@@ -1,0 +1,35 @@
+{
+  "name": "editor_diagnostics_returns_array",
+  "description": "List-only fixture documenting that editor_diagnostics returns bounded diagnostic entries plus ring-buffer metadata.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "entries": "array",
+    "totalCount": "number",
+    "truncated": "boolean",
+    "ringBufferStartedAt": "string",
+    "ringBufferOverflow": "boolean",
+    "filteredClasses": "array",
+    "firstItemShape": {
+      "ts": "string",
+      "severity": "info|warning|error|fatal",
+      "class": "compile|map_check|content|automation|log_warning|log_error",
+      "source": "string",
+      "message": "string",
+      "suggested": "optional string"
+    }
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2007,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.editor_diagnostics",
+      "arguments": {
+        "limit": 25
+      }
+    }
+  }
+}

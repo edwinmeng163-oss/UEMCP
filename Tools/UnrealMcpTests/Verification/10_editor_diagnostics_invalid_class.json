@@ -1,0 +1,26 @@
+{
+  "name": "editor_diagnostics_invalid_class",
+  "description": "List-only fixture documenting that unsupported diagnostic class filters are rejected.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": true,
+  "expectedContract": {
+    "errorKind": "InvalidClasses",
+    "invalidClassBehavior": "classes must contain only compile, map_check, content, automation, log_warning, or log_error."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2010,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.editor_diagnostics",
+      "arguments": {
+        "classes": [
+          "not_a_diagnostic_class"
+        ],
+        "limit": 10
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@
 #include "UnrealMcpActorTools.h"
 #include "UnrealMcpAutomationTools.h"
 #include "UnrealMcpBlueprintTools.h"
+#include "UnrealMcpDiagnosticsTools.h"
 #include "UnrealMcpEditorTools.h"
 #include "UnrealMcpMaterialInstanceTools.h"
 #include "UnrealMcpMemoryTools.h"
@@ -236,6 +237,11 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 	}
 	else if (Category == TEXT("verification"))
 	{
+		// Verification is split across diagnostics and automation handlers; first matching tool branch wins.
+		if (UnrealMcp::TryExecuteDiagnosticsTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
 		if (UnrealMcp::TryExecuteAutomationTool(ToolName, Arguments, CategoryResult))
 		{
 			return CategoryResult;

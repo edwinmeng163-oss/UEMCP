@@ -4013,6 +4013,134 @@
       "notes": "The public report shape excludes internal state-file bookkeeping such as timeoutSecondsConfigured."
     },
     {
+      "name": "unreal.editor_diagnostics",
+      "category": "verification",
+      "handlerName": "unreal.editor_diagnostics",
+      "title": "Read Editor Diagnostics",
+      "description": "Returns recent warning, error, and fatal Output Log diagnostics from an in-memory listener-backed ring buffer.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEvolve Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.21 build diagnostics ring buffer for Output Log warning/error/fatal events.",
+      "summaryTemplate": "Read editor diagnostics",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "Optional ISO-8601 UTC lower bound; entries with ts >= since are returned."
+          },
+          "classes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "compile",
+                "map_check",
+                "content",
+                "automation",
+                "log_warning",
+                "log_error"
+              ]
+            },
+            "description": "Optional diagnostic class filter."
+          },
+          "limit": {
+            "type": "number",
+            "default": 200,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum diagnostics entries to return. Defaults to 200 and is clamped to 1..1000."
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries",
+          "totalCount",
+          "truncated",
+          "ringBufferStartedAt",
+          "ringBufferOverflow",
+          "filteredClasses"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ts",
+                "severity",
+                "class",
+                "source",
+                "message"
+              ],
+              "properties": {
+                "ts": { "type": "string" },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "info",
+                    "warning",
+                    "error",
+                    "fatal"
+                  ]
+                },
+                "class": {
+                  "type": "string",
+                  "enum": [
+                    "compile",
+                    "map_check",
+                    "content",
+                    "automation",
+                    "log_warning",
+                    "log_error"
+                  ]
+                },
+                "source": { "type": "string" },
+                "message": { "type": "string" },
+                "suggested": { "type": "string" }
+              }
+            }
+          },
+          "totalCount": { "type": "number" },
+          "truncated": { "type": "boolean" },
+          "ringBufferStartedAt": { "type": "string" },
+          "ringBufferOverflow": { "type": "boolean" },
+          "filteredClasses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "compile",
+                "map_check",
+                "content",
+                "automation",
+                "log_warning",
+                "log_error"
+              ]
+            }
+          }
+        }
+      },
+      "notes": "In-memory only; the listener stores warning/error/fatal entries in a 5000-entry ring buffer and computes suggested hints at read time."
+    },
+    {
       "name": "unreal.project_settings_get",
       "category": "editor",
       "handlerName": "unreal.project_settings_get",

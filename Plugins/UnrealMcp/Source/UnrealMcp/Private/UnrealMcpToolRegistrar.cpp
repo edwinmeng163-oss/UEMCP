@@ -116,6 +116,16 @@ namespace UnrealMcp
 			return Property;
 		}
 
+		TArray<TSharedPtr<FJsonValue>> MakeEnumValues(const TArray<FString>& Values)
+		{
+			TArray<TSharedPtr<FJsonValue>> EnumValues;
+			for (const FString& Value : Values)
+			{
+				EnumValues.Add(MakeShared<FJsonValueString>(Value));
+			}
+			return EnumValues;
+		}
+
 		void RegisterEditorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -1065,6 +1075,45 @@ namespace UnrealMcp
 				Descriptor.DocsPath = TEXT("Docs/Verification.md");
 				Descriptor.Reason = TEXT("Descriptor: v0.20 C1a verification foundation read-only automation run polling/report tool.");
 				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("runId") }));
+			}
+
+			{
+				const TArray<FString> DiagnosticClasses = {
+					TEXT("compile"),
+					TEXT("map_check"),
+					TEXT("content"),
+					TEXT("automation"),
+					TEXT("log_warning"),
+					TEXT("log_error")
+				};
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("since"), MakeStringProperty(TEXT("Optional ISO-8601 UTC lower bound; entries with ts >= since are returned."), FString()));
+
+				TSharedPtr<FJsonObject> ClassesProperty = MakeStringArrayProperty(TEXT("Optional diagnostic class filter."));
+				TSharedPtr<FJsonObject> ClassItems = MakeShared<FJsonObject>();
+				ClassItems->SetStringField(TEXT("type"), TEXT("string"));
+				ClassItems->SetArrayField(TEXT("enum"), MakeEnumValues(DiagnosticClasses));
+				ClassesProperty->SetObjectField(TEXT("items"), ClassItems);
+				Properties->SetObjectField(TEXT("classes"), ClassesProperty);
+
+				TSharedPtr<FJsonObject> LimitProperty = MakeNumberProperty(TEXT("Maximum diagnostics entries to return. Defaults to 200 and is clamped to 1..1000."), 200.0);
+				LimitProperty->SetNumberField(TEXT("minimum"), 1.0);
+				LimitProperty->SetNumberField(TEXT("maximum"), 1000.0);
+				Properties->SetObjectField(TEXT("limit"), LimitProperty);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.editor_diagnostics"),
+					TEXT("Read Editor Diagnostics"),
+					TEXT("Returns recent warning, error, and fatal Output Log diagnostics from an in-memory listener-backed ring buffer."),
+					TEXT("verification"),
+					TEXT("UnrealMcpDiagnosticsTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.21 build diagnostics ring buffer for Output Log warning/error/fatal events.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
 			}
 		}
 

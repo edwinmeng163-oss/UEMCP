@@ -6,6 +6,7 @@
 #include "ToolMenus.h"
 #include "UnrealMcpAssistantRun.h"
 #include "UnrealMcpAutomationTools.h"
+#include "UnrealMcpDiagnosticsTools.h"
 #include "UnrealMcpInstallDoctor.h"
 #include "UnrealMcpSession.h"
 #include "UnrealMcpSkillTools.h"
@@ -61,6 +62,7 @@ namespace
 
 void FUnrealMcpModule::StartupModule()
 {
+	UnrealMcp::RegisterDiagnosticsListener();
 	UnrealMcp::InitializeLaunchSession();
 	StartServer();
 	UE_LOG(LogUnrealMcp, Display, TEXT("UnrealMcp plugin built against UE %d.%d.%d (built-time engine version)"),
@@ -73,6 +75,7 @@ void FUnrealMcpModule::StartupModule()
 
 void FUnrealMcpModule::ShutdownModule()
 {
+	UnrealMcp::UnregisterDiagnosticsListener();
 	UnrealMcp::MarkActiveAutomationRunStaleOnShutdown();
 	if (SkillActivityTickerHandle.IsValid())
 	{

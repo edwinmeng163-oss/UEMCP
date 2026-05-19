@@ -63,6 +63,11 @@ namespace UnrealMcp
 			{
 				return ToolEntry.PythonHandlerPath.IsEmpty() ? FString(TEXT("<missing python handler>")) : ToolEntry.PythonHandlerPath;
 			}
+			if (ToolEntry.Category == TEXT("verification")
+				&& (ToolEntry.Name == TEXT("unreal.editor_diagnostics") || ToolEntry.HandlerName == TEXT("unreal.editor_diagnostics")))
+			{
+				return TEXT("UnrealMcpDiagnosticsTools.cpp");
+			}
 			return ResolveCategoryDispatcherSource(ToolEntry.Category);
 		}
 

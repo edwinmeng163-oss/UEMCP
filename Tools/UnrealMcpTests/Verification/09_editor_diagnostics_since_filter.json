@@ -1,0 +1,26 @@
+{
+  "name": "editor_diagnostics_since_filter",
+  "description": "List-only fixture documenting that since is an inclusive ISO-8601 UTC timestamp lower bound.",
+  "category": "contract",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "since": "ISO-8601 UTC string",
+    "inclusive": true,
+    "assertion": "Every returned entry has ts >= since.",
+    "invalidSinceBehavior": "Invalid or non-UTC since strings return isError=true instead of being ignored."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 2009,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.editor_diagnostics",
+      "arguments": {
+        "since": "2026-05-19T12:00:00Z",
+        "limit": 200
+      }
+    }
+  }
+}
