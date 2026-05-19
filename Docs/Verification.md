@@ -46,6 +46,36 @@ Polling every 1-2 seconds is expected. Reports expose only the public fields in
 the schema: status, test identity, result events, timing, a bounded log excerpt,
 report path, and optional caller tags.
 
+## Watchdog Semantics
+
+The ticker updates the active run heartbeat on every invocation, roughly every
+0.1 seconds while an automation run is queued or running. The in-memory state
+always carries the latest `lastHeartbeatUtc`, but the state file is debounced to
+at most one heartbeat write per second to avoid hot disk writes while
+`automation_report` may also be polling the same file.
+
+The persisted state file has internal-only watchdog fields:
+
+- `lastHeartbeatUtc`: latest ticker heartbeat, ISO8601.
+- `staleReason`: present when `status` becomes `stale`.
+- `bestEffortCancelAttempted`: true when the runner attempted to drain queued
+  UE automation commands after a stale decision.
+
+`staleReason` values are:
+
+- `hard_timeout`: `now > startedAt + timeoutSeconds + 60s`.
+- `unresponsive`: `now > lastHeartbeatUtc + 30s`.
+- `editor_shutdown`: the UnrealMcp module shut down while a run was still
+  queued or running.
+
+When a run becomes stale because of `hard_timeout` or `unresponsive`, the
+runner calls `FAutomationTestFramework::Get().DequeueAllCommands()` as a
+best-effort cleanup and sets `bestEffortCancelAttempted=true`. This does not
+claim that Unreal cancelled any latent work; the state file's `status` and
+`staleReason` remain the source of truth. During module shutdown the runner
+writes `editor_shutdown`, removes its ticker, clears the active-run lock, and
+does not rely on the automation framework being available.
+
 ## State Files
 
 State files are local runtime data under:
@@ -55,8 +85,9 @@ Saved/UnrealMcp/AutomationRuns/<runId>.json
 ```
 
 The JSON file is the canonical run record. It includes the public report data
-plus internal-only fields such as `internalSchemaVersion` and
-`timeoutSecondsConfigured`. Do not treat internal fields as part of the public
+plus internal-only fields such as `internalSchemaVersion`,
+`timeoutSecondsConfigured`, `lastHeartbeatUtc`, `staleReason`, and
+`bestEffortCancelAttempted`. Do not treat internal fields as part of the public
 MCP contract.
 
 `automation_run.tags` are caller metadata only. They are stored in the state file
@@ -73,16 +104,110 @@ Public report status values are:
 - `failed`: the test stopped with assertion or log errors, or could not start.
 - `timed_out`: the configured timeout has elapsed while the state file remains
   active.
-- `stale`: the run exceeded `timeoutSeconds + 60` seconds and was marked stale
-  so a later `automation_run` can accept a new run.
+- `stale`: the run exceeded the hard-timeout window, stopped heartbeating, or
+  was active during editor shutdown, so a later `automation_run` can accept a
+  new run.
 
-## v0.20 B1 Scope
+## v0.20 Scope
 
 B1 implements the minimal foundation: discovery, one active async run, polling,
-state-file persistence, caller tags, bounded log excerpts, and stale recovery
-after `timeoutSeconds + 60` seconds.
+state-file persistence, caller tags, bounded log excerpts, and stale recovery.
 
-B1 intentionally does not implement release gates, Task Atlas dogfood replay,
-RAG recommendation quality checks, heartbeats, multi-run scheduling, history
-queries, cancellation, or a hardened watchdog. Those are deferred to v0.20 B2
-or later verification chunks.
+B2 adds watchdog hardening plus Task Atlas dogfood gates. It intentionally does
+not add a public cancellation tool, multi-run scheduling, history queries, or
+public `automation_report` schema fields.
+
+## Release Gate A (Manual)
+
+Gate A checks LLM-inferred Task Atlas labels. It is manual because label quality
+is subjective.
+
+Pre-condition: have at least 5 historical sessions under:
+
+```text
+Examples/UEvolveExample57/Saved/UnrealMcp/ActivityLog/*.jsonl
+```
+
+These sessions should not already contain `user_intent` events; they are the
+sessions that `unreal.task_label_backfill` will label.
+
+Procedure:
+
+```text
+/tool unreal.task_label_backfill {"limit":5}
+```
+
+Use the default Anthropic provider, or whichever provider the project is
+configured to use for Task Atlas label backfill. Then inspect the resulting
+task JSON files under:
+
+```text
+Examples/UEvolveExample57/Saved/UnrealMcp/Tasks/*.json
+```
+
+Acceptance: at least 4 of 5 inferred labels are reasonable. "Reasonable" means
+that an Unreal-experienced developer reading only the label could roughly guess
+what the session did.
+
+Failure mode: if fewer than 4 of 5 labels are reasonable, file a follow-up patch
+to refine the prompt template in `UnrealMcpTaskLabelBackfillTool.cpp`, then
+rerun Gate A before tagging the release.
+
+## Release Gate B (Automated)
+
+Gate B verifies skill replay for a read-only deterministic triad:
+
+1. `unreal.editor.engine_version({})`
+2. `unreal.project_settings_get({"category":"game","key":"DefaultGameMode"})`
+3. `unreal.list_assets({"contentRoot":"/Game","limit":5})`
+
+The release fixture is:
+
+```text
+Tools/UnrealMcpTests/Verification/05_gate_b_skill_replay.json
+```
+
+The C++ Automation Test is:
+
+```text
+UnrealMcp.Verification.GateB.SkillReplay
+```
+
+The test stages a synthetic ActivityLog window with the triad, calls the
+in-process skill distillation helper to write a draft, then calls
+`SkillApply` in-process with `writeMemory=false`. It passes only if the returned
+skill text lists the three tool names in the observed order.
+
+## Release Gate D (Automated)
+
+Gate D verifies that a Task Atlas markdown source can be found through
+`unreal.tool_recommend` after a knowledge refresh.
+
+The release fixture is:
+
+```text
+Tools/UnrealMcpTests/Verification/06_gate_d_rag_hit.json
+```
+
+The C++ Automation Test is:
+
+```text
+UnrealMcp.Verification.GateD.RagHit
+```
+
+The test writes:
+
+```text
+Saved/UnrealMcp/KnowledgeSources/TaskAtlas/gate_d_smoke.md
+```
+
+with the sentinel `UEVOLVE_GATE_D_SENTINEL_TASK_ATLAS_SMOKE`, calls
+`KnowledgeIndexRefresh` in-process, then calls `ToolRecommend` in-process with
+the sentinel query. It passes only if `knowledgeCards[]` contains the synthetic
+source by title, source path, or excerpt. A scoped cleanup guard deletes the
+markdown file and refreshes the index again even when the assertion fails.
+
+## Release Gate C (Stretch / Deferred)
+
+Gate C would validate Make Tool full apply from a Task Atlas workflow. It is
+deferred to v0.20.1 hardening and is not release-blocking for v0.20.

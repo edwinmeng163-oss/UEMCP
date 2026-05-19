@@ -1,0 +1,22 @@
+{
+  "name": "gate_d_rag_hit",
+  "description": "Release Gate D contract: a Task Atlas markdown knowledge source is indexed and then surfaced by tool_recommend for a matching query.",
+  "category": "gate",
+  "expectToolListed": false,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "sentinel": "UEVOLVE_GATE_D_SENTINEL_TASK_ATLAS_SMOKE",
+    "sourcePath": "Saved/UnrealMcp/KnowledgeSources/TaskAtlas/gate_d_smoke.md",
+    "assertion": "After knowledge_index_refresh, unreal.tool_recommend called with the sentinel query includes a knowledgeCards entry whose title, sourcePath, or excerpt matches the synthetic markdown source.",
+    "cleanup": "Delete the synthetic markdown file and refresh the knowledge index again so reruns cannot pass from a stale card.",
+    "automationTest": "UnrealMcp.Verification.GateD.RagHit"
+  },
+  "procedure": [
+    "Write Saved/UnrealMcp/KnowledgeSources/TaskAtlas/gate_d_smoke.md with title Gate D Task Atlas Smoke and body containing UEVOLVE_GATE_D_SENTINEL_TASK_ATLAS_SMOKE.",
+    "Call /tool unreal.knowledge_index_refresh {}.",
+    "Call /tool unreal.tool_recommend {\"task\":\"UEVOLVE_GATE_D_SENTINEL_TASK_ATLAS_SMOKE\",\"includeKnowledge\":true,\"includeWorkflowDraft\":false}.",
+    "Accept only if knowledgeCards contains the source title, gate_d_smoke.md, or the sentinel in the excerpt.",
+    "Delete Saved/UnrealMcp/KnowledgeSources/TaskAtlas/gate_d_smoke.md and call /tool unreal.knowledge_index_refresh {} again."
+  ]
+}

@@ -5,6 +5,7 @@
 #include "Providers/IAssistantProvider.h"
 #include "ToolMenus.h"
 #include "UnrealMcpAssistantRun.h"
+#include "UnrealMcpAutomationTools.h"
 #include "UnrealMcpInstallDoctor.h"
 #include "UnrealMcpSession.h"
 #include "UnrealMcpSkillTools.h"
@@ -72,6 +73,7 @@ void FUnrealMcpModule::StartupModule()
 
 void FUnrealMcpModule::ShutdownModule()
 {
+	UnrealMcp::MarkActiveAutomationRunStaleOnShutdown();
 	if (SkillActivityTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(SkillActivityTickerHandle);

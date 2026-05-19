@@ -29,6 +29,8 @@ namespace UnrealMcp
 		constexpr int32 DefaultAutomationTimeoutSeconds = 120;
 		constexpr int32 MaxAutomationTimeoutSeconds = 3600;
 		constexpr int32 StaleGraceSeconds = 60;
+		constexpr int32 UnresponsiveHeartbeatSeconds = 30;
+		constexpr int32 HeartbeatPersistDebounceSeconds = 1;
 		constexpr int32 LogExcerptLineLimit = 50;
 		constexpr int32 LogExcerptCharLimit = 4096;
 
@@ -53,14 +55,18 @@ namespace UnrealMcp
 			FDateTime AcceptedAtUtc;
 			FDateTime StartedAtUtc;
 			FDateTime EndedAtUtc;
+			FDateTime LastHeartbeatUtc;
+			FString StaleReason;
 			int32 TimeoutSeconds = DefaultAutomationTimeoutSeconds;
 			TArray<FAutomationResultEvent> Results;
+			bool bBestEffortCancelAttempted = false;
 		};
 
 		FCriticalSection GAutomationRunMutex;
 		bool bHasActiveAutomationRun = false;
 		FAutomationRunState GActiveAutomationRun;
 		FTSTicker::FDelegateHandle GAutomationTickerHandle;
+		FDateTime LastPersistedHeartbeatUtc;
 
 #if WITH_DEV_AUTOMATION_TESTS
 		bool bSuppressAutomationFrameworkStartForTests = false;
@@ -116,18 +122,23 @@ namespace UnrealMcp
 			return State.Status;
 		}
 
-		bool IsPastStaleWindow(const FAutomationRunState& State, const FDateTime& NowUtc)
+		FString GetStaleReason(const FAutomationRunState& State, const FDateTime& NowUtc)
 		{
 			if (!IsActiveStatus(State.Status))
 			{
-				return false;
+				return FString();
 			}
 			const FDateTime Basis = State.StartedAtUtc.GetTicks() > 0 ? State.StartedAtUtc : State.AcceptedAtUtc;
-			if (Basis.GetTicks() <= 0)
+			if (Basis.GetTicks() > 0 && NowUtc > (Basis + FTimespan::FromSeconds(State.TimeoutSeconds + StaleGraceSeconds)))
 			{
-				return false;
+				return TEXT("hard_timeout");
 			}
-			return NowUtc > (Basis + FTimespan::FromSeconds(State.TimeoutSeconds + StaleGraceSeconds));
+			if (State.LastHeartbeatUtc.GetTicks() > 0
+				&& NowUtc > (State.LastHeartbeatUtc + FTimespan::FromSeconds(UnresponsiveHeartbeatSeconds)))
+			{
+				return TEXT("unresponsive");
+			}
+			return FString();
 		}
 
 		TArray<TSharedPtr<FJsonValue>> MakeStringArrayValues(const TArray<FString>& Values)
@@ -227,6 +238,15 @@ namespace UnrealMcp
 				Object->SetStringField(TEXT("endedAt"), State.EndedAtUtc.ToIso8601());
 				Object->SetNumberField(TEXT("durationMs"), FMath::Max(0.0, (State.EndedAtUtc - State.StartedAtUtc).GetTotalMilliseconds()));
 			}
+			if (State.LastHeartbeatUtc.GetTicks() > 0)
+			{
+				Object->SetStringField(TEXT("lastHeartbeatUtc"), State.LastHeartbeatUtc.ToIso8601());
+			}
+			if (!State.StaleReason.IsEmpty())
+			{
+				Object->SetStringField(TEXT("staleReason"), State.StaleReason);
+			}
+			Object->SetBoolField(TEXT("bestEffortCancelAttempted"), State.bBestEffortCancelAttempted);
 			Object->SetNumberField(TEXT("timeoutSecondsConfigured"), State.TimeoutSeconds);
 			Object->SetArrayField(TEXT("results"), MakeResultEventValues(State.Results));
 			Object->SetStringField(TEXT("logExcerpt"), TailProjectLogExcerpt());
@@ -362,16 +382,21 @@ namespace UnrealMcp
 			FString AcceptedAt;
 			FString StartedAt;
 			FString EndedAt;
+			FString LastHeartbeatAt;
 			Object->TryGetStringField(TEXT("acceptedAt"), AcceptedAt);
 			Object->TryGetStringField(TEXT("startedAt"), StartedAt);
 			Object->TryGetStringField(TEXT("endedAt"), EndedAt);
+			Object->TryGetStringField(TEXT("lastHeartbeatUtc"), LastHeartbeatAt);
 			ParseIsoTimestamp(AcceptedAt, State.AcceptedAtUtc);
 			ParseIsoTimestamp(StartedAt, State.StartedAtUtc);
 			ParseIsoTimestamp(EndedAt, State.EndedAtUtc);
+			ParseIsoTimestamp(LastHeartbeatAt, State.LastHeartbeatUtc);
 			if (State.StartedAtUtc.GetTicks() <= 0)
 			{
 				State.StartedAtUtc = State.AcceptedAtUtc;
 			}
+			Object->TryGetStringField(TEXT("staleReason"), State.StaleReason);
+			Object->TryGetBoolField(TEXT("bestEffortCancelAttempted"), State.bBestEffortCancelAttempted);
 
 			const TSharedPtr<FJsonObject>* TestObject = nullptr;
 			if (Object->TryGetObjectField(TEXT("test"), TestObject) && TestObject && TestObject->IsValid())
@@ -552,6 +577,7 @@ namespace UnrealMcp
 			State.Tags = Tags;
 			State.AcceptedAtUtc = NowUtc;
 			State.StartedAtUtc = NowUtc;
+			State.LastHeartbeatUtc = NowUtc;
 			State.TimeoutSeconds = TimeoutSeconds;
 			return State;
 		}
@@ -573,10 +599,40 @@ namespace UnrealMcp
 			return FString::Printf(TEXT("%s-%s"), *Timestamp, *Hex);
 		}
 
-		void MarkStateStale(FAutomationRunState& State)
+		void AttemptBestEffortCancel(FAutomationRunState& State)
+		{
+			if (State.bBestEffortCancelAttempted || IsEngineExitRequested())
+			{
+				return;
+			}
+			FAutomationTestFramework::Get().DequeueAllCommands();
+			State.bBestEffortCancelAttempted = true;
+		}
+
+		void MarkStateStale(FAutomationRunState& State, const FString& StaleReason, bool bAttemptBestEffortCancel = true)
 		{
 			State.Status = TEXT("stale");
-			State.Reason = TEXT("exceeded timeout window");
+			State.StaleReason = StaleReason.TrimStartAndEnd().IsEmpty() ? TEXT("hard_timeout") : StaleReason.TrimStartAndEnd();
+			if (State.StaleReason == TEXT("hard_timeout"))
+			{
+				State.Reason = TEXT("exceeded timeout window");
+			}
+			else if (State.StaleReason == TEXT("unresponsive"))
+			{
+				State.Reason = TEXT("automation heartbeat stopped");
+			}
+			else if (State.StaleReason == TEXT("editor_shutdown"))
+			{
+				State.Reason = TEXT("editor shut down while run was active");
+			}
+			else
+			{
+				State.Reason = State.StaleReason;
+			}
+			if (bAttemptBestEffortCancel)
+			{
+				AttemptBestEffortCancel(State);
+			}
 			State.EndedAtUtc = FDateTime::UtcNow();
 			SaveStateFile(State);
 		}
@@ -594,9 +650,10 @@ namespace UnrealMcp
 				{
 					continue;
 				}
-				if (IsPastStaleWindow(State, FDateTime::UtcNow()))
+				const FString StaleReason = GetStaleReason(State, FDateTime::UtcNow());
+				if (!StaleReason.IsEmpty())
 				{
-					MarkStateStale(State);
+					MarkStateStale(State, StaleReason);
 					continue;
 				}
 				OutState = MoveTemp(State);
@@ -611,9 +668,10 @@ namespace UnrealMcp
 				FScopeLock Lock(&GAutomationRunMutex);
 				if (bHasActiveAutomationRun)
 				{
-					if (IsPastStaleWindow(GActiveAutomationRun, FDateTime::UtcNow()))
+					const FString StaleReason = GetStaleReason(GActiveAutomationRun, FDateTime::UtcNow());
+					if (!StaleReason.IsEmpty())
 					{
-						MarkStateStale(GActiveAutomationRun);
+						MarkStateStale(GActiveAutomationRun, StaleReason);
 						bHasActiveAutomationRun = false;
 					}
 					else
@@ -629,6 +687,7 @@ namespace UnrealMcp
 				FScopeLock Lock(&GAutomationRunMutex);
 				GActiveAutomationRun = OutState;
 				bHasActiveAutomationRun = true;
+				LastPersistedHeartbeatUtc = OutState.LastHeartbeatUtc;
 				return true;
 			}
 			return false;
@@ -640,6 +699,7 @@ namespace UnrealMcp
 			if (bHasActiveAutomationRun && GActiveAutomationRun.RunId == RunId)
 			{
 				bHasActiveAutomationRun = false;
+				LastPersistedHeartbeatUtc = FDateTime();
 			}
 		}
 
@@ -648,6 +708,10 @@ namespace UnrealMcp
 			FScopeLock Lock(&GAutomationRunMutex);
 			GActiveAutomationRun = State;
 			bHasActiveAutomationRun = IsActiveStatus(State.Status);
+			if (!bHasActiveAutomationRun)
+			{
+				LastPersistedHeartbeatUtc = FDateTime();
+			}
 		}
 
 		FAutomationRunState GetActiveRunStateCopy()
@@ -696,6 +760,35 @@ namespace UnrealMcp
 			GAutomationTickerHandle.Reset();
 		}
 
+		void UpdateActiveRunHeartbeat(FAutomationRunState& State, const FDateTime& NowUtc)
+		{
+			if (!IsActiveStatus(State.Status))
+			{
+				return;
+			}
+
+			State.LastHeartbeatUtc = NowUtc;
+			bool bPersistHeartbeat = false;
+			{
+				FScopeLock Lock(&GAutomationRunMutex);
+				if (bHasActiveAutomationRun && GActiveAutomationRun.RunId == State.RunId)
+				{
+					GActiveAutomationRun.LastHeartbeatUtc = NowUtc;
+					if (LastPersistedHeartbeatUtc.GetTicks() <= 0
+						|| NowUtc > (LastPersistedHeartbeatUtc + FTimespan::FromSeconds(HeartbeatPersistDebounceSeconds)))
+					{
+						LastPersistedHeartbeatUtc = NowUtc;
+						bPersistHeartbeat = true;
+					}
+				}
+			}
+
+			if (bPersistHeartbeat)
+			{
+				SaveStateFile(State);
+			}
+		}
+
 		bool TickActiveAutomationRun(float DeltaTime)
 		{
 			(void)DeltaTime;
@@ -706,9 +799,13 @@ namespace UnrealMcp
 				return false;
 			}
 
-			if (IsPastStaleWindow(State, FDateTime::UtcNow()))
+			const FDateTime NowUtc = FDateTime::UtcNow();
+			UpdateActiveRunHeartbeat(State, NowUtc);
+
+			const FString StaleReason = GetStaleReason(State, NowUtc);
+			if (!StaleReason.IsEmpty())
 			{
-				MarkStateStale(State);
+				MarkStateStale(State, StaleReason);
 				ClearActiveRunIfMatching(State.RunId);
 				ResetAutomationTickerHandle();
 				return false;
@@ -721,8 +818,10 @@ namespace UnrealMcp
 				{
 					State.Status = TEXT("running");
 					State.StartedAtUtc = FDateTime::UtcNow();
+					State.LastHeartbeatUtc = State.StartedAtUtc;
 					SetActiveRunState(State);
 					SaveStateFile(State);
+					LastPersistedHeartbeatUtc = State.LastHeartbeatUtc;
 					return true;
 				}
 #endif
@@ -730,6 +829,7 @@ namespace UnrealMcp
 				Framework.StartTestByName(State.FullName, 0, State.PrettyName.IsEmpty() ? State.DisplayName : State.PrettyName);
 				State.Status = TEXT("running");
 				State.StartedAtUtc = FDateTime::UtcNow();
+				State.LastHeartbeatUtc = State.StartedAtUtc;
 				if (!GIsAutomationTesting || Framework.GetCurrentTest() == nullptr)
 				{
 					State.Status = TEXT("failed");
@@ -737,12 +837,14 @@ namespace UnrealMcp
 					State.EndedAtUtc = FDateTime::UtcNow();
 					SetActiveRunState(State);
 					SaveStateFile(State);
+					LastPersistedHeartbeatUtc = State.LastHeartbeatUtc;
 					ClearActiveRunIfMatching(State.RunId);
 					ResetAutomationTickerHandle();
 					return false;
 				}
 				SetActiveRunState(State);
 				SaveStateFile(State);
+				LastPersistedHeartbeatUtc = State.LastHeartbeatUtc;
 				return true;
 			}
 
@@ -881,6 +983,7 @@ namespace UnrealMcp
 			FAutomationRunState State = MakeRunStateFromTestInfo(RunId, TestInfo, Tags, TimeoutSeconds);
 			SaveStateFile(State);
 			SetActiveRunState(State);
+			LastPersistedHeartbeatUtc = State.LastHeartbeatUtc;
 			EnsureAutomationTicker();
 
 			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
@@ -922,9 +1025,10 @@ namespace UnrealMcp
 				return MakeExecutionResult(Message, ErrorObject, true);
 			}
 
-			if (IsPastStaleWindow(State, FDateTime::UtcNow()))
+			const FString StaleReason = GetStaleReason(State, FDateTime::UtcNow());
+			if (!StaleReason.IsEmpty())
 			{
-				MarkStateStale(State);
+				MarkStateStale(State, StaleReason);
 				ClearActiveRunIfMatching(State.RunId);
 			}
 
@@ -955,12 +1059,47 @@ namespace UnrealMcp
 		return false;
 	}
 
+	void MarkActiveAutomationRunStaleOnShutdown()
+	{
+		FAutomationRunState State;
+		{
+			FScopeLock Lock(&GAutomationRunMutex);
+			if (!bHasActiveAutomationRun)
+			{
+				if (GAutomationTickerHandle.IsValid())
+				{
+					FTSTicker::GetCoreTicker().RemoveTicker(GAutomationTickerHandle);
+					GAutomationTickerHandle.Reset();
+				}
+				LastPersistedHeartbeatUtc = FDateTime();
+				return;
+			}
+
+			State = GActiveAutomationRun;
+			bHasActiveAutomationRun = false;
+			GActiveAutomationRun = FAutomationRunState();
+			LastPersistedHeartbeatUtc = FDateTime();
+		}
+
+		if (GAutomationTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(GAutomationTickerHandle);
+			GAutomationTickerHandle.Reset();
+		}
+
+		if (IsActiveStatus(State.Status))
+		{
+			MarkStateStale(State, TEXT("editor_shutdown"), false);
+		}
+	}
+
 #if WITH_DEV_AUTOMATION_TESTS
 	void ResetAutomationToolStateForTests()
 	{
 		FScopeLock Lock(&GAutomationRunMutex);
 		bHasActiveAutomationRun = false;
 		GActiveAutomationRun = FAutomationRunState();
+		LastPersistedHeartbeatUtc = FDateTime();
 		bSuppressAutomationFrameworkStartForTests = false;
 		if (GAutomationTickerHandle.IsValid())
 		{
@@ -991,6 +1130,7 @@ namespace UnrealMcp
 		State.Flags = { TEXT("EditorContext"), TEXT("EngineFilter") };
 		State.AcceptedAtUtc = StartedAtUtc;
 		State.StartedAtUtc = StartedAtUtc;
+		State.LastHeartbeatUtc = StartedAtUtc;
 		State.TimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1, MaxAutomationTimeoutSeconds);
 		SaveStateFile(State);
 		return MakeReportPath(RunId);

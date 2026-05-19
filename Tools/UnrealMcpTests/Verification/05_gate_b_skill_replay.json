@@ -1,0 +1,28 @@
+{
+  "name": "gate_b_skill_replay",
+  "description": "Release Gate B contract: a promoted Task Atlas skill draft can replay the read-only triad workflow guidance deterministically.",
+  "category": "gate",
+  "expectToolListed": false,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "expectedContract": {
+    "precondition": "Record the triad activity, promote it with the Task Atlas To Skills action or unreal.skill_distill_from_activity, and keep the resulting draft at Saved/UnrealMcp/SkillDrafts/gate_b_triad.skill.md or another known skillPath.",
+    "triad": [
+      "unreal.editor.engine_version({})",
+      "unreal.project_settings_get({\"category\":\"game\",\"key\":\"DefaultGameMode\"})",
+      "unreal.list_assets({\"contentRoot\":\"/Game\",\"limit\":5})"
+    ],
+    "assertion": "unreal.skill_apply on the draft returns success and its workflow guidance lists the three tool names in the same order.",
+    "automationTest": "UnrealMcp.Verification.GateB.SkillReplay"
+  },
+  "procedure": [
+    "Call /tool unreal.skill_recording_start {\"goal\":\"Gate B read-only triad\",\"reset\":true}.",
+    "Call /tool unreal.editor.engine_version {}.",
+    "Call /tool unreal.project_settings_get {\"category\":\"game\",\"key\":\"DefaultGameMode\"}.",
+    "Call /tool unreal.list_assets {\"contentRoot\":\"/Game\",\"limit\":5}.",
+    "Call /tool unreal.skill_recording_stop {\"reason\":\"Gate B triad complete\"}.",
+    "Promote the activity through Task Atlas To Skills or call /tool unreal.skill_distill_from_activity with the recorded sessionId and skillName gate_b_triad.",
+    "Call /tool unreal.skill_apply {\"skillPath\":\"Saved/UnrealMcp/SkillDrafts/gate_b_triad/SKILL.md\",\"writeMemory\":false,\"includeFullText\":true}.",
+    "Accept only if the response succeeds and the returned skill text lists unreal.editor.engine_version, unreal.project_settings_get, and unreal.list_assets in that order."
+  ]
+}

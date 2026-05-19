@@ -471,6 +471,8 @@ with Part A Make Tool scaffold drafts, Part B Markdown ingestion/RAG indexing
 for promoted workflows, and Part C LLM retrospective label backfill.
 v0.20 C1a B1 is now in place with the `verification` category and async
 Automation Framework list/run/report polling foundation.
+v0.20 B2 hardens the automation watchdog with debounced heartbeats, stale
+reasons, shutdown stale marking, and adds Task Atlas dogfood gates A/B/D.
 v0.19.1 patched a latent unity-build symbol collision that blocked UE 5.6
 dev-host builds against `UEvolve.uproject` (fixed by setting `bUseUnity =
 false` for the UnrealMcp module); same source now compiles cleanly on UE

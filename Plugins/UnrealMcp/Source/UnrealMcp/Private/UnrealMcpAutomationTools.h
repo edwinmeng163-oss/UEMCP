@@ -8,6 +8,7 @@ struct FUnrealMcpExecutionResult;
 namespace UnrealMcp
 {
 	bool TryExecuteAutomationTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
+	void MarkActiveAutomationRunStaleOnShutdown();
 
 #if WITH_DEV_AUTOMATION_TESTS
 	void ResetAutomationToolStateForTests();
