@@ -121,6 +121,8 @@ The repository currently contains:
 - Project-level README and ignore rules suitable for public GitHub hosting.
 - Self-extension safety rails: schema validation, patch-fragment validation, dry-run diffs, backups, build/test handoff, rollback manifests, project memory, and project-local skills.
 - Versioned core MCP test fixtures under `Tools/UnrealMcpTests`.
+- `Tools/UEAtelierCli`, the `cli-anything-ueatelier` Python package for
+  command-line access to a running UEAtelier MCP endpoint.
 - Explicit ToolRegistry metadata under `Tools/UnrealMcpToolRegistry/tools.json` for category, handler alias, risk level, write/build/process/restart/memory/lock requirements, dry-run support, owner, docs path, and test coverage.
 - Registry-derived ToolHandlerRegistry metadata so audit, dispatch, and validation share the same handler/category view without source scanning.
 - Tool-specific preflight/postcheck verifiers for Blueprint graph, Widget Blueprint, level actor, project memory, skill, scaffold, and self-extension workflow tools.
@@ -219,6 +221,31 @@ configuration, per-turn model/effort selection, logging, and limitations. The
 separate Codex CLI subprocess provider remains locked to `gpt-5.5` with `xhigh`
 reasoning and is supported on macOS/Linux only; Windows users should use the
 `CodexAppServer` bridge provider.
+
+## External CLI
+
+The CLI-Anything wrapper lives at:
+
+```text
+Tools/UEAtelierCli
+```
+
+Install it from the repository subdirectory:
+
+```bash
+pip install git+https://github.com/edwinmeng163-oss/UEAtelier.git#subdirectory=Tools/UEAtelierCli
+```
+
+Minimal use with a running UEAtelier-equipped editor:
+
+```bash
+cli-anything-ueatelier status
+cli-anything-ueatelier tools list --category verification
+cli-anything-ueatelier --json run unreal.editor_status --args-json '{}'
+```
+
+Full command reference for CLI-Anything Hub is in
+[`Tools/UEAtelierCli/SKILL.md`](Tools/UEAtelierCli/SKILL.md).
 
 ## Tool Coverage
 

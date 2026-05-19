@@ -38,6 +38,12 @@ Examples/*/.idea/
 # Python cache
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Python package build outputs
+Tools/UEAtelierCli/build/
+Tools/UEAtelierCli/dist/
+Tools/UEAtelierCli/*.egg-info/
 
 # Local user/developer content
 Content/Developers/

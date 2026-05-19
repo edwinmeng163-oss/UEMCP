@@ -215,6 +215,7 @@ Schemas/
   UnrealMcpToolRegistry.schema.json
 
 Tools/
+  UEAtelierCli/
   install_unrealmcp_to_project.py
   unreal_mcp_fetch_docs.py
   unreal_mcp_stdio_proxy.py
@@ -482,6 +483,9 @@ diagnostics ring buffer in the existing `verification` category.
 v0.22 adds `unreal.pie_smoke`, a shared-lock single-instance PIE runtime smoke
 that reports through `unreal.automation_report` in the existing `verification`
 category.
+v0.23 adds `Tools/UEAtelierCli/`, the `cli-anything-ueatelier` Python package
+that lets CLI-Anything, shell scripts, CI, and command-mode agents call the
+running editor MCP endpoint without adding new MCP tools.
 v0.19.1 patched a latent unity-build symbol collision that blocked UE 5.6
 dev-host builds against `UEvolve.uproject` (fixed by setting `bUseUnity =
 false` for the UnrealMcp module); same source now compiles cleanly on UE

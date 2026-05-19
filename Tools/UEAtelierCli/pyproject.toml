@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cli-anything-ueatelier"
+version = "0.23.0"
+description = "CLI-Anything wrapper for UEAtelier Unreal Editor MCP tools."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.0",
+  "requests>=2.31",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Build Tools",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=7.0",
+]
+
+[project.scripts]
+cli-anything-ueatelier = "ueatelier_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ueatelier_cli*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
