@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cli-anything-ueatelier"
-version = "0.23.0"
+version = "0.23.1"
 description = "CLI-Anything wrapper for UEAtelier Unreal Editor MCP tools."
 readme = "README.md"
 requires-python = ">=3.10"

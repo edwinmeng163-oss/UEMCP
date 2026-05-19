@@ -116,12 +116,14 @@ cli-anything-ueatelier status
 cli-anything-ueatelier --json status
 ```
 
-Human output includes endpoint, connected state, editor version, and tool count.
+Human output includes endpoint, connected state, editor version, tool count, and (when reachable) project name, current map, and PIE state.
 JSON output is normalized:
 
 ```json
-{"endpoint":"http://127.0.0.1:8765/mcp","connected":true,"editorVersion":"5.7.4","toolCount":160}
+{"endpoint":"http://127.0.0.1:8765/mcp","connected":true,"editorVersion":"5.7.4","toolCount":160,"projectName":"MyProject","currentMap":"/Game/Maps/Main","isPlayInEditor":false}
 ```
+
+Project name, current map, and PIE state are omitted when editor_status is unavailable or returns isError.
 
 `tools list`: list MCP tools, with optional category, search, and limit.
 

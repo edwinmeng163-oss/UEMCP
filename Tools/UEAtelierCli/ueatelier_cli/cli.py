@@ -224,7 +224,7 @@ def _find_tool(tools: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
 def _extract_editor_version(payload: Any) -> str:
     if not isinstance(payload, dict):
         return "unknown"
-    aliases = {"unrealversion", "editorversion", "engineversion", "version"}
+    aliases = {"unrealversion", "editorversion", "engineversion", "version", "version_string"}
     for key, value in payload.items():
         if key.lower() in aliases and value not in (None, ""):
             return str(value)
@@ -270,24 +270,30 @@ def status(ctx: click.Context) -> None:
     state = _state(ctx)
     tools = _client_call(ctx, state.client.list_tools)
     tool_count = len(tools)
+    tool_names = {str(tool.get("name", "")) for tool in tools}
     editor_version = "unknown"
+    project_name = None
+    current_map = None
+    is_play_in_editor = None
+    editor_status_succeeded = False
 
-    try:
+    if "unreal.editor_status" in tool_names:
+        status_result = _client_call(ctx, lambda: state.client.call_tool("unreal.editor_status", {}))
+        if not is_tool_error(status_result):
+            editor_status_succeeded = True
+            status_payload = structured_content(status_result)
+            editor_version = _extract_editor_version(status_payload)
+            if isinstance(status_payload, dict):
+                if status_payload.get("projectName") not in (None, ""):
+                    project_name = status_payload.get("projectName")
+                if status_payload.get("currentMap") not in (None, ""):
+                    current_map = status_payload.get("currentMap")
+                if isinstance(status_payload.get("isPlayInEditor"), bool):
+                    is_play_in_editor = status_payload.get("isPlayInEditor")
+    if not editor_status_succeeded and "unreal.editor.engine_version" in tool_names:
         engine_result = _client_call(ctx, lambda: state.client.call_tool("unreal.editor.engine_version", {}))
         if not is_tool_error(engine_result):
             editor_version = _extract_editor_version(structured_content(engine_result))
-    except click.exceptions.Exit:
-        raise
-    except Exception:
-        editor_version = "unknown"
-
-    if any(tool.get("name") == "unreal.editor_status" for tool in tools):
-        try:
-            _client_call(ctx, lambda: state.client.call_tool("unreal.editor_status", {}))
-        except click.exceptions.Exit:
-            raise
-        except Exception:
-            pass
 
     payload = {
         "endpoint": state.client.endpoint,
@@ -295,16 +301,29 @@ def status(ctx: click.Context) -> None:
         "editorVersion": editor_version,
         "toolCount": tool_count,
     }
+    if project_name is not None:
+        payload["projectName"] = project_name
+    if current_map is not None:
+        payload["currentMap"] = current_map
+    if is_play_in_editor is not None:
+        payload["isPlayInEditor"] = is_play_in_editor
     if state.json_output:
         emit_json(payload)
     else:
+        rows = [
+            ("UEAtelier MCP server", state.client.endpoint),
+            ("Status", "connected"),
+            ("Editor version", editor_version),
+        ]
+        if project_name is not None:
+            rows.append(("Project name", project_name))
+        if current_map is not None:
+            rows.append(("Current map", current_map))
+        if is_play_in_editor is not None:
+            rows.append(("PIE", "true" if is_play_in_editor else "false"))
+        rows.append(("Tool count", tool_count))
         emit_key_values(
-            [
-                ("UEAtelier MCP server", state.client.endpoint),
-                ("Status", "connected"),
-                ("Editor version", editor_version),
-                ("Tool count", tool_count),
-            ]
+            rows
         )
 
 

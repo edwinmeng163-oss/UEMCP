@@ -31,7 +31,9 @@ class FakeClient:
         if isinstance(value, list):
             if not value:
                 raise AssertionError(f"No fake responses left for {name}")
-            return value.pop(0)
+            value = value.pop(0)
+        if isinstance(value, Exception):
+            raise value
         return value
 
 
@@ -58,8 +60,47 @@ def test_status_json_normalizes_payload(runner, install_fake_client):
     fake = FakeClient(
         tools=[{"name": "unreal.editor.engine_version"}, {"name": "unreal.editor_status"}],
         responses={
-            "unreal.editor.engine_version": {"structuredContent": {"unrealVersion": "5.7.4"}},
-            "unreal.editor_status": {"structuredContent": {"ok": True}},
+            "unreal.editor_status": {
+                "structuredContent": {
+                    "projectName": "MyProject",
+                    "engineVersion": "5.7.4",
+                    "currentMap": "/Game/Maps/Main",
+                    "isPlayInEditor": False,
+                    "projectDir": "/abs/path",
+                    "isSimulatingInEditor": False,
+                    "playRequestPending": False,
+                    "selectedAssetCount": 0,
+                    "selectedActorCount": 0,
+                    "endpoint": "http://127.0.0.1:8765/mcp",
+                }
+            },
+        },
+    )
+    install_fake_client(fake)
+
+    result = runner.invoke(main, ["--json", "--endpoint", "http://editor.test/mcp", "status"])
+
+    assert result.exit_code == 0
+    assert decode_json(result) == {
+        "endpoint": "http://editor.test/mcp",
+        "connected": True,
+        "editorVersion": "5.7.4",
+        "toolCount": 2,
+        "projectName": "MyProject",
+        "currentMap": "/Game/Maps/Main",
+        "isPlayInEditor": False,
+    }
+    assert fake.calls == [("unreal.editor_status", {})]
+
+
+def test_status_falls_back_to_engine_version_when_editor_status_isError(runner, install_fake_client):
+    fake = FakeClient(
+        tools=[{"name": "unreal.editor.engine_version"}, {"name": "unreal.editor_status"}],
+        responses={
+            "unreal.editor_status": {"isError": True, "structuredContent": {"errorKind": "x"}},
+            "unreal.editor.engine_version": {
+                "structuredContent": {"version_string": "5.7.4", "major": 5, "minor": 7, "patch": 4}
+            },
         },
     )
     install_fake_client(fake)
@@ -73,7 +114,72 @@ def test_status_json_normalizes_payload(runner, install_fake_client):
         "editorVersion": "5.7.4",
         "toolCount": 2,
     }
-    assert fake.calls == [("unreal.editor.engine_version", {}), ("unreal.editor_status", {})]
+    assert fake.calls == [("unreal.editor_status", {}), ("unreal.editor.engine_version", {})]
+
+
+def test_status_unknown_when_both_tools_iserror(runner, install_fake_client):
+    fake = FakeClient(
+        tools=[{"name": "unreal.editor.engine_version"}, {"name": "unreal.editor_status"}],
+        responses={
+            "unreal.editor_status": {"isError": True, "structuredContent": {"errorKind": "status_failed"}},
+            "unreal.editor.engine_version": {"isError": True, "structuredContent": {"errorKind": "version_failed"}},
+        },
+    )
+    install_fake_client(fake)
+
+    result = runner.invoke(main, ["--json", "--endpoint", "http://editor.test/mcp", "status"])
+
+    assert result.exit_code == 0
+    assert decode_json(result) == {
+        "endpoint": "http://editor.test/mcp",
+        "connected": True,
+        "editorVersion": "unknown",
+        "toolCount": 2,
+    }
+    assert fake.calls == [("unreal.editor_status", {}), ("unreal.editor.engine_version", {})]
+
+
+def test_status_endpoint_unreachable_during_editor_status_exits_2(runner, install_fake_client):
+    fake = FakeClient(
+        tools=[{"name": "unreal.editor.engine_version"}, {"name": "unreal.editor_status"}],
+        responses={
+            "unreal.editor_status": EndpointUnreachableError("refused", endpoint="http://editor.test/mcp"),
+            "unreal.editor.engine_version": {"structuredContent": {"version_string": "5.7.4"}},
+        },
+    )
+    install_fake_client(fake)
+
+    result = runner.invoke(main, ["--json", "--endpoint", "http://editor.test/mcp", "status"])
+
+    assert result.exit_code == 2
+    assert decode_json(result)["error"] == "endpoint_unreachable"
+    assert fake.calls == [("unreal.editor_status", {})]
+
+
+def test_status_omits_currentmap_when_empty(runner, install_fake_client):
+    fake = FakeClient(
+        tools=[{"name": "unreal.editor_status"}],
+        responses={
+            "unreal.editor_status": {
+                "structuredContent": {
+                    "projectName": "MyProject",
+                    "engineVersion": "5.7.4",
+                    "currentMap": "",
+                    "isPlayInEditor": False,
+                }
+            },
+        },
+    )
+    install_fake_client(fake)
+
+    result = runner.invoke(main, ["--json", "--endpoint", "http://editor.test/mcp", "status"])
+
+    assert result.exit_code == 0
+    payload = decode_json(result)
+    assert payload["projectName"] == "MyProject"
+    assert payload["editorVersion"] == "5.7.4"
+    assert payload["isPlayInEditor"] is False
+    assert "currentMap" not in payload
 
 
 def test_status_unreachable_json_exits_2(runner, install_fake_client):
