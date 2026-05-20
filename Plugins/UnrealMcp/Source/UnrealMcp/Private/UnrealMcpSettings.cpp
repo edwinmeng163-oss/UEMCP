@@ -190,6 +190,11 @@ bool UUnrealMcpSettings::LoadProvidersBackup()
 void UUnrealMcpSettings::PostInitProperties()
 {
 	Super::PostInitProperties();
+	ApplyLegacyOpenAIMigration_IfNeeded();
+}
+
+void UUnrealMcpSettings::ApplyLegacyOpenAIMigration_IfNeeded()
+{
 	if (!OpenAIApiKey.TrimStartAndEnd().IsEmpty())
 	{
 		const bool bHasMigratedDefaultProvider = Providers.ContainsByPredicate(

@@ -51,6 +51,94 @@ namespace UnrealMcpProviderPresetTests
 		bool bHadOriginalDirectory = false;
 	};
 
+	class FConfigFileGuard
+	{
+	public:
+		explicit FConfigFileGuard(const FString& InConfigPath)
+			: ConfigPath(InConfigPath)
+			, ConfigDirectory(FPaths::GetPath(ConfigPath))
+			, bHadOriginalFile(!ConfigPath.IsEmpty() && FPaths::FileExists(ConfigPath))
+			, bHadOriginalDirectory(!ConfigDirectory.IsEmpty() && IFileManager::Get().DirectoryExists(*ConfigDirectory))
+		{
+			if (bHadOriginalFile)
+			{
+				FFileHelper::LoadFileToString(OriginalContent, *ConfigPath);
+			}
+		}
+
+		~FConfigFileGuard()
+		{
+			if (ConfigPath.IsEmpty())
+			{
+				return;
+			}
+			if (bHadOriginalFile)
+			{
+				IFileManager::Get().MakeDirectory(*FPaths::GetPath(ConfigPath), true);
+				FFileHelper::SaveStringToFile(OriginalContent, *ConfigPath);
+			}
+			else
+			{
+				IFileManager::Get().Delete(*ConfigPath, false, true, true);
+				if (!bHadOriginalDirectory && !ConfigDirectory.IsEmpty())
+				{
+					IFileManager::Get().DeleteDirectory(*ConfigDirectory, false, false);
+				}
+			}
+		}
+
+	private:
+		FString ConfigPath;
+		FString ConfigDirectory;
+		FString OriginalContent;
+		bool bHadOriginalFile = false;
+		bool bHadOriginalDirectory = false;
+	};
+
+	class FSettingsStateGuard
+	{
+	public:
+		explicit FSettingsStateGuard(UUnrealMcpSettings* InSettings)
+			: Settings(InSettings)
+		{
+			if (Settings)
+			{
+				Providers = Settings->Providers;
+				ActiveProviderId = Settings->ActiveProviderId;
+				OpenAIResponsesUrl = Settings->OpenAIResponsesUrl;
+				OpenAIApiKey = Settings->OpenAIApiKey;
+				OpenAIModel = Settings->OpenAIModel;
+				OpenAIReasoningEffort = Settings->OpenAIReasoningEffort;
+				AiMaxOutputTokens = Settings->AiMaxOutputTokens;
+			}
+		}
+
+		~FSettingsStateGuard()
+		{
+			if (!Settings)
+			{
+				return;
+			}
+			Settings->Providers = Providers;
+			Settings->ActiveProviderId = ActiveProviderId;
+			Settings->OpenAIResponsesUrl = OpenAIResponsesUrl;
+			Settings->OpenAIApiKey = OpenAIApiKey;
+			Settings->OpenAIModel = OpenAIModel;
+			Settings->OpenAIReasoningEffort = OpenAIReasoningEffort;
+			Settings->AiMaxOutputTokens = AiMaxOutputTokens;
+		}
+
+	private:
+		UUnrealMcpSettings* Settings = nullptr;
+		TArray<FAiProviderConfig> Providers;
+		FString ActiveProviderId;
+		FString OpenAIResponsesUrl;
+		FString OpenAIApiKey;
+		FString OpenAIModel;
+		FString OpenAIReasoningEffort;
+		int32 AiMaxOutputTokens = 4096;
+	};
+
 	bool DispatchProviderChainEvent(
 		FAutomationTestBase& Test,
 		UUnrealMcpSettings* Settings,
@@ -172,7 +260,7 @@ bool FUnrealMcpProviderPresetRegistryTest::RunTest(const FString& Parameters)
 			TestFalse(TEXT("Preset strings do not contain bearer tokens."), Value.Contains(TEXT("bearer"), ESearchCase::IgnoreCase));
 			TestFalse(TEXT("Preset strings do not contain secret markers."), Value.Contains(TEXT("secret"), ESearchCase::IgnoreCase));
 			TestFalse(TEXT("Preset strings do not contain token markers."), Value.Contains(TEXT("token"), ESearchCase::IgnoreCase));
-			TestFalse(TEXT("Preset strings do not contain OpenAI key prefixes."), Value.Contains(TEXT("sk-"), ESearchCase::IgnoreCase));
+			TestFalse(TEXT("Preset strings do not contain OpenAI key prefixes."), Value.Contains(FString(TEXT("sk")) + TEXT("-"), ESearchCase::IgnoreCase));
 		}
 	}
 	TestEqual(TEXT("All preset ids are unique."), SeenIds.Num(), Presets.Num());
@@ -259,6 +347,117 @@ bool FUnrealMcpProviderPresetRegistryTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpProviderPresetsIntlPresetURLsTest,
+	"UnrealMcp.ProviderPresets.IntlPresetURLs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpProviderPresetsIntlPresetURLsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	using namespace UnrealMcp::ProviderPresets;
+
+	const FProviderPreset* KimiPreset = FindProviderPresetById(TEXT("kimi"));
+	TestNotNull(TEXT("Kimi preset exists."), KimiPreset);
+	if (KimiPreset)
+	{
+		TestEqual(
+			TEXT("Kimi preset uses international BaseUrl."),
+			KimiPreset->BaseUrl,
+			FString(TEXT("https://api.moonshot.ai/v1/chat/completions")));
+	}
+
+	const FProviderPreset* GlmPreset = FindProviderPresetById(TEXT("glm"));
+	TestNotNull(TEXT("GLM preset exists."), GlmPreset);
+	if (GlmPreset)
+	{
+		TestEqual(
+			TEXT("GLM preset uses Z.ai international BaseUrl."),
+			GlmPreset->BaseUrl,
+			FString(TEXT("https://api.z.ai/api/paas/v4/chat/completions")));
+	}
+
+	const FProviderPreset* QwenPreset = FindProviderPresetById(TEXT("qwen"));
+	TestNotNull(TEXT("Qwen preset exists."), QwenPreset);
+	if (QwenPreset)
+	{
+		TestEqual(
+			TEXT("Qwen preset uses international DashScope BaseUrl."),
+			QwenPreset->BaseUrl,
+			FString(TEXT("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions")));
+	}
+
+	for (const FProviderPreset& Preset : GetAllProviderPresets())
+	{
+		if (!Preset.BaseUrl.IsEmpty())
+		{
+			TestFalse(
+				FString::Printf(TEXT("Preset '%s' BaseUrl does not use a .cn endpoint."), *Preset.Id),
+				Preset.BaseUrl.Contains(TEXT(".cn"), ESearchCase::IgnoreCase));
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpProviderPresetsLegacyOpenAIMigrationTest,
+	"UnrealMcp.ProviderPresets.LegacyOpenAIMigration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpProviderPresetsLegacyOpenAIMigrationTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	UnrealMcpProviderPresetTests::FProviderBackupFileGuard BackupGuard;
+	UUnrealMcpSettings* Settings = GetMutableDefault<UUnrealMcpSettings>();
+	TestNotNull(TEXT("Mutable default settings object is available."), Settings);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	UnrealMcpProviderPresetTests::FConfigFileGuard ConfigGuard(Settings->GetDefaultConfigFilename());
+	UnrealMcpProviderPresetTests::FSettingsStateGuard SettingsGuard(Settings);
+
+	Settings->Providers.Reset();
+	Settings->ActiveProviderId.Reset();
+	Settings->OpenAIApiKey = TEXT("legacy-test-api-key");
+	Settings->OpenAIResponsesUrl = TEXT("https://test.example/v1/responses");
+	Settings->OpenAIModel = TEXT("gpt-test");
+	Settings->OpenAIReasoningEffort = TEXT("high");
+
+	TestEqual(TEXT("Legacy migration starts with no providers."), Settings->Providers.Num(), 0);
+
+	Settings->ApplyLegacyOpenAIMigration_IfNeeded();
+
+	TestEqual(TEXT("Legacy migration creates one provider."), Settings->Providers.Num(), 1);
+	if (Settings->Providers.Num() == 1)
+	{
+		const FAiProviderConfig& Provider = Settings->Providers[0];
+		TestEqual(TEXT("Migrated provider id."), Provider.Id, FString(TEXT("openai-default")));
+		TestEqual(TEXT("Migrated provider display name."), Provider.DisplayName, FString(TEXT("OpenAI (migrated)")));
+		TestEqual(TEXT("Migrated provider kind."), static_cast<uint8>(Provider.Kind), static_cast<uint8>(EAiProviderKind::OpenAiResponses));
+		TestEqual(TEXT("Migrated provider preset id."), Provider.PresetId, FString(TEXT("openai-responses")));
+		TestEqual(TEXT("Migrated provider API key."), Provider.ApiKey, FString(TEXT("legacy-test-api-key")));
+		TestEqual(TEXT("Migrated provider BaseUrl."), Provider.BaseUrl, FString(TEXT("https://test.example/v1/responses")));
+		TestEqual(TEXT("Migrated provider model."), Provider.Model, FString(TEXT("gpt-test")));
+		TestEqual(TEXT("Migrated provider reasoning effort."), Provider.ReasoningEffort, FString(TEXT("high")));
+	}
+	TestEqual(TEXT("Legacy migration selects migrated provider."), Settings->ActiveProviderId, FString(TEXT("openai-default")));
+
+	Settings->ApplyLegacyOpenAIMigration_IfNeeded();
+
+	TestEqual(TEXT("Legacy migration is idempotent."), Settings->Providers.Num(), 1);
+	if (Settings->Providers.Num() == 1)
+	{
+		TestEqual(TEXT("Legacy migration keeps migrated provider id."), Settings->Providers[0].Id, FString(TEXT("openai-default")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealMcpProviderPresetNestedChainEventTest,
 	"UnrealMcp.ProviderPresets.NestedChainEvent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -293,7 +492,7 @@ bool FUnrealMcpProviderPresetNestedChainEventTest::RunTest(const FString& Parame
 	TestEqual(
 		TEXT("PresetId chain event fills Kimi BaseUrl."),
 		Settings->Providers[0].BaseUrl,
-		FString(TEXT("https://api.moonshot.cn/v1/chat/completions")));
+		FString(TEXT("https://api.moonshot.ai/v1/chat/completions")));
 	TestEqual(
 		TEXT("PresetId chain event fills Kimi Model."),
 		Settings->Providers[0].Model,

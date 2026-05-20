@@ -194,6 +194,18 @@ v0.24.1 修复 Project Settings 中 Provider `PresetId` / `Kind` 自动填充。
 chain event, 确保 preset 选择拿到正确数组索引、填充对应 provider 行并写入
 provider backup。新增 synthetic chain-event automation test 覆盖该回归。
 
+##### v0.24.2 hotfix: Provider preset international endpoints
+
+v0.24.2 隐藏四个 deprecated legacy `OpenAI*` Project Settings 字段, 但仍保留
+`Config` 反序列化和 legacy INI migration. Kimi / GLM / Qwen preset 现在默认
+使用 international endpoints: Kimi `https://api.moonshot.ai/v1/chat/completions`,
+GLM/Zhipu `https://api.z.ai/api/paas/v4/chat/completions`, Qwen
+`https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`.
+`Z.ai` 是 Zhipu/GLM 的 international endpoint / rebrand, 所以 GLM 不再默认指向
+`open.bigmodel.cn`. 升级时已有 provider 的 saved `BaseUrl` 会保留; 若要把
+v0.24.0/v0.24.1 的 provider 切到 international default, 请清空并重新选择 preset,
+或手动编辑 `BaseUrl`.
+
 | Preset | Default Model |
 |---|---|
 | Custom OpenAI-compatible | empty/manual |
@@ -456,6 +468,19 @@ handles that chain event directly so preset selection receives the correct array
 index, fills the selected provider row, and writes the provider backup. A
 synthetic chain-event automation test covers the regression.
 
+##### v0.24.2 hotfix: Provider preset international endpoints
+
+v0.24.2 hides the four deprecated legacy `OpenAI*` Project Settings fields from
+the UI while preserving `Config` deserialization and legacy INI migration. Kimi
+/ GLM / Qwen presets now default to international endpoints: Kimi
+`https://api.moonshot.ai/v1/chat/completions`, GLM/Zhipu
+`https://api.z.ai/api/paas/v4/chat/completions`, and Qwen
+`https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`.
+`Z.ai` is Zhipu/GLM's international endpoint and rebrand, so GLM no longer
+defaults to `open.bigmodel.cn`. Existing saved provider `BaseUrl` values are
+preserved on upgrade; to switch an existing v0.24.0/v0.24.1 provider to the
+intl defaults, clear and re-pick the preset or manually edit `BaseUrl`.
+
 | Preset | Default Model |
 |---|---|
 | Custom OpenAI-compatible | empty/manual |
@@ -714,6 +739,19 @@ v0.24.1 では Project Settings の Provider `PresetId` / `Kind` 自動入力を
 hotfix はその chain event を直接処理し、preset 選択が正しい配列 index を受け取り、
 選択した provider 行を埋めて provider backup を書きます。synthetic chain-event
 automation test でこの回帰をカバーします。
+
+##### v0.24.2 hotfix: Provider preset international endpoints
+
+v0.24.2 では deprecated legacy `OpenAI*` Project Settings 4 項目を UI から隠し、
+`Config` deserialization と legacy INI migration は維持します。Kimi / GLM / Qwen
+preset は international endpoints を default にします: Kimi
+`https://api.moonshot.ai/v1/chat/completions`, GLM/Zhipu
+`https://api.z.ai/api/paas/v4/chat/completions`, Qwen
+`https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`.
+`Z.ai` は Zhipu/GLM の international endpoint / rebrand なので、GLM は
+`open.bigmodel.cn` を default にしません。upgrade 時、既存 provider の saved
+`BaseUrl` は保持されます。v0.24.0/v0.24.1 既存 provider を intl default に切り替えるには、
+preset を clear して選び直すか、`BaseUrl` を手動編集してください。
 
 | Preset | Default Model |
 |---|---|

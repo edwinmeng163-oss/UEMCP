@@ -108,16 +108,16 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Id of the provider currently used by the chat panel and /ask. Must match one of Providers[].Id."))
 	FString ActiveProviderId;
 
-	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Responses API endpoint URL. Leave the default for OpenAI unless you are targeting a compatible gateway.", DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
+	UPROPERTY(Config, meta=(DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
 	FString OpenAIResponsesUrl = TEXT("https://api.openai.com/v1/responses");
 
-	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="API key used for the AI assistant.", PasswordField=true, DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
+	UPROPERTY(Config, meta=(PasswordField=true, DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
 	FString OpenAIApiKey;
 
-	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Model used for in-editor AI chat.", DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
+	UPROPERTY(Config, meta=(DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
 	FString OpenAIModel = TEXT("gpt-5.1");
 
-	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Reasoning effort for GPT-5/o-series models. Use minimal, low, medium, or high. Leave empty to omit.", DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
+	UPROPERTY(Config, meta=(DeprecatedProperty, DeprecationMessage="Use Providers[] + ActiveProviderId instead. This field will be removed in a future version."))
 	FString OpenAIReasoningEffort = TEXT("medium");
 
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ClampMin="1", ClampMax="24", ToolTip="Maximum number of model->tool->model iterations allowed for one /ask request."))
@@ -135,7 +135,11 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(MultiLine=true, ToolTip="Optional additional instructions appended to the built-in assistant prompt."))
 	FString AssistantSystemPrompt;
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FUnrealMcpProviderPresetsLegacyOpenAIMigrationTest;
+#endif
 	static const TCHAR* const BackupFileRelativePath;
+	void ApplyLegacyOpenAIMigration_IfNeeded();
 	void WriteProvidersBackup() const;
 	bool LoadProvidersBackup();
 #if WITH_EDITOR
