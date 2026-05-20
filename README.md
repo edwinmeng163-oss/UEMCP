@@ -4,6 +4,11 @@
 
 # UEAtelier
 
+[![Latest release](https://img.shields.io/github/v/release/edwinmeng163-oss/UEAtelier)](https://github.com/edwinmeng163-oss/UEAtelier/releases)
+[![License](https://img.shields.io/github/license/edwinmeng163-oss/UEAtelier)](LICENSE)
+[![Languages](https://img.shields.io/github/languages/top/edwinmeng163-oss/UEAtelier)](https://github.com/edwinmeng163-oss/UEAtelier)
+[![Release-package CI](https://github.com/edwinmeng163-oss/UEAtelier/actions/workflows/win-release-package.yml/badge.svg)](https://github.com/edwinmeng163-oss/UEAtelier/actions/workflows/win-release-package.yml)
+
 **Unreal Editor MCP Self-Extension Workbench**
 
 AI agents should read [AGENTS.md](AGENTS.md) first. It is the canonical handoff
@@ -48,7 +53,15 @@ variants following as collaborators verify them.
 For a quick start, read `Docs/Release-2026-05.md`, then `AGENTS.md`, then the
 Deployment section later in this README.
 
+Demo gallery: see [Demo/README.md](Demo/README.md).
+Contribute: pick a template under [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/).
+
 ## 中文概览
+
+[![Latest release](https://img.shields.io/github/v/release/edwinmeng163-oss/UEAtelier)](https://github.com/edwinmeng163-oss/UEAtelier/releases)
+[![License](https://img.shields.io/github/license/edwinmeng163-oss/UEAtelier)](LICENSE)
+[![Languages](https://img.shields.io/github/languages/top/edwinmeng163-oss/UEAtelier)](https://github.com/edwinmeng163-oss/UEAtelier)
+[![Release-package CI](https://github.com/edwinmeng163-oss/UEAtelier/actions/workflows/win-release-package.yml/badge.svg)](https://github.com/edwinmeng163-oss/UEAtelier/actions/workflows/win-release-package.yml)
 
 UEAtelier 是一个面向 Unreal Editor 5.6 / 5.7 的 MCP 自扩展工作台。
 
@@ -78,7 +91,15 @@ plugin；Windows 和其他引擎版本会在协作者验证后继续跟进。
 快速开始请先阅读 `Docs/Release-2026-05.md`，再读 `AGENTS.md`，然后参考本
 README 后面的 Deployment 部分。
 
+Demo 库：见 [Demo/README.md](Demo/README.md)。
+参与贡献：见 [Issue templates](.github/ISSUE_TEMPLATE/) 任选模板提 issue。
+
 ## 日本語概要
+
+[![Latest release](https://img.shields.io/github/v/release/edwinmeng163-oss/UEAtelier)](https://github.com/edwinmeng163-oss/UEAtelier/releases)
+[![License](https://img.shields.io/github/license/edwinmeng163-oss/UEAtelier)](LICENSE)
+[![Languages](https://img.shields.io/github/languages/top/edwinmeng163-oss/UEAtelier)](https://github.com/edwinmeng163-oss/UEAtelier)
+[![Release-package CI](https://github.com/edwinmeng163-oss/UEAtelier/actions/workflows/win-release-package.yml/badge.svg)](https://github.com/edwinmeng163-oss/UEAtelier/actions/workflows/win-release-package.yml)
 
 UEAtelier は Unreal Editor 5.6 / 5.7 向けの MCP self-extension workbench です。
 
@@ -108,6 +129,9 @@ dual-engine drop-in plugin であり、Windows と他の engine variants は
 
 quick start には `Docs/Release-2026-05.md`、続いて `AGENTS.md`、さらにこの
 README 後半の Deployment section を参照してください。
+
+デモギャラリー：[Demo/README.md](Demo/README.md) を参照。
+コントリビュート：[.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) のテンプレートから issue を作成してください。
 
 ## Current Status
 
