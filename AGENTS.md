@@ -107,7 +107,9 @@ Tools/UEAtelierCli/
 Tools/UnrealMcpCodexBridge/, Tools/UnrealMcpKnowledge/
 Tools/UnrealMcpSkills/, Tools/UnrealMcpTests/
 Tools/UnrealMcpToolRegistry/, Tools/UnrealMcpToolScaffoldStarters/
+Tools/UnrealMcpToolDocs/
 Tools/UnrealMcpSupervisorTemplates/
+Tools/extract_tool_schemas.py, Tools/generate_tool_docs.py
 Tools/install_unrealmcp_to_project.py, Tools/validate_tool_registry.py
 Tools/unreal_mcp_fetch_docs.py, Tools/unreal_mcp_stdio_proxy.py
 Tools/unreal_mcp_supervisor.py
