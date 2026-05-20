@@ -275,63 +275,102 @@ void UUnrealMcpSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	const FName PropertyName = PropertyChangedEvent.Property ? PropertyChangedEvent.Property->GetFName() : NAME_None;
 	const FName MemberPropertyName = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
-	const FString PropertyNameString = PropertyName.ToString();
-	const FString MemberPropertyNameString = MemberPropertyName.ToString();
 
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FAiProviderConfig, PresetId))
-	{
-		const int32 ArrayIndex = PropertyChangedEvent.GetArrayIndex(TEXT("Providers"));
-		if (Providers.IsValidIndex(ArrayIndex))
-		{
-			FAiProviderConfig& Entry = Providers[ArrayIndex];
-			if (const UnrealMcp::ProviderPresets::FProviderPreset* Preset =
-				UnrealMcp::ProviderPresets::FindProviderPresetById(Entry.PresetId))
-			{
-				UnrealMcp::ProviderPresets::ApplyProviderPreset(
-					Entry,
-					*Preset,
-					UnrealMcp::ProviderPresets::EProviderPresetApplyMode::ExplicitPresetSelection);
-			}
-		}
-	}
-
-	// Auto-fill canonical BaseUrl / Model / CodexBinaryPath when the user
-	// changes Kind on a provider entry. Only fills empty fields, never
-	// overwrites user input. This makes onboarding a new provider a
-	// one-dropdown action for the common cases (OpenAI / Anthropic / Codex).
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FAiProviderConfig, Kind))
-	{
-		const int32 ArrayIndex = PropertyChangedEvent.GetArrayIndex(TEXT("Providers"));
-		if (Providers.IsValidIndex(ArrayIndex))
-		{
-			FAiProviderConfig& Entry = Providers[ArrayIndex];
-			if (const UnrealMcp::ProviderPresets::FProviderPreset* Preset =
-				UnrealMcp::ProviderPresets::FindDefaultProviderPresetForKind(Entry.Kind))
-			{
-				UnrealMcp::ProviderPresets::ApplyProviderPreset(
-					Entry,
-					*Preset,
-					UnrealMcp::ProviderPresets::EProviderPresetApplyMode::FillEmpty);
-			}
-
-			if (Entry.Kind == EAiProviderKind::OpenAiChatCompat)
-			{
-				// Multi-vendor (Kimi / GLM / DeepSeek / Qwen / Ollama). Provide a
-				// non-functional placeholder URL that flags the user must edit it.
-				if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://<vendor-host>/v1/chat/completions");
-				if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("OpenAI-Compatible (edit BaseUrl + Model)");
-				if (Entry.Id.IsEmpty()) Entry.Id = TEXT("openai-compat");
-			}
-		}
-	}
+	TryApplyPresetForProviderChange(PropertyChangedEvent);
 
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, ActiveProviderId)
 		|| MemberPropertyName == GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, ActiveProviderId)
-		|| PropertyNameString.Contains(TEXT("Provider"))
-		|| MemberPropertyNameString.Contains(TEXT("Provider")))
+		|| IsProvidersChangeEvent(PropertyChangedEvent))
 	{
 		WriteProvidersBackup();
 	}
+}
+
+void UUnrealMcpSettings::PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeChainProperty(PropertyChangedEvent);
+	TryApplyPresetForProviderChange(PropertyChangedEvent);
+	if (IsProvidersChangeEvent(PropertyChangedEvent))
+	{
+		WriteProvidersBackup();
+	}
+}
+
+bool UUnrealMcpSettings::TryApplyPresetForProviderChange(const FPropertyChangedEvent& Event)
+{
+	const FName PropertyName = Event.Property ? Event.Property->GetFName() : NAME_None;
+	const int32 ArrayIndex = Event.GetArrayIndex(TEXT("Providers"));
+	if (!Providers.IsValidIndex(ArrayIndex))
+	{
+		return false;
+	}
+
+	FAiProviderConfig& Entry = Providers[ArrayIndex];
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FAiProviderConfig, PresetId))
+	{
+		if (const UnrealMcp::ProviderPresets::FProviderPreset* Preset =
+			UnrealMcp::ProviderPresets::FindProviderPresetById(Entry.PresetId))
+		{
+			return UnrealMcp::ProviderPresets::ApplyProviderPreset(
+				Entry,
+				*Preset,
+				UnrealMcp::ProviderPresets::EProviderPresetApplyMode::ExplicitPresetSelection);
+		}
+
+		return false;
+	}
+
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FAiProviderConfig, Kind))
+	{
+		bool bChanged = false;
+		if (Entry.Kind == EAiProviderKind::OpenAiChatCompat)
+		{
+			// Multi-vendor (Kimi / GLM / DeepSeek / Qwen / Ollama). Provide a
+			// non-functional placeholder URL that flags the user must edit it.
+			if (Entry.BaseUrl.IsEmpty())
+			{
+				Entry.BaseUrl = TEXT("https://<vendor-host>/v1/chat/completions");
+				bChanged = true;
+			}
+			if (Entry.DisplayName.IsEmpty())
+			{
+				Entry.DisplayName = TEXT("OpenAI-Compatible (edit BaseUrl + Model)");
+				bChanged = true;
+			}
+			if (Entry.Id.IsEmpty())
+			{
+				Entry.Id = TEXT("openai-compat");
+				bChanged = true;
+			}
+		}
+
+		if (const UnrealMcp::ProviderPresets::FProviderPreset* Preset =
+			UnrealMcp::ProviderPresets::FindDefaultProviderPresetForKind(Entry.Kind))
+		{
+			bChanged |= UnrealMcp::ProviderPresets::ApplyProviderPreset(
+				Entry,
+				*Preset,
+				UnrealMcp::ProviderPresets::EProviderPresetApplyMode::FillEmpty);
+		}
+
+		return bChanged;
+	}
+
+	return false;
+}
+
+bool UUnrealMcpSettings::IsProvidersChangeEvent(const FPropertyChangedEvent& Event) const
+{
+	const FName PropertyName = Event.Property ? Event.Property->GetFName() : NAME_None;
+	const FName MemberPropertyName = Event.MemberProperty ? Event.MemberProperty->GetFName() : NAME_None;
+	const FString PropertyNameString = PropertyName.ToString();
+	const FString MemberPropertyNameString = MemberPropertyName.ToString();
+
+	return Event.GetArrayIndex(TEXT("Providers")) != INDEX_NONE
+		|| PropertyName == GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, Providers)
+		|| MemberPropertyName == GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, Providers)
+		|| PropertyNameString.Contains(TEXT("Provider"))
+		|| MemberPropertyNameString.Contains(TEXT("Provider"));
 }
 #endif
 

@@ -1,7 +1,112 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "UnrealMcpProviderPresets.h"
+#include "UnrealMcpSettings.h"
+#include "UObject/Package.h"
+#include "UObject/UnrealType.h"
+
+namespace UnrealMcpProviderPresetTests
+{
+	class FProviderBackupFileGuard
+	{
+	public:
+		FProviderBackupFileGuard()
+			: BackupPath(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp/providers.backup.json")))
+			, BackupDirectory(FPaths::GetPath(BackupPath))
+			, bHadOriginalFile(FPaths::FileExists(BackupPath))
+			, bHadOriginalDirectory(IFileManager::Get().DirectoryExists(*BackupDirectory))
+		{
+			if (bHadOriginalFile)
+			{
+				FFileHelper::LoadFileToString(OriginalContent, *BackupPath);
+			}
+		}
+
+		~FProviderBackupFileGuard()
+		{
+			if (bHadOriginalFile)
+			{
+				IFileManager::Get().MakeDirectory(*FPaths::GetPath(BackupPath), true);
+				FFileHelper::SaveStringToFile(OriginalContent, *BackupPath);
+			}
+			else
+			{
+				IFileManager::Get().Delete(*BackupPath, false, true, true);
+				if (!bHadOriginalDirectory)
+				{
+					IFileManager::Get().DeleteDirectory(*BackupDirectory, false, false);
+				}
+			}
+		}
+
+	private:
+		FString BackupPath;
+		FString BackupDirectory;
+		FString OriginalContent;
+		bool bHadOriginalFile = false;
+		bool bHadOriginalDirectory = false;
+	};
+
+	bool DispatchProviderChainEvent(
+		FAutomationTestBase& Test,
+		UUnrealMcpSettings* Settings,
+		const FName LeafPropertyName,
+		const bool bSetProviderArrayIndex)
+	{
+		FProperty* ProvidersProperty = FindFProperty<FProperty>(
+			UUnrealMcpSettings::StaticClass(),
+			GET_MEMBER_NAME_CHECKED(UUnrealMcpSettings, Providers));
+		if (!ProvidersProperty)
+		{
+			Test.AddError(TEXT("Providers property exists."));
+			return false;
+		}
+
+		FProperty* LeafProperty = FindFProperty<FProperty>(
+			FAiProviderConfig::StaticStruct(),
+			LeafPropertyName);
+		if (!LeafProperty)
+		{
+			Test.AddError(FString::Printf(TEXT("Leaf property '%s' exists."), *LeafPropertyName.ToString()));
+			return false;
+		}
+
+		FEditPropertyChain Chain;
+		Chain.AddTail(ProvidersProperty);
+		Chain.AddTail(LeafProperty);
+		if (!Chain.SetActiveMemberPropertyNode(ProvidersProperty))
+		{
+			Test.AddError(TEXT("Providers property is the active member property."));
+			return false;
+		}
+		if (!Chain.SetActivePropertyNode(LeafProperty))
+		{
+			Test.AddError(TEXT("Leaf property is the active property."));
+			return false;
+		}
+
+		FPropertyChangedEvent Event(LeafProperty, EPropertyChangeType::ValueSet);
+		Event.SetActiveMemberProperty(ProvidersProperty);
+		Event.ObjectIteratorIndex = 0;
+
+		TArray<TMap<FString, int32>> ArrayIndexPerObject;
+		ArrayIndexPerObject.AddDefaulted();
+		if (bSetProviderArrayIndex)
+		{
+			ArrayIndexPerObject[0].Add(TEXT("Providers"), 0);
+		}
+		Event.SetArrayIndexPerObject(ArrayIndexPerObject);
+
+		FPropertyChangedChainEvent ChainEvent(Chain, Event);
+		ChainEvent.ObjectIteratorIndex = 0;
+		Settings->PostEditChangeChainProperty(ChainEvent);
+		return true;
+	}
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealMcpProviderPresetRegistryTest,
@@ -149,6 +254,156 @@ bool FUnrealMcpProviderPresetRegistryTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Applying no preset preserves BaseUrl."), ManualConfig.BaseUrl, BeforeNoPreset.BaseUrl);
 	TestEqual(TEXT("Applying no preset preserves Model."), ManualConfig.Model, BeforeNoPreset.Model);
 	TestEqual(TEXT("Applying no preset preserves ApiKey."), ManualConfig.ApiKey, BeforeNoPreset.ApiKey);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpProviderPresetNestedChainEventTest,
+	"UnrealMcp.ProviderPresets.NestedChainEvent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpProviderPresetNestedChainEventTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	UnrealMcpProviderPresetTests::FProviderBackupFileGuard BackupGuard;
+	UUnrealMcpSettings* Settings = NewObject<UUnrealMcpSettings>(GetTransientPackage());
+	TestNotNull(TEXT("Transient settings object is created."), Settings);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	Settings->Providers.Reset();
+	FAiProviderConfig& PresetProvider = Settings->Providers.AddDefaulted_GetRef();
+	PresetProvider.PresetId = TEXT("kimi");
+	PresetProvider.BaseUrl.Empty();
+	PresetProvider.Model.Empty();
+	PresetProvider.DisplayName.Empty();
+	PresetProvider.ApiKey = TEXT("test-key-sentinel-001");
+
+	TestTrue(
+		TEXT("PresetId chain event dispatches."),
+		UnrealMcpProviderPresetTests::DispatchProviderChainEvent(
+			*this,
+			Settings,
+			GET_MEMBER_NAME_CHECKED(FAiProviderConfig, PresetId),
+			true));
+	TestEqual(
+		TEXT("PresetId chain event fills Kimi BaseUrl."),
+		Settings->Providers[0].BaseUrl,
+		FString(TEXT("https://api.moonshot.cn/v1/chat/completions")));
+	TestEqual(
+		TEXT("PresetId chain event fills Kimi Model."),
+		Settings->Providers[0].Model,
+		FString(TEXT("moonshot-v1-8k")));
+	TestEqual(
+		TEXT("PresetId chain event fills Kimi DisplayName."),
+		Settings->Providers[0].DisplayName,
+		FString(TEXT("Kimi (Moonshot)")));
+	TestEqual(
+		TEXT("PresetId chain event preserves ApiKey."),
+		Settings->Providers[0].ApiKey,
+		FString(TEXT("test-key-sentinel-001")));
+
+	Settings->Providers.Reset();
+	FAiProviderConfig& KindProvider = Settings->Providers.AddDefaulted_GetRef();
+	KindProvider.Kind = EAiProviderKind::OpenAiChatCompat;
+	KindProvider.Id.Empty();
+	KindProvider.DisplayName.Empty();
+	KindProvider.BaseUrl.Empty();
+	KindProvider.Model.Empty();
+
+	TestTrue(
+		TEXT("Kind chain event dispatches."),
+		UnrealMcpProviderPresetTests::DispatchProviderChainEvent(
+			*this,
+			Settings,
+			GET_MEMBER_NAME_CHECKED(FAiProviderConfig, Kind),
+			true));
+	TestEqual(
+		TEXT("Kind chain event fills OpenAI-compatible placeholder BaseUrl."),
+		Settings->Providers[0].BaseUrl,
+		FString(TEXT("https://<vendor-host>/v1/chat/completions")));
+	TestEqual(
+		TEXT("Kind chain event fills OpenAI-compatible placeholder DisplayName."),
+		Settings->Providers[0].DisplayName,
+		FString(TEXT("OpenAI-Compatible (edit BaseUrl + Model)")));
+	TestEqual(
+		TEXT("Kind chain event fills OpenAI-compatible placeholder Id."),
+		Settings->Providers[0].Id,
+		FString(TEXT("openai-compat")));
+
+	Settings->Providers.Reset();
+	FAiProviderConfig& InvalidIndexProvider = Settings->Providers.AddDefaulted_GetRef();
+	InvalidIndexProvider.PresetId = TEXT("kimi");
+	InvalidIndexProvider.Id = TEXT("invalid-index-id");
+	InvalidIndexProvider.DisplayName = TEXT("invalid-index-display");
+	InvalidIndexProvider.BaseUrl = TEXT("https://invalid-index.example/v1/chat/completions");
+	InvalidIndexProvider.Model = TEXT("invalid-index-model");
+	InvalidIndexProvider.ApiKey = TEXT("invalid-index-key");
+
+	TestTrue(
+		TEXT("Invalid-index chain event dispatches."),
+		UnrealMcpProviderPresetTests::DispatchProviderChainEvent(
+			*this,
+			Settings,
+			GET_MEMBER_NAME_CHECKED(FAiProviderConfig, PresetId),
+			false));
+	TestEqual(
+		TEXT("Invalid-index chain event preserves Id."),
+		Settings->Providers[0].Id,
+		FString(TEXT("invalid-index-id")));
+	TestEqual(
+		TEXT("Invalid-index chain event preserves DisplayName."),
+		Settings->Providers[0].DisplayName,
+		FString(TEXT("invalid-index-display")));
+	TestEqual(
+		TEXT("Invalid-index chain event preserves BaseUrl."),
+		Settings->Providers[0].BaseUrl,
+		FString(TEXT("https://invalid-index.example/v1/chat/completions")));
+	TestEqual(
+		TEXT("Invalid-index chain event preserves Model."),
+		Settings->Providers[0].Model,
+		FString(TEXT("invalid-index-model")));
+	TestEqual(
+		TEXT("Invalid-index chain event preserves ApiKey."),
+		Settings->Providers[0].ApiKey,
+		FString(TEXT("invalid-index-key")));
+
+	Settings->Providers.Reset();
+	FAiProviderConfig& ModelProvider = Settings->Providers.AddDefaulted_GetRef();
+	ModelProvider.PresetId = TEXT("kimi");
+	ModelProvider.Kind = EAiProviderKind::OpenAiChatCompat;
+	ModelProvider.Id = TEXT("model-change-id");
+	ModelProvider.DisplayName = TEXT("model-change-display");
+	ModelProvider.BaseUrl = TEXT("https://model-change.example/v1/chat/completions");
+	ModelProvider.Model = TEXT("model-change-model");
+
+	TestTrue(
+		TEXT("Model chain event dispatches."),
+		UnrealMcpProviderPresetTests::DispatchProviderChainEvent(
+			*this,
+			Settings,
+			GET_MEMBER_NAME_CHECKED(FAiProviderConfig, Model),
+			true));
+	TestEqual(
+		TEXT("Model chain event does not overwrite Id."),
+		Settings->Providers[0].Id,
+		FString(TEXT("model-change-id")));
+	TestEqual(
+		TEXT("Model chain event does not overwrite DisplayName."),
+		Settings->Providers[0].DisplayName,
+		FString(TEXT("model-change-display")));
+	TestEqual(
+		TEXT("Model chain event does not overwrite BaseUrl."),
+		Settings->Providers[0].BaseUrl,
+		FString(TEXT("https://model-change.example/v1/chat/completions")));
+	TestEqual(
+		TEXT("Model chain event does not overwrite Model."),
+		Settings->Providers[0].Model,
+		FString(TEXT("model-change-model")));
 
 	return true;
 }

@@ -4,6 +4,8 @@
 #include "Engine/DeveloperSettings.h"
 #include "UnrealMcpSettings.generated.h"
 
+struct FPropertyChangedChainEvent;
+
 UENUM()
 enum class EAiProviderKind : uint8
 {
@@ -70,6 +72,7 @@ public:
 	virtual FText GetSectionText() const override;
 	virtual FText GetSectionDescription() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent) override;
 #endif
 	const FAiProviderConfig* FindActiveProvider() const;
 
@@ -135,4 +138,8 @@ private:
 	static const TCHAR* const BackupFileRelativePath;
 	void WriteProvidersBackup() const;
 	bool LoadProvidersBackup();
+#if WITH_EDITOR
+	bool TryApplyPresetForProviderChange(const FPropertyChangedEvent& Event);
+	bool IsProvidersChangeEvent(const FPropertyChangedEvent& Event) const;
+#endif
 };
