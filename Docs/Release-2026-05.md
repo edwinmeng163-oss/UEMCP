@@ -183,6 +183,10 @@ Model           = claude-sonnet-4-6
 
 Phase 1 增加 provider preset 的数据和 Project Settings UI 支持。`PresetId` 记录选中的 preset；空 `PresetId` 或 `custom-openai-chat` 仍可用于手动 OpenAI-compatible provider。各 vendor 的 dispatcher 细节留到 Phase 2。
 
+##### Phase 2: Kimi reasoning_content
+
+Phase 2 先加入 Kimi / Moonshot chat-compatible `reasoning_content` handler. 它会累积 streamed `reasoning_content`, 并在 assistant tool-call continuation message 中回填同样文本; 空 `PresetId`, `custom-openai-chat` 和其他 OpenAI-compatible provider 保持不变. DeepSeek / GLM / Qwen / Ollama quirks 仍然 deferred; DeepSeek 不按同形处理, 因为 DeepSeek-reasoner 的 input contract 相反: input message 中包含 `reasoning_content` 会返回 400, 且不支持 function calling.
+
 | Preset | Default Model |
 |---|---|
 | Custom OpenAI-compatible | empty/manual |
@@ -433,6 +437,10 @@ Model       = claude-sonnet-4-6
 
 Phase 1 adds data and Project Settings UI support for provider presets. `PresetId` records the selected preset; empty `PresetId` or `custom-openai-chat` remains valid for manual OpenAI-compatible providers. Vendor-specific dispatcher quirks are deferred to Phase 2.
 
+##### Phase 2: Kimi reasoning_content
+
+Phase 2 adds only the Kimi / Moonshot chat-compatible `reasoning_content` handler. It accumulates streamed `reasoning_content` and echoes it into the assistant tool-call continuation message; empty `PresetId`, `custom-openai-chat`, and other OpenAI-compatible providers remain unchanged. DeepSeek / GLM / Qwen / Ollama quirks remain deferred; DeepSeek is intentionally not treated as same-shape because DeepSeek-reasoner has the opposite input contract: `reasoning_content` in input messages returns 400, and function calling is unsupported.
+
 | Preset | Default Model |
 |---|---|
 | Custom OpenAI-compatible | empty/manual |
@@ -679,6 +687,10 @@ Model       = claude-sonnet-4-6
 #### Provider presets
 
 Phase 1 では provider preset のデータと Project Settings UI を追加します。`PresetId` は選択した preset を記録します。空の `PresetId` または `custom-openai-chat` は、手動の OpenAI-compatible provider として引き続き有効です。vendor 固有の dispatcher quirks は Phase 2 で対応します。
+
+##### Phase 2: Kimi reasoning_content
+
+Phase 2 では Kimi / Moonshot chat-compatible `reasoning_content` handler のみを追加します. streamed `reasoning_content` を累積し, assistant tool-call continuation message に同じ text を戻します. 空の `PresetId`, `custom-openai-chat`, その他の OpenAI-compatible provider は変更しません. DeepSeek / GLM / Qwen / Ollama quirks は deferred のままです. DeepSeek は同形として扱いません. DeepSeek-reasoner は input contract が逆で, input message に `reasoning_content` があると 400 を返し, function calling も unsupported です.
 
 | Preset | Default Model |
 |---|---|

@@ -1,4 +1,5 @@
 #include "Providers/OpenAiChatCompletionsProvider.h"
+#include "Providers/ChatCompatQuirks/IChatCompatQuirkHandler.h"
 #include "Providers/ProviderHelpers.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
@@ -70,6 +71,7 @@ namespace
 			CachedSettings.AiRequestTimeoutSeconds = Settings->AiRequestTimeoutSeconds;
 			CachedSettings.AiRequestActivityTimeoutSeconds = Settings->AiRequestActivityTimeoutSeconds;
 			CachedSettings.AssistantSystemPrompt = Settings->AssistantSystemPrompt;
+			QuirkHandler = UnrealMcp::ChatCompat::MakeChatCompatQuirkHandler(Config);
 			if (!CachedSettings.bEnableAiAssistant)
 			{
 				Finish(TEXT("AI assistant is disabled. Enable it in Project Settings > Plugins > Unreal MCP > AI."), true);
@@ -190,6 +192,7 @@ namespace
 			StreamFailureMessage.Reset();
 			StreamToolCalls.Reset();
 			AccumulatedAssistantText.Reset();
+			AccumulatedReasoningContent.Reset();
 			bToolCallsFinished = false;
 		}
 		void SendModelRequest()
@@ -206,6 +209,10 @@ namespace
 			Payload->SetBoolField(TEXT("stream"), true);
 			Payload->SetNumberField(TEXT("max_tokens"), CachedSettings.AiMaxOutputTokens);
 			AddReasoningEffortIfSupported(Payload);
+			if (QuirkHandler)
+			{
+				QuirkHandler->OnBuildRequestPayload(Payload.ToSharedRef());
+			}
 			StartHttpRequest(UnrealMcp::JsonObjectToString(Payload));
 		}
 		void AddReasoningEffortIfSupported(const TSharedPtr<FJsonObject>& Payload) const
@@ -308,6 +315,10 @@ namespace
 			{
 				for (int32 FallbackIndex = 0; FallbackIndex < ToolCalls->Num(); ++FallbackIndex) { AccumulateToolCall((*ToolCalls)[FallbackIndex], FallbackIndex); }
 			}
+			if (QuirkHandler)
+			{
+				QuirkHandler->OnDelta(*Delta, AccumulatedReasoningContent);
+			}
 		}
 		void AccumulateToolCall(const TSharedPtr<FJsonValue>& ToolCallValue, int32 FallbackIndex)
 		{
@@ -379,6 +390,10 @@ namespace
 			}
 			TSharedPtr<FJsonObject> AssistantMessage = ChatMessage(TEXT("assistant"), AccumulatedAssistantText);
 			AssistantMessage->SetArrayField(TEXT("tool_calls"), AssistantToolCalls);
+			if (QuirkHandler)
+			{
+				QuirkHandler->OnBuildAssistantToolCallsMessage(AssistantMessage.ToSharedRef(), AccumulatedReasoningContent);
+			}
 			Messages.Add(AssistantMessage);
 			for (const TSharedPtr<FJsonObject>& ToolMessage : ToolMessages) { Messages.Add(ToolMessage); }
 			SendModelRequest();
@@ -480,6 +495,7 @@ namespace
 		TFunction<void(const FUnrealMcpAssistantEvent&)> OnEvent;
 		TFunction<void(const FUnrealMcpAssistantTurnResult&)> OnComplete;
 		UnrealMcp::FUnrealMcpAssistantSettingsCache CachedSettings;
+		TUniquePtr<UnrealMcp::ChatCompat::IChatCompatQuirkHandler> QuirkHandler;
 		TArray<TSharedPtr<FJsonObject>> Messages;
 		TArray<TSharedPtr<FJsonValue>> OpenAiTools;
 		TMap<FString, FString> FunctionNameToToolName;
@@ -492,6 +508,7 @@ namespace
 		TMap<int32, FChatToolCall> StreamToolCalls;
 		TArray<FString> PendingSteerInstructions;
 		FString AccumulatedAssistantText;
+		FString AccumulatedReasoningContent;
 		int32 ToolRoundCount = 0;
 		bool bToolCallsFinished = false;
 		bool bCompleted = false;
