@@ -29,6 +29,9 @@ struct UNREALMCP_API FAiProviderConfig
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Provider protocol or integration type."))
 	EAiProviderKind Kind = EAiProviderKind::OpenAiResponses;
 
+	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(GetOptions="GetProviderPresetOptions", ToolTip="Stable provider preset id, for example kimi, deepseek, or openai-responses. Empty means custom/backward-compatible behavior."))
+	FString PresetId;
+
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Provider endpoint URL. For chat-compatible providers, use the chat/completions endpoint."))
 	FString BaseUrl;
 
@@ -70,6 +73,9 @@ public:
 #endif
 	const FAiProviderConfig* FindActiveProvider() const;
 
+	UFUNCTION()
+	TArray<FString> GetProviderPresetOptions() const;
+
 	UPROPERTY(EditAnywhere, Config, Category="Server")
 	bool bEnableServer = true;
 
@@ -91,7 +97,7 @@ public:
 	//   Example: Kimi (Moonshot)  Kind=OpenAiChatCompat BaseUrl=https://api.moonshot.cn/v1/chat/completions Model=moonshot-v1-8k
 	//   Example: GLM (Zhipu)      Kind=OpenAiChatCompat BaseUrl=https://open.bigmodel.cn/api/paas/v4/chat/completions Model=glm-4
 	//   Example: DeepSeek         Kind=OpenAiChatCompat BaseUrl=https://api.deepseek.com/v1/chat/completions Model=deepseek-chat
-	//   Example: Anthropic        Kind=AnthropicMessages BaseUrl=https://api.anthropic.com/v1/messages Model=claude-sonnet-4-5
+	//   Example: Anthropic        Kind=AnthropicMessages BaseUrl=https://api.anthropic.com/v1/messages Model=claude-sonnet-4-6
 	//   Example: Codex            Kind=Codex CodexBinaryPath=/Users/.../codex-orchestrator/bin/codex-agent CodexExtraArgs="-m gpt-5.5 -r xhigh"
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(TitleProperty="DisplayName"))
 	TArray<FAiProviderConfig> Providers;

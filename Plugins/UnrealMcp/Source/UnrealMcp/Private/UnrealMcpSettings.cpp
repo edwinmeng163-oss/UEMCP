@@ -10,6 +10,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UnrealMcpModule.h"
+#include "UnrealMcpProviderPresets.h"
 #include "UObject/UnrealType.h"
 
 #define LOCTEXT_NAMESPACE "UnrealMcpSettings"
@@ -60,6 +61,7 @@ void UUnrealMcpSettings::WriteProvidersBackup() const
 		ProviderObject->SetStringField(TEXT("id"), Provider.Id);
 		ProviderObject->SetStringField(TEXT("displayName"), Provider.DisplayName);
 		ProviderObject->SetStringField(TEXT("kind"), ProviderKindEnum->GetNameStringByValue(static_cast<int64>(Provider.Kind)));
+		ProviderObject->SetStringField(TEXT("presetId"), Provider.PresetId);
 		ProviderObject->SetStringField(TEXT("baseUrl"), Provider.BaseUrl);
 		ProviderObject->SetStringField(TEXT("apiKey"), Provider.ApiKey);
 		ProviderObject->SetStringField(TEXT("model"), Provider.Model);
@@ -162,6 +164,7 @@ bool UUnrealMcpSettings::LoadProvidersBackup()
 		ProviderObject->TryGetStringField(TEXT("id"), Provider.Id);
 		ProviderObject->TryGetStringField(TEXT("displayName"), Provider.DisplayName);
 		Provider.Kind = static_cast<EAiProviderKind>(KindValue);
+		ProviderObject->TryGetStringField(TEXT("presetId"), Provider.PresetId);
 		ProviderObject->TryGetStringField(TEXT("baseUrl"), Provider.BaseUrl);
 		ProviderObject->TryGetStringField(TEXT("apiKey"), Provider.ApiKey);
 		ProviderObject->TryGetStringField(TEXT("model"), Provider.Model);
@@ -200,6 +203,7 @@ void UUnrealMcpSettings::PostInitProperties()
 			Provider.Id = TEXT("openai-default");
 			Provider.DisplayName = TEXT("OpenAI (migrated)");
 			Provider.Kind = EAiProviderKind::OpenAiResponses;
+			Provider.PresetId = TEXT("openai-responses");
 			Provider.BaseUrl = OpenAIResponsesUrl;
 			Provider.ApiKey = OpenAIApiKey;
 			Provider.Model = OpenAIModel;
@@ -250,6 +254,11 @@ const FAiProviderConfig* UUnrealMcpSettings::FindActiveProvider() const
 	return nullptr;
 }
 
+TArray<FString> UUnrealMcpSettings::GetProviderPresetOptions() const
+{
+	return UnrealMcp::ProviderPresets::GetProviderPresetOptionIds();
+}
+
 #if WITH_EDITOR
 FText UUnrealMcpSettings::GetSectionText() const
 {
@@ -269,6 +278,23 @@ void UUnrealMcpSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 	const FString PropertyNameString = PropertyName.ToString();
 	const FString MemberPropertyNameString = MemberPropertyName.ToString();
 
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FAiProviderConfig, PresetId))
+	{
+		const int32 ArrayIndex = PropertyChangedEvent.GetArrayIndex(TEXT("Providers"));
+		if (Providers.IsValidIndex(ArrayIndex))
+		{
+			FAiProviderConfig& Entry = Providers[ArrayIndex];
+			if (const UnrealMcp::ProviderPresets::FProviderPreset* Preset =
+				UnrealMcp::ProviderPresets::FindProviderPresetById(Entry.PresetId))
+			{
+				UnrealMcp::ProviderPresets::ApplyProviderPreset(
+					Entry,
+					*Preset,
+					UnrealMcp::ProviderPresets::EProviderPresetApplyMode::ExplicitPresetSelection);
+			}
+		}
+	}
+
 	// Auto-fill canonical BaseUrl / Model / CodexBinaryPath when the user
 	// changes Kind on a provider entry. Only fills empty fields, never
 	// overwrites user input. This makes onboarding a new provider a
@@ -279,42 +305,22 @@ void UUnrealMcpSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 		if (Providers.IsValidIndex(ArrayIndex))
 		{
 			FAiProviderConfig& Entry = Providers[ArrayIndex];
-			switch (Entry.Kind)
+			if (const UnrealMcp::ProviderPresets::FProviderPreset* Preset =
+				UnrealMcp::ProviderPresets::FindDefaultProviderPresetForKind(Entry.Kind))
 			{
-				case EAiProviderKind::OpenAiResponses:
-					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://api.openai.com/v1/responses");
-					if (Entry.Model.IsEmpty()) Entry.Model = TEXT("gpt-5.1");
-					if (Entry.ReasoningEffort.IsEmpty()) Entry.ReasoningEffort = TEXT("medium");
-					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("OpenAI Responses");
-					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("openai-default");
-					break;
-				case EAiProviderKind::OpenAiChatCompat:
-					// Multi-vendor (Kimi / GLM / DeepSeek / Qwen / Ollama). Provide a
-					// non-functional placeholder URL that flags the user must edit it.
-					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://<vendor-host>/v1/chat/completions");
-					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("OpenAI-Compatible (edit BaseUrl + Model)");
-					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("openai-compat");
-					break;
-				case EAiProviderKind::AnthropicMessages:
-					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://api.anthropic.com/v1/messages");
-					if (Entry.Model.IsEmpty()) Entry.Model = TEXT("claude-sonnet-4-6");
-					if (Entry.ReasoningEffort.IsEmpty()) Entry.ReasoningEffort = TEXT("medium");
-					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("Anthropic Messages");
-					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("anthropic-default");
-					break;
-				case EAiProviderKind::Codex:
-					// Local subprocess; no URL. Suggest the conventional binary path.
-					if (Entry.CodexBinaryPath.IsEmpty()) Entry.CodexBinaryPath = TEXT("~/codex-orchestrator/bin/codex-agent");
-					if (Entry.CodexExtraArgs.IsEmpty()) Entry.CodexExtraArgs = TEXT("-m gpt-5.5 -r xhigh");
-					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("Codex CLI (local)");
-					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("codex-cli");
-					break;
-				case EAiProviderKind::CodexAppServer:
-					// Codex Desktop bridge default endpoint.
-					if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("http://127.0.0.1:8766");
-					if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("Codex Desktop / App Server");
-					if (Entry.Id.IsEmpty()) Entry.Id = TEXT("codex-app-server");
-					break;
+				UnrealMcp::ProviderPresets::ApplyProviderPreset(
+					Entry,
+					*Preset,
+					UnrealMcp::ProviderPresets::EProviderPresetApplyMode::FillEmpty);
+			}
+
+			if (Entry.Kind == EAiProviderKind::OpenAiChatCompat)
+			{
+				// Multi-vendor (Kimi / GLM / DeepSeek / Qwen / Ollama). Provide a
+				// non-functional placeholder URL that flags the user must edit it.
+				if (Entry.BaseUrl.IsEmpty()) Entry.BaseUrl = TEXT("https://<vendor-host>/v1/chat/completions");
+				if (Entry.DisplayName.IsEmpty()) Entry.DisplayName = TEXT("OpenAI-Compatible (edit BaseUrl + Model)");
+				if (Entry.Id.IsEmpty()) Entry.Id = TEXT("openai-compat");
 			}
 		}
 	}

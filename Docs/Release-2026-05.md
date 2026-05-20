@@ -176,8 +176,25 @@ Model           = deepseek-chat
 # 例：Anthropic Claude
 Kind            = AnthropicMessages
 BaseUrl         = https://api.anthropic.com/v1/messages
-Model           = claude-sonnet-4-5
+Model           = claude-sonnet-4-6
 ```
+
+#### Provider 预设
+
+Phase 1 增加 provider preset 的数据和 Project Settings UI 支持。`PresetId` 记录选中的 preset；空 `PresetId` 或 `custom-openai-chat` 仍可用于手动 OpenAI-compatible provider。各 vendor 的 dispatcher 细节留到 Phase 2。
+
+| Preset | Default Model |
+|---|---|
+| Custom OpenAI-compatible | empty/manual |
+| OpenAI Responses | `gpt-5.1` |
+| Anthropic Claude | `claude-sonnet-4-6` |
+| Kimi (Moonshot) | `moonshot-v1-8k` |
+| GLM (Zhipu) | `glm-4` |
+| DeepSeek | `deepseek-chat` |
+| Qwen (Tongyi) | `qwen-plus` |
+| Ollama (local) | `llama3.1` |
+| Codex CLI | Model empty; `CodexExtraArgs` defaults to `-m gpt-5.5 -r xhigh` |
+| Codex Desktop / App Server | Model empty; bridge/default decides |
 
 4. 设 `ActiveProviderId` 等于你想用的那条的 `Id`，保存（Ctrl+S）
 5. 打开 `Window > Unreal MCP Chat`，顶部 Provider 选择器应能切换、模型字段显示当前选择
@@ -409,8 +426,25 @@ Model       = deepseek-chat
 # Anthropic Claude
 Kind        = AnthropicMessages
 BaseUrl     = https://api.anthropic.com/v1/messages
-Model       = claude-sonnet-4-5
+Model       = claude-sonnet-4-6
 ```
+
+#### Provider presets
+
+Phase 1 adds data and Project Settings UI support for provider presets. `PresetId` records the selected preset; empty `PresetId` or `custom-openai-chat` remains valid for manual OpenAI-compatible providers. Vendor-specific dispatcher quirks are deferred to Phase 2.
+
+| Preset | Default Model |
+|---|---|
+| Custom OpenAI-compatible | empty/manual |
+| OpenAI Responses | `gpt-5.1` |
+| Anthropic Claude | `claude-sonnet-4-6` |
+| Kimi (Moonshot) | `moonshot-v1-8k` |
+| GLM (Zhipu) | `glm-4` |
+| DeepSeek | `deepseek-chat` |
+| Qwen (Tongyi) | `qwen-plus` |
+| Ollama (local) | `llama3.1` |
+| Codex CLI | Model empty; `CodexExtraArgs` defaults to `-m gpt-5.5 -r xhigh` |
+| Codex Desktop / App Server | Model empty; bridge/default decides |
 
 4. Set `ActiveProviderId` to the row you want. Save.
 5. Open `Window > Unreal MCP Chat`. The top-bar Provider selector should list your entries; the model field reflects the active provider.
@@ -639,8 +673,25 @@ Model       = deepseek-chat
 # Anthropic Claude
 Kind        = AnthropicMessages
 BaseUrl     = https://api.anthropic.com/v1/messages
-Model       = claude-sonnet-4-5
+Model       = claude-sonnet-4-6
 ```
+
+#### Provider presets
+
+Phase 1 では provider preset のデータと Project Settings UI を追加します。`PresetId` は選択した preset を記録します。空の `PresetId` または `custom-openai-chat` は、手動の OpenAI-compatible provider として引き続き有効です。vendor 固有の dispatcher quirks は Phase 2 で対応します。
+
+| Preset | Default Model |
+|---|---|
+| Custom OpenAI-compatible | empty/manual |
+| OpenAI Responses | `gpt-5.1` |
+| Anthropic Claude | `claude-sonnet-4-6` |
+| Kimi (Moonshot) | `moonshot-v1-8k` |
+| GLM (Zhipu) | `glm-4` |
+| DeepSeek | `deepseek-chat` |
+| Qwen (Tongyi) | `qwen-plus` |
+| Ollama (local) | `llama3.1` |
+| Codex CLI | Model empty; `CodexExtraArgs` defaults to `-m gpt-5.5 -r xhigh` |
+| Codex Desktop / App Server | Model empty; bridge/default decides |
 
 4. `ActiveProviderId` を選択した行の `Id` に設定して保存
 5. `Window > Unreal MCP Chat` を開き、上部の Provider セレクターが利用可能なら成功

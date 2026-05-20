@@ -120,7 +120,11 @@ namespace UnrealMcpChat
 	FString FormatProviderLabel(const FAiProviderConfig& Provider)
 	{
 		const FString DisplayName = Provider.DisplayName.TrimStartAndEnd().IsEmpty() ? Provider.Id : Provider.DisplayName.TrimStartAndEnd();
-		return FString::Printf(TEXT("%s (%s)"), *DisplayName, *ProviderKindShortName(Provider.Kind));
+		const FString PresetSuffix =
+			(!Provider.PresetId.TrimStartAndEnd().IsEmpty() && !Provider.PresetId.Equals(TEXT("custom-openai-chat"), ESearchCase::CaseSensitive))
+			? FString::Printf(TEXT(" (preset: %s)"), *Provider.PresetId.TrimStartAndEnd())
+			: FString();
+		return FString::Printf(TEXT("%s (%s)%s"), *DisplayName, *ProviderKindShortName(Provider.Kind), *PresetSuffix);
 	}
 
 #if PLATFORM_WINDOWS
