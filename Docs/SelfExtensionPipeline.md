@@ -23,7 +23,7 @@ The self-extension pipeline lets Unreal MCP add new MCP tools from inside Editor
 - `unreal.knowledge_eval_run`: run local RAG regression cases after changing
   docs, ToolRegistry metadata, search scoring, or tool recommendation logic.
 
-The same status and safety tools are also exposed through `Window > Unreal MCP Workbench`, a thin Slate panel for people who prefer a dashboard over typing `/tool` commands.
+The same status and safety tools are also exposed through `Window > UEAtelier Workbench`, a thin Slate panel for people who prefer a dashboard over typing `/tool` commands.
 
 Versioned core tests live in `Tools/UnrealMcpTests/Core`. Generated tests remain local under `Saved/UnrealMcp/TestScaffolds`.
 

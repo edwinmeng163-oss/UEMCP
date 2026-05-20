@@ -39,8 +39,8 @@ Before submission, update the `.uplugin` description only after the PM approves 
 - Recommended icon path: `Plugins/UnrealMcp/Resources/Icon128.png`, using a 256x256 source PNG even if the filename remains Unreal's conventional icon name.
 - Featured screenshot: Fab expects a 1920x1080 PNG. Recommended hero shot: Workbench tab and Chat panel side by side in Unreal Editor. Gap.
 - Additional screenshots: provide 3-5 more 1920x1080 PNGs.
-- Additional screenshot 1: `Window > Unreal MCP Chat` with a multi-turn conversation.
-- Additional screenshot 2: `Window > Unreal MCP Workbench` showing pipeline status and the install doctor card after v0.15.2.
+- Additional screenshot 1: `Window > UEAtelier Chat` with a multi-turn conversation.
+- Additional screenshot 2: `Window > UEAtelier Workbench` showing pipeline status and the install doctor card after v0.15.2.
 - Additional screenshot 3: self-extension flow showing scaffold, validate, apply, build, and test.
 - Additional screenshot 4: tool list response from a downstream MCP client, with 140+ tools visible.
 - Additional screenshot 5: optional Codex Desktop bridge running side by side with the editor.

@@ -412,7 +412,7 @@ Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue
 - `127.0.0.1:8765` LISTEN（UE MCP）
 - `127.0.0.1:8766` LISTEN（bridge）
 
-如果 8765 没 LISTEN：UE editor 没启动 / UnrealMcp plugin 没启用 / 端口被占。打开 `Window > Unreal MCP Workbench` 确认插件已加载，看 `Output Log` 找 `LogUnrealMcp` 日志。
+如果 8765 没 LISTEN：UE editor 没启动 / UnrealMcp plugin 没启用 / 端口被占。打开 `Window > UEAtelier Workbench` 确认插件已加载，看 `Output Log` 找 `LogUnrealMcp` 日志。
 
 如果 8766 没 LISTEN：bridge daemon 没跑（最常见）。继续看下面。
 

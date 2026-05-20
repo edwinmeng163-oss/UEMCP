@@ -16,7 +16,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: UEAtelier
-VersionName: 0.23.0
+VersionName: 0.24.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -157,19 +157,24 @@ At the time this file was written, the registry contained 160 entries across:
 actors, blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget.
 
-This count includes recent v0.14-v0.23 additions: Python runtime smoke,
+Recent v0.14-v0.24 project work includes Python runtime smoke,
 readback inspectors, Blueprint refactor and macro/interface tools, UBT target
 matrix, migration tools, install doctor, UMG/material parity tools, Task Atlas
 foundation/backfill tools, verification foundation tools, diagnostics, PIE
-smoke, and the `Tools/UEAtelierCli/` CLI-Anything package.
+smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
+input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
+the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.23 adds `cli-anything-ueatelier`; v0.22 adds
-`unreal.pie_smoke`; v0.21 adds `unreal.editor_diagnostics`; v0.20 hardens async
-automation runs and watchdog stale recovery; v0.19 completes Task Atlas Make
-Tool, To RAG ingestion, and label backfill; v0.19.1 disables Unity build for
-the UnrealMcp module after a UE 5.6 collision. `unreal.configure_fps_settings`
-and `unreal.bp_add_input_axis_event_node` remain scaffold-only pending
-functional verification.
+Current project status: v0.24 adds AI provider presets, Kimi
+`reasoning_content` compatibility, enriched input schemas, generated per-tool
+docs under `Tools/UnrealMcpToolDocs/`, and progressive-disclosure agent docs;
+v0.23 adds `cli-anything-ueatelier`; v0.22 adds `unreal.pie_smoke`; v0.21 adds
+`unreal.editor_diagnostics`; v0.20 hardens async automation runs and watchdog
+stale recovery; v0.19 completes Task Atlas Make Tool, To RAG ingestion, and
+label backfill; v0.19.1 disables Unity build for the UnrealMcp module after a
+UE 5.6 collision. `unreal.configure_fps_settings` and
+`unreal.bp_add_input_axis_event_node` remain scaffold-only pending functional
+verification.
 
 Visible tool counts can differ because hidden entries and aliases are filtered.
 Trust `/tool unreal.mcp_workbench_status {}` and

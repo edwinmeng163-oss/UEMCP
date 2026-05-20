@@ -37,7 +37,7 @@ Leave that window open while using Chat.
 
 ### Step 5 - Open Chat Or Workbench
 
-In Unreal Editor, open `Window > Unreal MCP Chat` or `Window > Unreal MCP Workbench`.
+In Unreal Editor, open `Window > UEAtelier Chat` or `Window > UEAtelier Workbench`.
 Configure your AI provider in `Project Settings > Plugins > Unreal MCP`.
 Test the setup by asking Chat to `list maps` or by calling `unreal.editor_status`.
 
@@ -84,7 +84,7 @@ Test the setup by asking Chat to `list maps` or by calling `unreal.editor_status
 
 ### 步骤 5 - 打开 Chat 或 Workbench
 
-在 Unreal Editor 中打开 `Window > Unreal MCP Chat` 或 `Window > Unreal MCP Workbench`。
+在 Unreal Editor 中打开 `Window > UEAtelier Chat` 或 `Window > UEAtelier Workbench`。
 在 `Project Settings > Plugins > Unreal MCP` 中配置 AI provider。
 可以通过让 Chat 执行 `list maps`，或调用 `unreal.editor_status` 来测试配置。
 
@@ -131,7 +131,7 @@ Chat を使う間はこのウィンドウを開いたままにしてください
 
 ### Step 5 - Chat または Workbench を開く
 
-Unreal Editor で `Window > Unreal MCP Chat` または `Window > Unreal MCP Workbench` を開きます。
+Unreal Editor で `Window > UEAtelier Chat` または `Window > UEAtelier Workbench` を開きます。
 `Project Settings > Plugins > Unreal MCP` で AI provider を設定します。
 Chat に `list maps` と依頼するか、`unreal.editor_status` を呼び出して動作確認してください。
 

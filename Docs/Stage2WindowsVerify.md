@@ -354,7 +354,7 @@ Get-NetTCPConnection -LocalPort 8766 -State Listen
 
 PASS: the bridge console reports `Bridge listening on ws://127.0.0.1:8766/uevolve` and port `8766` is listening.
 
-Open `Window > Unreal MCP Chat` and call:
+Open `Window > UEAtelier Chat` and call:
 
 ```text
 /tool unreal.editor_status {}

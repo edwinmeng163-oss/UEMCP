@@ -281,11 +281,11 @@ Behavior notes:
 
 Open the command chat window from:
 
-`Window > Unreal MCP Chat`
+`Window > UEAtelier Chat`
 
 Open the thin self-extension console from:
 
-`Window > Unreal MCP Workbench`
+`Window > UEAtelier Workbench`
 
 The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
