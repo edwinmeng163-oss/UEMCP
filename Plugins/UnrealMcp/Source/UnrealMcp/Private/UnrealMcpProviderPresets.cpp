@@ -65,7 +65,13 @@ namespace ProviderPresets
 			FProviderPreset{ TEXT("deepseek"), TEXT("DeepSeek"), EAiProviderKind::OpenAiChatCompat, TEXT("https://api.deepseek.com/v1/chat/completions"), TEXT("deepseek-chat"), TEXT(""), TEXT(""), TEXT("") },
 			FProviderPreset{ TEXT("qwen"), TEXT("Qwen (Tongyi)"), EAiProviderKind::OpenAiChatCompat, TEXT("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"), TEXT("qwen-plus"), TEXT(""), TEXT(""), TEXT("") },
 			FProviderPreset{ TEXT("ollama-local"), TEXT("Ollama (local)"), EAiProviderKind::OpenAiChatCompat, TEXT("http://127.0.0.1:11434/v1/chat/completions"), TEXT("llama3.1"), TEXT(""), TEXT(""), TEXT("") },
-			FProviderPreset{ TEXT("codex-cli"), TEXT("Codex CLI"), EAiProviderKind::Codex, TEXT(""), TEXT(""), TEXT(""), TEXT("~/codex-orchestrator/bin/codex-agent"), TEXT("-m gpt-5.5 -r xhigh") },
+			// v0.25 default empty: user must run `which codex` and fill the path manually.
+			// Tilde expansion (G2) is unresolved, so a literal "~/..." default would
+			// confuse users with "file not found" on platforms where FPaths doesn't expand.
+			// v0.25 default empty: baseline -c flags (model, sandbox_mode, reasoning_effort)
+			// are auto-injected by BuildCodexExecCommand. User extra args are optional.
+			// The legacy -m / -r form is REJECTED by ValidateConfig in v0.25.
+			FProviderPreset{ TEXT("codex-cli"), TEXT("Codex CLI"), EAiProviderKind::Codex, TEXT(""), TEXT(""), TEXT(""), TEXT(""), TEXT("") },
 			FProviderPreset{ TEXT("codex-desktop"), TEXT("Codex Desktop / App Server"), EAiProviderKind::CodexAppServer, TEXT("ws://127.0.0.1:8766/uevolve"), TEXT(""), TEXT(""), TEXT(""), TEXT("") },
 		};
 		return Presets;

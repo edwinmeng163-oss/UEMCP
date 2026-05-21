@@ -1,6 +1,6 @@
 # AI Provider Architecture (UnrealMcp)
 
-> v0.24.4 - first written. Audience: contributors editing
+> v0.25.0 - updated for Reform B. Audience: contributors editing
 > `Plugins/UnrealMcp/Source/UnrealMcp/Private/Providers/`. Cross-referenced
 > from `Docs/Release-2026-05.md` v0.24.4 entry and from inline file-top
 > comments in `CodexProvider.cpp`.
@@ -16,7 +16,7 @@ Anthropic.
 | OpenAiResponses | HTTP (Responses API) | SSE | Bearer token |
 | OpenAiChatCompat | HTTP (Chat Completions) | SSE / NDJSON | Bearer token |
 | AnthropicMessages | HTTP (Messages API) | SSE | x-api-key |
-| Codex | Subprocess (bash + codex-agent + codex CLI) | parent stdout pump | OAuth via codex login |
+| Codex | Subprocess (codex exec, one-shot non-interactive, JSONL stdout) | line-by-line JSONL events; reply text arrives as one `item.completed` event (no token-level deltas in v0.25) | OAuth via codex login |
 | CodexAppServer | WebSocket (localhost) | JSON frames | OAuth via Codex Desktop |
 
 `EAiProviderKind` is append-only. Numeric values never change. See
@@ -38,7 +38,7 @@ HTTP providers share the same broad run lifecycle:
 
 Codex providers differ from HTTP providers:
 
-- `Codex` launches a local subprocess through `/bin/bash -c`;
+- `Codex` launches a local `codex exec` subprocess through `/bin/bash -c`;
 - `CodexAppServer` speaks to a local bridge WebSocket;
 - both rely on the user already being authenticated in the local Codex toolchain.
 
@@ -55,7 +55,9 @@ list exactly:
 - User-supplied or config-derived values MUST appear only as output of `QuoteForBashWordNoSpaces(...)`, or be rejected upstream by `ContainsDangerousShellCharacters(...)`.
 - Command parts MUST be joined with `${IFS}`, never with literal ASCII space.
 - The command MUST NOT use `"..."` double-quote wrapping, `"$(cat ...)"` substitution, or any other construct that introduces literal `"` characters.
-- **PATH augmentation MUST use the bare assignment form** `PATH=...:$PATH&&${IFS}<cmd>`, NOT `export${IFS}PATH=...&&${IFS}<cmd>`. Rationale: `export VAR=value` is the export BUILTIN which word-splits its single argument (`VAR=value`) after parameter expansion. When inherited `$PATH` contains directories with literal spaces — common on macOS, e.g. `/Library/Application Support/JetBrains/Toolbox/scripts` — the expanded assignment splits at the space and `export` receives multiple args. The second arg is not a valid identifier and fails: `export: 'Support/JetBrains/...': not a valid identifier`. The bare `PATH=value` form (no `export` keyword) is a current-shell variable assignment whose RHS is POSIX-guaranteed NOT word-split post-expansion. `$PATH` is already exported by the parent UE Editor process, so re-assignment preserves the exported status and the new value propagates to child processes via standard env inheritance. (Discovered via the `SpawnedCommandActualBashExec` / `KillCommandActualBashExec` integration tests during v0.24.4 ship-time verification.)
+- **PATH augmentation MUST use the bare assignment form** `PATH=...:$PATH&&${IFS}<cmd>`, NOT `export${IFS}PATH=...&&${IFS}<cmd>`. Rationale: `export VAR=value` is the export BUILTIN which word-splits its single argument (`VAR=value`) after parameter expansion. When inherited `$PATH` contains directories with literal spaces — common on macOS, e.g. `/Library/Application Support/JetBrains/Toolbox/scripts` — the expanded assignment splits at the space and `export` receives multiple args. The second arg is not a valid identifier and fails: `export: 'Support/JetBrains/...': not a valid identifier`. The bare `PATH=value` form (no `export` keyword) is a current-shell variable assignment whose RHS is POSIX-guaranteed NOT word-split post-expansion. `$PATH` is already exported by the parent UE Editor process, so re-assignment preserves the exported status and the new value propagates to child processes via standard env inheritance. (Discovered during v0.24.4 ship-time verification.)
+- ConversationContext for multi-turn chat MUST be passed via the child subprocess's stdin pipe (closed after write to signal EOF), NOT concatenated into the argv prompt. Argv prompt contains only the latest user message. Rationale: avoids ARG_MAX cap; clean `<stdin>` block separation in codex's prompt envelope.
+- Cancellation MUST use `FPlatformProcess::TerminateProc(handle, /*killTree=*/true)` directly on the bash subprocess handle, not a separate `kill <jobId>` subprocess command.
 
 These rules are about the full string passed as the `Arguments` parameter to
 `CreateProc`, not about C++ comments, docs, or temporary files. Trusted shell
@@ -81,15 +83,15 @@ CommandParts.Add(TEXT("-m gpt-5.5"));
 DO:
 
 ```cpp
-// $'...'-wrapped composed prompt
-CommandParts.Add(QuoteForBashWordNoSpaces(ComposePrompt(UserPrompt, ConversationContext)));
+// latest user prompt only; ConversationContext goes through stdin
+CommandParts.Add(QuoteForBashWordNoSpaces(UserPrompt));
 
 // PATH wrapper with no literal "
-"export${IFS}PATH=$HOME/.bun/bin:...:$PATH&&${IFS}"
+"PATH=$HOME/.bun/bin:...:$PATH&&${IFS}"
 
 // separate IFS-joined args
-CommandParts.Add(TEXT("-m"));
-CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexModel));
+CommandParts.Add(TEXT("-c"));
+CommandParts.Add(QuoteForBashWordNoSpaces(TEXT("model=\"gpt-5.5\"")));
 ```
 
 ### Case studies
@@ -103,6 +105,12 @@ CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexModel));
   `"$(cat ${IFS}...)"` was masked for months by the `bun: not found` failure
   earlier in the pipeline. v0.24.3 PATH fix unmasked it. Fixed in v0.24.4
   Edit B by passing the composed prompt directly as a `$'...'` argv word.
+- **v0.25.0 - Reform B exec rewrite**:
+  `codex-agent start -w` could not return the real assistant reply because the
+  upstream codex CLI stayed interactive inside the orchestrated session. Reform
+  B replaced that path with `codex exec --json --ephemeral`, 3 process pipes,
+  JSONL stdout parsing, stderr auth detection, stdin ConversationContext, and
+  direct process termination.
 
 ### Helper ownership
 
@@ -110,12 +118,14 @@ The shell helpers are production code and test surface:
 
 - `QuoteForBashWordNoSpaces` escapes one value and wraps it in `$'...'`.
 - `JoinShellArgumentsNoSpaces` joins quoted values with `${IFS}`.
-- `ComposePrompt` folds prior conversation context into the latest user prompt.
-- `BuildCodexStartCommand` builds the codex-agent `start` command payload.
-- `BuildCodexKillCommand` builds the codex-agent `kill` command payload.
+- `BuildCodexExecCommand` builds the `codex exec` command payload.
+- `ParseCodexJsonlEvent` parses one stdout JSONL event line.
+- `DetectCodexAuthError` rate-limits friendly login guidance per run.
+- `LooksLikeLegacyCodexAgentPath` and `ContainsUnsupportedReasoningFlag`
+  provide v0.25 migration checks.
 
 The helper declarations live in the private header
-`Providers/CodexProviderShellHelpers.h` so integration tests can call the same
+`Providers/CodexProviderExecHelpers.h` so integration tests can call the same
 code path as runtime. Tests must not reimplement shell construction logic.
 
 ## C. Settings UI architecture
@@ -178,11 +188,23 @@ Pure-function tests cover string content and registry shape:
 
 Integration tests cover runtime boundaries that string tests cannot prove:
 
-- v0.24.4 tests spawn `/bin/bash -c` with the production-built command;
-- the fake binary is an argc/argv-printing helper script;
-- stdout is parsed for `ARGC=` and `ARG=` lines;
-- prompt content is verified after the real shell and UE process tokenizer path;
-- both `start` and `kill` command builders are exercised.
+- v0.25 tests spawn `/bin/bash -c` with the production-built `codex exec`
+  command;
+- the fake codex binary is a shell script that records argv and stdin;
+- argv assertions prove `exec`, JSON flags, `-C`, `-c`, and the user prompt
+  land in the expected order, with the prompt last;
+- stdin assertions prove ConversationContext is not folded into argv;
+- stdout assertions cover JSONL events, including an `item.completed` line split
+  across two writes.
+
+JSONL parser tests cover:
+
+- `thread.started`;
+- `turn.started`;
+- `item.completed` with `agent_message` text;
+- `turn.completed` usage fields;
+- error events and malformed JSON rejection;
+- unknown future event types, which are preserved as `Unknown` with raw JSON.
 
 Pure string tests are not enough for CreateProc-bound command strings.
 v0.24.3's subprocess PATH prefix test passed because the string contained the
@@ -194,9 +216,10 @@ Rule of thumb: any `FString` that ultimately flows into
 execs the constructed command against a deterministic helper and asserts argv
 boundaries.
 
-The tests intentionally use an argc/argv printer rather than `/bin/echo`.
-`echo` collapses argv into one space-separated output line, which cannot
-distinguish one argument containing an embedded space from two arguments.
+The integration test intentionally uses a fake codex script rather than
+`/bin/echo`. `echo` collapses argv into one space-separated output line, which
+cannot distinguish one argument containing an embedded space from two
+arguments, and it cannot prove stdin transport.
 
 ## F. Known UE gotchas
 
@@ -208,9 +231,16 @@ Direct re-invocation in test fixtures can assert at runtime. Extract a
 non-`PostInitProperties` helper instead.
 
 `FPaths::FileExists` does not expand `~` (tilde). The preset default for
-`CodexBinaryPath`, `~/codex-orchestrator/bin/codex-agent`, is a literal path.
-Users must currently substitute the absolute path each time the preset
-auto-fills. See Section G2.
+`CodexBinaryPath` is now empty, but user-entered `~/...` paths remain literal
+and fail validation. Users must supply the absolute path returned by
+`which codex`. See Section G2.
+
+`FPlatformProcess::CreateProc` can wire three pipes at once: stdout child write,
+stdin child read, and stderr child write. For Codex CLI, stdout is JSONL,
+stderr carries process/auth diagnostics, and stdin carries ConversationContext.
+On Mac, `WritePipe` blocks on the write side by design, so large stdin payloads
+must be written from the worker pump thread in chunks and the stdin write end
+must be closed afterward to signal EOF.
 
 `meta=(DeprecatedProperty)` does not hide a `UPROPERTY` from the Property
 Editor. Remove `EditAnywhere` for deprecated config values that should still
@@ -223,7 +253,7 @@ way.
 
 ## G. Known limitations / candidate Reform chunks
 
-### G1 - Codex CLI provider interactive-mode mismatch (v0.25 Reform B candidate)
+### G1 - Codex CLI provider interactive-mode mismatch (Resolved in v0.25)
 
 `codex-agent start -w` waits for job `status != running`. `codex` CLI is
 interactive: it processes the initial prompt, replies, then sits idle waiting
@@ -232,25 +262,15 @@ returns. The UE chat pump on the parent `/bin/bash` stdout only sees
 codex-agent's `"Job started: <uuid>"` header. Codex's actual reply lives in a
 tmux pane that the parent never reads.
 
-**Workaround**: use the Codex Desktop bridge, the `CodexAppServer` provider,
-which talks over WebSocket to the local Codex Desktop bridge. PM validated this
-path and it works today.
-
-**Planned fix (Reform B)**: rewrite `SpawnProcess` to use one of:
-
-- `codex exec <prompt>` one-shot mode. Codex prints the reply to stdout and
-  exits 0. This is cleaner but loses the codex-agent job-control surface.
-- `codex-agent start ... && codex-agent await-turn <jobId> && codex-agent capture <jobId>`.
-  This preserves codex-agent job tracking, but requires parsing `await-turn`
-  exit semantics and `capture` stdout format.
-
-PM decision is deferred to v0.25 chunk planning.
+**Resolution**: v0.25 Reform B uses `codex exec --json --ephemeral` directly.
+The provider now reads stdout JSONL events from the child process and emits the
+`agent_message` text back to UE Assistant when the one-shot process exits.
 
 ### G2 - Tilde not expanded in `CodexBinaryPath` (v0.24.5 candidate)
 
-`FPaths::FileExists` does not expand `~`. The preset default
-`~/codex-orchestrator/bin/codex-agent` works only after the user manually edits
-it to an absolute path.
+`FPaths::FileExists` does not expand `~`. v0.25 leaves the Codex CLI preset
+path empty, but a user-entered `~/bin/codex` style path still fails until the
+user substitutes an absolute path.
 
 Candidate fix: add an `ExpandTildeInPath()` helper in a small shell/path utility
 file. Substitute leading `~` with `FPlatformProcess::UserHomeDir()` at config
@@ -271,16 +291,15 @@ list through settings. Candidate fix: add a `Codex Extra PATH Prefix` setting
 as a colon-separated `FString` that prepends to the hardcoded list after
 validation.
 
-### G4 - Composed prompt command-line length (accepted limit)
+### G4 - Composed prompt command-line length (Resolved in v0.25)
 
-After v0.24.4 Edit B, the composed prompt text flows directly into `argv[1]` of
-the bash subprocess. macOS `ARG_MAX` is roughly 256 KiB, and Apple Silicon
-macOS 11+ is roughly 1 MiB. A 50-turn chat history with the standard system
-prompt envelope is typically 50-200 KiB, which fits comfortably.
+After v0.24.4 Edit B, the composed prompt text flowed directly into `argv[1]`
+of the bash subprocess. That exposed an ARG_MAX risk for long multi-turn chat
+history.
 
-This is accepted for v0.24.4. Revisit only if users report hitting the cap. The
-Reform B rewrite would likely pipe prompt text through stdin or use a one-shot
-Codex command that owns prompt transport explicitly.
+**Resolution**: v0.25 passes only the latest user message as the final argv
+prompt and writes ConversationContext to the child stdin pipe, then closes the
+write end to signal EOF.
 
 ### G5 - Provider observability is uneven (deferred)
 
@@ -292,3 +311,10 @@ tmux pane visibility, or provider-specific diagnostic UX.
 Candidate fix: add provider-level diagnostic events with transport, command
 builder, stream parser, and tool-call phases. Keep secrets and prompt content
 redacted from persisted logs.
+
+### G6 - Codex CLI exec has no token-level streaming (deferred)
+
+`codex exec --json` emits the assistant reply as one complete `item.completed`
+event with `item.type == "agent_message"`, not token-level deltas. UE chat shows
+the full reply atomically in v0.25. A future enhancement could investigate
+whether codex exposes a streaming mode suitable for this provider.

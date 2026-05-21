@@ -990,6 +990,80 @@ BaseUrl     = ws://127.0.0.1:8766/uevolve
 
 ---
 
+## v0.25.0 — Reform B (Codex CLI exec rewrite)
+
+### 中文
+
+v0.25 重写 Codex CLI provider，改为直接调用 `codex exec --json --ephemeral`
+的一次性非交互模式。这个版本解决 v0.24.4 Known Limitation G1（UE
+Assistant panel 使用 Codex CLI chat 不返回回复）和 G4（多轮 composed prompt
+进入 argv 后可能触发命令行长度限制）。`ConversationContext` 现在通过子进程 stdin
+传入，最新用户消息仍然是最后一个 argv prompt。
+
+#### Breaking change for Codex CLI provider users
+
+1. 安装或定位 codex CLI binary：在终端运行 `which codex`。
+2. 更新 Codex Binary Path 设置：旧值是 `.../codex-orchestrator/bin/codex-agent`，新值是 `codex` binary，例如 `/opt/homebrew/bin/codex`。
+3. 从 Codex Extra Args 删除 `-m gpt-5.5 -r xhigh`，或改写为 `-c model="gpt-5.5" -c reasoning_effort="xhigh"`。
+4. 第一次使用时先在终端运行 `codex login`。
+5. 在 UEAtelier Chat 中发送一次 `/ask` 做 smoke test。
+
+Codex CLI provider 不再需要 codex-agent、bun、tmux。Codex Desktop / App
+Server provider 不受影响，WebSocket bridge 保持不变。Windows 用户继续使用
+Codex Desktop bridge；CLI provider 仍然只支持 macOS/Linux。剩余已知限制：
+G2（tilde path 不展开）、G3（hardcoded PATH list）、G5（provider
+observability）、G6（无 token-level streaming），全部 deferred。
+
+### EN
+
+v0.25 rewrites the Codex CLI provider to invoke
+`codex exec --json --ephemeral` directly in one-shot non-interactive mode. This
+resolves v0.24.4 Known Limitation G1 (Codex CLI chat did not return replies to
+the UE Assistant panel) and G4 (composed prompt argv length risk).
+`ConversationContext` now goes through the child process stdin pipe; the latest
+user message remains the final argv prompt.
+
+#### Breaking change for Codex CLI provider users
+
+1. Install or locate the codex CLI binary with `which codex`.
+2. Update the Codex Binary Path setting: the old value was `.../codex-orchestrator/bin/codex-agent`; the new value is the `codex` binary, for example `/opt/homebrew/bin/codex`.
+3. Remove `-m gpt-5.5 -r xhigh` from Codex Extra Args, or rewrite it as `-c model="gpt-5.5" -c reasoning_effort="xhigh"`.
+4. Run `codex login` in a terminal if this is the first use.
+5. Smoke-test UEAtelier Chat with one `/ask` request.
+
+The Codex CLI provider no longer requires codex-agent, bun, or tmux. The Codex
+Desktop / App Server provider is unaffected; the WebSocket bridge is unchanged.
+Windows users should continue using the Codex Desktop bridge because the CLI
+provider remains macOS/Linux only. Remaining known limitations are G2 (tilde
+paths), G3 (hardcoded PATH list), G5 (provider observability), and G6 (no
+token-level streaming); all are deferred.
+
+### 日本語
+
+v0.25 では Codex CLI provider を書き直し、`codex exec --json --ephemeral`
+を直接呼ぶ one-shot / non-interactive mode に変更します。これにより v0.24.4
+Known Limitation G1（Codex CLI chat の reply が UE Assistant panel に戻らない）
+と G4（composed prompt を argv に入れることによる command-line length risk）を解決します。
+`ConversationContext` は子プロセス stdin pipe 経由になり、最新の user message だけが
+最後の argv prompt になります。
+
+#### Breaking change for Codex CLI provider users
+
+1. `which codex` を terminal で実行し、codex CLI binary を install / locate します。
+2. Codex Binary Path を更新します。旧値は `.../codex-orchestrator/bin/codex-agent`、新値は `codex` binary（例: `/opt/homebrew/bin/codex`）です。
+3. Codex Extra Args から `-m gpt-5.5 -r xhigh` を削除するか、`-c model="gpt-5.5" -c reasoning_effort="xhigh"` に書き換えます。
+4. 初回利用時は terminal で `codex login` を実行します。
+5. UEAtelier Chat で `/ask` を 1 回送り smoke test します。
+
+Codex CLI provider では codex-agent、bun、tmux は不要になりました。Codex
+Desktop / App Server provider は影響を受けず、WebSocket bridge は変更ありません。
+Windows ユーザーは引き続き Codex Desktop bridge を使ってください。CLI provider は
+macOS/Linux 専用のままです。残る known limitations は G2（tilde path）、
+G3（hardcoded PATH list）、G5（provider observability）、G6（token-level
+streaming なし）で、いずれも deferred です。
+
+---
+
 ## トラブルシューティング / Troubleshooting / 故障排查
 
 | 症状 / Symptom | 原因 / Cause | 対処 / Fix |

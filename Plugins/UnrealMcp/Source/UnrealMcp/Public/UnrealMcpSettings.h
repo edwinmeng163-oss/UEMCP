@@ -49,10 +49,10 @@ struct UNREALMCP_API FAiProviderConfig
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ClampMin="0", ToolTip="Per-provider output token limit. Set to 0 to fall back to the global AiMaxOutputTokens setting."))
 	int32 MaxOutputTokens = 4096;
 
-	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Path to the local Codex CLI bridge executable. Ignored for non-Codex provider kinds."))
+	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Path to the codex CLI binary (e.g. /opt/homebrew/bin/codex on Apple Silicon Homebrew). Find via `which codex` in a terminal. Used only by the Codex CLI provider. v0.25+ uses codex exec directly; codex-agent wrapper is no longer supported."))
 	FString CodexBinaryPath;
 
-	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Extra arguments passed to the local Codex CLI bridge. Ignored for non-Codex provider kinds."))
+	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(ToolTip="Additional flags appended to `codex exec` invocation. Uses codex CLI -c key=\"value\" syntax. Example: -c reasoning_effort=\"high\". Baseline flags (model, sandbox_mode, reasoning_effort) are auto-injected. v0.25 no longer accepts the legacy -r/--reasoning flags (codex exec rejects them)."))
 	FString CodexExtraArgs;
 };
 
@@ -101,7 +101,7 @@ public:
 	//   Example: GLM (Zhipu)      Kind=OpenAiChatCompat BaseUrl=https://open.bigmodel.cn/api/paas/v4/chat/completions Model=glm-4
 	//   Example: DeepSeek         Kind=OpenAiChatCompat BaseUrl=https://api.deepseek.com/v1/chat/completions Model=deepseek-chat
 	//   Example: Anthropic        Kind=AnthropicMessages BaseUrl=https://api.anthropic.com/v1/messages Model=claude-sonnet-4-6
-	//   Example: Codex            Kind=Codex CodexBinaryPath=/Users/.../codex-orchestrator/bin/codex-agent CodexExtraArgs="-m gpt-5.5 -r xhigh"
+	//   Example: Codex            Kind=Codex CodexBinaryPath=/opt/homebrew/bin/codex CodexExtraArgs="-c reasoning_effort=\"high\""
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(TitleProperty="DisplayName"))
 	TArray<FAiProviderConfig> Providers;
 

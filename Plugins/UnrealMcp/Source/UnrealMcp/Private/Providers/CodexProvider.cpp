@@ -1,23 +1,24 @@
 #include "Providers/CodexProvider.h"
 
+#include "Providers/CodexProviderExecHelpers.h"
 #include "Providers/ProviderHelpers.h"
 #include "Async/Async.h"
-#include "HAL/FileManager.h"
+#include "Dom/JsonObject.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include <atomic>
 
 // =====================================================================
-// CodexProvider shell-quoting invariants (v0.24.4 - authoritative copy
+// CodexProvider shell-quoting invariants (v0.25 - authoritative copy
 // of Docs/AIProviderArchitecture.md Section B; keep both in sync)
 // =====================================================================
 // The full Arguments string passed to FPlatformProcess::CreateProc as the
-// Arguments parameter, for the bash subprocess that wraps codex-agent,
+// Arguments parameter, for the bash subprocess that wraps codex exec,
 // must satisfy ALL of the following invariants:
 //
 // - The full `Arguments` string passed to `FPlatformProcess::CreateProc` has
@@ -51,6 +52,14 @@
 //   post-expansion. PATH is already exported by the parent UE Editor
 //   process, so re-assignment preserves the exported status and the new
 //   value propagates to child processes via standard env inheritance.
+// - ConversationContext for multi-turn chat MUST be passed via the child
+//   subprocess's stdin pipe (closed after write to signal EOF), NOT
+//   concatenated into the argv prompt. Argv prompt contains only the latest
+//   user message. Rationale: avoids ARG_MAX cap; clean <stdin> block
+//   separation in codex's prompt envelope.
+// - Cancellation MUST use FPlatformProcess::TerminateProc(handle,
+//   /*killTree=*/true) directly on the bash subprocess handle, not a separate
+//   kill <jobId> subprocess command.
 //
 // Rationale: UE Unix CreateProc parses Arguments via ParseCmdLineToken in
 // Engine/Source/Runtime/Core/Private/Unix/UnixPlatformProcess.cpp, which
@@ -68,6 +77,10 @@
 //     spaces); the v0.24.4 ship-time fix changed `export${IFS}PATH=`
 //     to the bare `PATH=` assignment form and added the explicit
 //     invariant (8) above.
+//   - v0.25 Reform B replaced codex-agent + tmux + bun with direct
+//     codex exec + 3 pipes + worker-thread chunked stdin write. Drops
+//     3 runtime dependencies; resolves G1 (interactive-mode mismatch)
+//     + G4 (composed prompt argv length).
 // =====================================================================
 
 namespace UnrealMcp::Providers
@@ -125,22 +138,9 @@ namespace UnrealMcp::Providers::Internal
 		return FString::Join(QuotedArgs, TEXT("${IFS}"));
 	}
 
-	FString ComposePrompt(const FString& UserPrompt, const FString& ConversationContext)
-	{
-		const FString TrimmedContext = ConversationContext.TrimStartAndEnd();
-		if (TrimmedContext.IsEmpty())
-		{
-			return UserPrompt;
-		}
-		return FString::Printf(
-			TEXT("--- conversation context ---\n\n%s\n\n--- latest user prompt ---\n\n%s"),
-			*TrimmedContext,
-			*UserPrompt);
-	}
-
-	FString BuildCodexStartCommand(
+	FString BuildCodexExecCommand(
 		const FString& CodexBinaryPath,
-		const FString& ComposedPromptText,
+		const FString& UserPromptOnly,
 		const FString& ProjectAbsoluteDir,
 		const TArray<FString>& FilteredExtraArgs)
 	{
@@ -150,49 +150,150 @@ namespace UnrealMcp::Providers::Internal
 
 		TArray<FString> CommandParts;
 		CommandParts.Add(QuoteForBashWordNoSpaces(CodexBinaryPath));
-		CommandParts.Add(TEXT("start"));
-		CommandParts.Add(QuoteForBashWordNoSpaces(ComposedPromptText));
-		CommandParts.Add(TEXT("-m"));
-		CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexModel));
-		CommandParts.Add(TEXT("-r"));
-		CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexReasoning));
-		CommandParts.Add(TEXT("-s"));
-		CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexSandbox));
-		CommandParts.Add(TEXT("-d"));
+		CommandParts.Add(TEXT("exec"));
+		CommandParts.Add(TEXT("--json"));
+		CommandParts.Add(TEXT("--ephemeral"));
+		CommandParts.Add(TEXT("--skip-git-repo-check"));
+		CommandParts.Add(TEXT("-C"));
 		CommandParts.Add(QuoteForBashWordNoSpaces(ProjectAbsoluteDir));
-		CommandParts.Add(TEXT("-w"));
-		CommandParts.Add(TEXT("--strip-ansi"));
+		CommandParts.Add(TEXT("-c"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(FString::Printf(TEXT("model=\"%s\""), ForcedCodexModel)));
+		CommandParts.Add(TEXT("-c"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(FString::Printf(TEXT("reasoning_effort=\"%s\""), ForcedCodexReasoning)));
+		CommandParts.Add(TEXT("-c"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(FString::Printf(TEXT("sandbox_mode=\"%s\""), ForcedCodexSandbox)));
 		if (!FilteredExtraArgs.IsEmpty())
 		{
 			CommandParts.Add(JoinShellArgumentsNoSpaces(FilteredExtraArgs));
 		}
+		CommandParts.Add(QuoteForBashWordNoSpaces(UserPromptOnly));
 
 		return UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
 			+ FString::Join(CommandParts, TEXT("${IFS}"));
 	}
 
-	FString BuildCodexKillCommand(
-		const FString& CodexBinaryPath,
-		const FString& JobId,
-		const FString& ProjectAbsoluteDir)
+	namespace
 	{
-		static_cast<void>(ProjectAbsoluteDir);
+		int32 ReadIntField(const TSharedPtr<FJsonObject>& Object, const FString& FieldName)
+		{
+			double Number = 0.0;
+			if (Object.IsValid() && Object->TryGetNumberField(FieldName, Number))
+			{
+				return FMath::TruncToInt(Number);
+			}
+			return 0;
+		}
+	}
 
-		TArray<FString> KillCommandParts;
-		KillCommandParts.Add(QuoteForBashWordNoSpaces(CodexBinaryPath));
-		KillCommandParts.Add(TEXT("kill"));
-		KillCommandParts.Add(QuoteForBashWordNoSpaces(JobId));
+	bool ParseCodexJsonlEvent(const FString& Line, FCodexJsonlEvent& OutEvent)
+	{
+		OutEvent = FCodexJsonlEvent();
+		OutEvent.RawJson = Line;
 
-		return UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
-			+ FString::Join(KillCommandParts, TEXT("${IFS}"));
+		TSharedPtr<FJsonObject> RootObject;
+		const TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(Line);
+		if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+		{
+			return false;
+		}
+
+		FString Type;
+		if (!RootObject->TryGetStringField(TEXT("type"), Type))
+		{
+			return true;
+		}
+
+		if (Type == TEXT("thread.started"))
+		{
+			OutEvent.Kind = ECodexJsonlEventKind::ThreadStarted;
+			RootObject->TryGetStringField(TEXT("thread_id"), OutEvent.ThreadId);
+			return true;
+		}
+
+		if (Type == TEXT("turn.started"))
+		{
+			OutEvent.Kind = ECodexJsonlEventKind::TurnStarted;
+			return true;
+		}
+
+		if (Type == TEXT("item.completed"))
+		{
+			OutEvent.Kind = ECodexJsonlEventKind::ItemCompleted;
+			const TSharedPtr<FJsonObject>* ItemObject = nullptr;
+			if (RootObject->TryGetObjectField(TEXT("item"), ItemObject) && ItemObject && ItemObject->IsValid())
+			{
+				(*ItemObject)->TryGetStringField(TEXT("type"), OutEvent.ItemType);
+				(*ItemObject)->TryGetStringField(TEXT("text"), OutEvent.ItemText);
+			}
+			return true;
+		}
+
+		if (Type == TEXT("turn.completed"))
+		{
+			OutEvent.Kind = ECodexJsonlEventKind::TurnCompleted;
+			const TSharedPtr<FJsonObject>* UsageObject = nullptr;
+			if (RootObject->TryGetObjectField(TEXT("usage"), UsageObject) && UsageObject && UsageObject->IsValid())
+			{
+				OutEvent.InputTokens = ReadIntField(*UsageObject, TEXT("input_tokens"));
+				OutEvent.OutputTokens = ReadIntField(*UsageObject, TEXT("output_tokens"));
+				OutEvent.CachedInputTokens = ReadIntField(*UsageObject, TEXT("cached_input_tokens"));
+				OutEvent.ReasoningOutputTokens = ReadIntField(*UsageObject, TEXT("reasoning_output_tokens"));
+			}
+			return true;
+		}
+
+		if (Type == TEXT("error"))
+		{
+			OutEvent.Kind = ECodexJsonlEventKind::Error;
+			if (!RootObject->TryGetStringField(TEXT("message"), OutEvent.ErrorMessage))
+			{
+				RootObject->TryGetStringField(TEXT("error"), OutEvent.ErrorMessage);
+			}
+			return true;
+		}
+
+		return true;
+	}
+
+	bool DetectCodexAuthError(const FString& Chunk)
+	{
+		return Chunk.Contains(TEXT("401 Unauthorized"), ESearchCase::IgnoreCase)
+			|| Chunk.Contains(TEXT("Missing bearer or basic authentication"), ESearchCase::IgnoreCase)
+			|| Chunk.Contains(TEXT("Reconnecting"), ESearchCase::IgnoreCase);
+	}
+
+	bool LooksLikeLegacyCodexAgentPath(const FString& Path)
+	{
+		FString Trimmed = Path.TrimStartAndEnd();
+		while (Trimmed.EndsWith(TEXT("/")) || Trimmed.EndsWith(TEXT("\\")))
+		{
+			Trimmed.LeftChopInline(1, EAllowShrinking::No);
+		}
+		if (Trimmed.IsEmpty())
+		{
+			return false;
+		}
+		return FPaths::GetCleanFilename(Trimmed).Equals(TEXT("codex-agent"), ESearchCase::IgnoreCase);
+	}
+
+	bool ContainsUnsupportedReasoningFlag(const TArray<FString>& Tokens)
+	{
+		for (const FString& Token : Tokens)
+		{
+			if (Token == TEXT("-r")
+				|| (Token.StartsWith(TEXT("-r")) && Token.Len() > 2)
+				|| Token == TEXT("--reasoning")
+				|| Token.StartsWith(TEXT("--reasoning=")))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 }
 
 namespace
 {
-	const TCHAR* ForcedCodexModel = TEXT("gpt-5.5");
-	const TCHAR* ForcedCodexReasoning = TEXT("xhigh");
-	const TCHAR* ForcedCodexSandbox = TEXT("workspace-write");
 #if PLATFORM_WINDOWS
 	const TCHAR* CodexCliWindowsUnsupportedMessage = TEXT("Codex CLI provider is not supported on Windows. Use the CodexAppServer (Codex Desktop bridge) provider instead. See Docs/Release-2026-05.md.");
 
@@ -252,11 +353,13 @@ namespace
 			if (Character == TEXT('\'') && !bInDoubleQuote)
 			{
 				bInSingleQuote = !bInSingleQuote;
+				Current.AppendChar(Character);
 				continue;
 			}
 			if (Character == TEXT('"') && !bInSingleQuote)
 			{
 				bInDoubleQuote = !bInDoubleQuote;
+				Current.AppendChar(Character);
 				continue;
 			}
 			if (FChar::IsWhitespace(Character) && !bInSingleQuote && !bInDoubleQuote)
@@ -281,6 +384,8 @@ namespace
 		}
 		return true;
 	}
+
+	// TODO(v0.26+): reuse if -c flag enforcement is needed.
 	bool ValidateFlagValue(
 		const FAiProviderConfig& Config,
 		const FString& FlagName,
@@ -300,139 +405,7 @@ namespace
 		}
 		return true;
 	}
-	bool ValidateAndFilterExtraArgs(const FAiProviderConfig& Config, TArray<FString>& OutFilteredArgs, FString& OutError)
-	{
-		TArray<FString> Tokens;
-		if (!TokenizeExtraArgs(Config.CodexExtraArgs.TrimStartAndEnd(), Tokens, OutError))
-		{
-			OutError = FString::Printf(TEXT("Provider '%s': %s"), *UnrealMcp::Providers::ProviderIdForError(Config), *OutError);
-			return false;
-		}
 
-		for (int32 Index = 0; Index < Tokens.Num(); ++Index)
-		{
-			const FString& Token = Tokens[Index];
-			auto ConsumeNextValue = [&](const FString& FlagName, FString& OutValue) -> bool
-			{
-				if (Index + 1 >= Tokens.Num())
-				{
-					OutError = FString::Printf(TEXT("Provider '%s': CodexExtraArgs flag %s requires a value."), *UnrealMcp::Providers::ProviderIdForError(Config), *FlagName);
-					return false;
-				}
-				OutValue = Tokens[++Index];
-				return true;
-			};
-
-			if (Token == TEXT("-m") || Token == TEXT("--model"))
-			{
-				FString Value;
-				if (!ConsumeNextValue(Token, Value)) { return false; }
-				if (!ValidateFlagValue(Config, Token, Value, ForcedCodexModel, OutError)) { return false; }
-				continue;
-			}
-			if (Token.StartsWith(TEXT("--model=")))
-			{
-				const FString Value = Token.RightChop(8);
-				if (!ValidateFlagValue(Config, TEXT("--model"), Value, ForcedCodexModel, OutError)) { return false; }
-				continue;
-			}
-			if (Token.StartsWith(TEXT("-m")) && Token.Len() > 2)
-			{
-				FString Value = Token.RightChop(2);
-				if (Value.StartsWith(TEXT("="))) { Value.RightChopInline(1, EAllowShrinking::No); }
-				if (!ValidateFlagValue(Config, TEXT("-m"), Value, ForcedCodexModel, OutError)) { return false; }
-				continue;
-			}
-			if (Token == TEXT("-r") || Token == TEXT("--reasoning"))
-			{
-				FString Value;
-				if (!ConsumeNextValue(Token, Value)) { return false; }
-				if (!ValidateFlagValue(Config, Token, Value, ForcedCodexReasoning, OutError)) { return false; }
-				continue;
-			}
-			if (Token.StartsWith(TEXT("--reasoning=")))
-			{
-				const FString Value = Token.RightChop(12);
-				if (!ValidateFlagValue(Config, TEXT("--reasoning"), Value, ForcedCodexReasoning, OutError)) { return false; }
-				continue;
-			}
-			if (Token.StartsWith(TEXT("-r")) && Token.Len() > 2)
-			{
-				FString Value = Token.RightChop(2);
-				if (Value.StartsWith(TEXT("="))) { Value.RightChopInline(1, EAllowShrinking::No); }
-				if (!ValidateFlagValue(Config, TEXT("-r"), Value, ForcedCodexReasoning, OutError)) { return false; }
-				continue;
-			}
-			if (Token == TEXT("--fast"))
-			{
-				OutError = FString::Printf(TEXT("Provider '%s': CodexExtraArgs must not use --fast because this provider forces model '%s'."), *UnrealMcp::Providers::ProviderIdForError(Config), ForcedCodexModel);
-				return false;
-			}
-			if (Token == TEXT("-s") || Token == TEXT("--sandbox"))
-			{
-				FString Value;
-				if (!ConsumeNextValue(Token, Value)) { return false; }
-				if (!ValidateFlagValue(Config, Token, Value, ForcedCodexSandbox, OutError)) { return false; }
-				continue;
-			}
-			if (Token.StartsWith(TEXT("--sandbox=")))
-			{
-				const FString Value = Token.RightChop(10);
-				if (!ValidateFlagValue(Config, TEXT("--sandbox"), Value, ForcedCodexSandbox, OutError)) { return false; }
-				continue;
-			}
-			if (Token.StartsWith(TEXT("-s")) && Token.Len() > 2)
-			{
-				FString Value = Token.RightChop(2);
-				if (Value.StartsWith(TEXT("="))) { Value.RightChopInline(1, EAllowShrinking::No); }
-				if (!ValidateFlagValue(Config, TEXT("-s"), Value, ForcedCodexSandbox, OutError)) { return false; }
-				continue;
-			}
-
-			OutFilteredArgs.Add(Token);
-		}
-		return true;
-	}
-	bool LooksLikeJobId(const FString& Candidate)
-	{
-		const FString Trimmed = Candidate.TrimStartAndEnd();
-		if (Trimmed.Len() < 4 || Trimmed.Len() > 96)
-		{
-			return false;
-		}
-		for (const TCHAR Character : Trimmed)
-		{
-			if (!FChar::IsAlnum(Character) && Character != TEXT('-') && Character != TEXT('_'))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-	FString ExtractLikelyJobId(const FString& Chunk)
-	{
-		TArray<FString> Lines;
-		Chunk.ParseIntoArrayLines(Lines, false);
-		for (const FString& Line : Lines)
-		{
-			FString Candidate;
-			if (Line.Split(TEXT("Job started:"), nullptr, &Candidate, ESearchCase::IgnoreCase))
-			{
-				TArray<FString> Parts;
-				Candidate.ParseIntoArrayWS(Parts);
-				if (Parts.Num() > 0 && LooksLikeJobId(Parts[0]))
-				{
-					return Parts[0];
-					}
-				}
-				const FString Trimmed = Line.TrimStartAndEnd();
-			if (LooksLikeJobId(Trimmed))
-			{
-				return Trimmed;
-			}
-		}
-		return FString();
-	}
 	class FCodexRun final : public IUnrealMcpAssistantHandle, public FRunnable, public TSharedFromThis<FCodexRun, ESPMode::ThreadSafe>
 	{
 	public:
@@ -474,7 +447,7 @@ namespace
 			SelfKeepAlive = AsShared();
 			check(Settings);
 			static_cast<void>(Module);
-			// Codex CLI is currently single-shot: previous_response_id is ignored and any compressed chat history is folded into the prompt text.
+			// Codex CLI is one-shot: previous_response_id is ignored and compressed chat history goes through stdin.
 			static_cast<void>(PreviousResponseId);
 
 			if (!Settings->bEnableAiAssistant)
@@ -491,29 +464,18 @@ namespace
 				return;
 			}
 
-			// TODO(v0.25 Reform B): WritePromptTempFile's output is no longer read by
-			// the bash command after the v0.24.4 prompt-pass refactor. The function is
-			// retained for one release to preserve any external tooling that may inspect
-			// the temp file; Reform B will rewrite SpawnProcess to use `codex exec`
-			// (one-shot) and remove this branch.
-			if (!WritePromptTempFile(Error))
-			{
-				Finish(Error, true);
-				return;
-			}
-
 			if (!SpawnProcess(FilteredExtraArgs, Error))
 			{
 				Finish(Error, true);
 				return;
 			}
 
-			EmitStatus(TEXT("Started local Codex agent."));
-			PumpThread = FRunnableThread::Create(this, TEXT("UnrealMcpCodexStdoutPump"));
+			EmitStatus(TEXT("Started local Codex exec."));
+			PumpThread = FRunnableThread::Create(this, TEXT("UnrealMcpCodexExecPump"));
 			if (!PumpThread)
 			{
 				TerminateProcessIfRunning();
-				Finish(TEXT("Failed to start Codex stdout pump thread."), true);
+				Finish(TEXT("Failed to start Codex exec pump thread."), true);
 			}
 		}
 
@@ -525,7 +487,6 @@ namespace
 			}
 			bCancellationRequested.store(true, std::memory_order_relaxed);
 			TerminateProcessIfRunning();
-			TryKillCapturedJob();
 			Finish(TEXT("Generation stopped."), false, true);
 		}
 
@@ -549,9 +510,11 @@ namespace
 
 		virtual uint32 Run() override
 		{
+			WriteConversationContextToStdin();
+
 			while (!bCancellationRequested.load(std::memory_order_relaxed))
 			{
-				DrainStdoutOnce();
+				DrainPipesOnce();
 				if (!IsProcessRunning())
 				{
 					break;
@@ -561,11 +524,10 @@ namespace
 
 			for (int32 DrainAttempt = 0; DrainAttempt < 10; ++DrainAttempt)
 			{
-				if (!DrainStdoutOnce())
-				{
-					break;
-				}
+				DrainPipesOnce();
+				FPlatformProcess::Sleep(0.01f);
 			}
+			FlushPartialPipeLines();
 
 			if (bCompleted.load(std::memory_order_acquire))
 			{
@@ -578,7 +540,7 @@ namespace
 				return 0;
 			}
 
-			int32 ReturnCode = 0;
+			int32 ReturnCode = -1;
 			const bool bHasReturnCode = GetProcessReturnCode(ReturnCode);
 			FString FinalText;
 			{
@@ -586,15 +548,24 @@ namespace
 				FinalText = AccumulatedText;
 			}
 
-			if (bHasReturnCode && ReturnCode != 0)
+			if (!bHasReturnCode || ReturnCode != 0 || !bTurnCompletedSeen)
 			{
-				if (FinalText.TrimStartAndEnd().IsEmpty())
+				if (!bAuthErrorAlreadyEmitted)
 				{
-					FinalText = FString::Printf(TEXT("Codex process exited with code %d."), ReturnCode);
+					const FString StderrTail = StderrRecentText.Right(200);
+					FUnrealMcpAssistantEvent ErrEvent;
+					ErrEvent.Type = EUnrealMcpAssistantEventType::Status;  // v0.25: EUnrealMcpAssistantEventType has no Error variant; chat panel renders Status text. The Text field below carries the explicit "Codex CLI error:" / "is not logged in" / "exited with code" prefix so users see the error wording. Terminal failure also sets bIsError=true on FUnrealMcpAssistantTurnResult in EmitTurnResult.
+					ErrEvent.Text = FString::Printf(
+						TEXT("Codex CLI exited with code %d%s. Stderr (last 200 chars): %s"),
+						ReturnCode,
+						bTurnCompletedSeen ? TEXT("") : TEXT(" before turn.completed"),
+						*StderrTail);
+					EmitEvent(ErrEvent);
+					FinalText = ErrEvent.Text;
 				}
-				else
+				else if (FinalText.TrimStartAndEnd().IsEmpty())
 				{
-					FinalText += FString::Printf(TEXT("\n\nCodex process exited with code %d."), ReturnCode);
+					FinalText = TEXT("Codex CLI is not logged in. Run 'codex login' in a terminal first, then retry the chat.");
 				}
 				Finish(FinalText, true);
 				return 0;
@@ -602,7 +573,7 @@ namespace
 
 			if (FinalText.TrimStartAndEnd().IsEmpty())
 			{
-				FinalText = TEXT("Codex process completed without producing output.");
+				FinalText = TEXT("Codex turn completed without producing an agent_message.");
 			}
 			Finish(FinalText, false);
 			return 0;
@@ -621,79 +592,94 @@ namespace
 			ReportCodexCliWindowsUnsupported(OutError);
 			return false;
 #else
-			const FString ProviderId = UnrealMcp::Providers::ProviderIdForError(InConfig);
-			const FString BinaryPath = InConfig.CodexBinaryPath.TrimStartAndEnd();
-			if (BinaryPath.IsEmpty())
+			const FString TrimmedBinaryPath = InConfig.CodexBinaryPath.TrimStartAndEnd();
+
+			if (TrimmedBinaryPath.IsEmpty())
 			{
-				OutError = FString::Printf(TEXT("Provider '%s': Codex binary path is empty."), *ProviderId);
+				OutError = FString::Printf(
+					TEXT("Provider '%s': Codex Binary Path is empty. Set it to the codex CLI binary (find it with 'which codex' in a terminal)."),
+					*InConfig.Id);
 				return false;
 			}
 
 			FString FailureReason;
-			if (ContainsDangerousShellCharacters(BinaryPath, FailureReason))
+			if (ContainsDangerousShellCharacters(TrimmedBinaryPath, FailureReason))
 			{
-				OutError = FString::Printf(TEXT("Provider '%s': Codex binary path %s"), *ProviderId, *FailureReason);
+				OutError = FString::Printf(TEXT("Provider '%s': Codex Binary Path %s"), *InConfig.Id, *FailureReason);
 				return false;
 			}
 
-			if (!FPaths::FileExists(BinaryPath))
+			if (::UnrealMcp::Providers::Internal::LooksLikeLegacyCodexAgentPath(TrimmedBinaryPath))
 			{
-				OutError = FString::Printf(TEXT("Provider '%s': Codex binary path does not exist: %s"), *ProviderId, *BinaryPath);
+				OutError = FString::Printf(
+					TEXT("Provider '%s': Codex Binary Path points to the legacy codex-agent wrapper. v0.25 uses codex exec directly; "
+						 "set Codex Binary Path to the codex CLI binary (e.g. /opt/homebrew/bin/codex on Apple Silicon Homebrew, "
+						 "or run 'which codex' in a terminal). codex-agent / bun / tmux are no longer required for the Codex CLI provider. "
+						 "See Docs/AIProviderArchitecture.md Section G (G1) for the architectural change rationale."),
+					*InConfig.Id);
 				return false;
 			}
 
-			if (!ValidateAndFilterExtraArgs(InConfig, OutFilteredExtraArgs, OutError))
+			if (!FPaths::FileExists(TrimmedBinaryPath))
 			{
+				OutError = FString::Printf(TEXT("Provider '%s': Codex Binary Path does not exist: %s"), *InConfig.Id, *TrimmedBinaryPath);
 				return false;
 			}
 
+			TArray<FString> Tokens;
+			if (!TokenizeExtraArgs(InConfig.CodexExtraArgs, Tokens, OutError))
+			{
+				OutError = FString::Printf(TEXT("Provider '%s': %s"), *InConfig.Id, *OutError);
+				return false;
+			}
+
+			if (::UnrealMcp::Providers::Internal::ContainsUnsupportedReasoningFlag(Tokens))
+			{
+				OutError = FString::Printf(
+					TEXT("Provider '%s': Codex Extra Args contains an unsupported -r/--reasoning flag. v0.25 uses codex exec which does NOT accept -r. "
+						 "Remove '-r <value>' (and any '-m gpt-5.5 -r xhigh'-style v0.24 default), or rewrite as '-c reasoning_effort=\"<value>\"'."),
+					*InConfig.Id);
+				return false;
+			}
+
+			OutFilteredExtraArgs = MoveTemp(Tokens);
 			return true;
 #endif
 		}
 
 	private:
-		bool WritePromptTempFile(FString& OutError)
-		{
-			const FString PromptDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("codex_prompts"));
-			if (!IFileManager::Get().MakeDirectory(*PromptDir, true))
-			{
-				OutError = FString::Printf(TEXT("Failed to create Codex prompt directory: %s"), *PromptDir);
-				return false;
-			}
-
-			PromptTempFilePath = FPaths::Combine(
-				PromptDir,
-				FString::Printf(TEXT("%s.txt"), *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower)));
-
-			const FString PromptText = ::UnrealMcp::Providers::Internal::ComposePrompt(UserPrompt, ConversationContext);
-			if (!FFileHelper::SaveStringToFile(PromptText, *PromptTempFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-			{
-				OutError = FString::Printf(TEXT("Failed to write Codex prompt file: %s"), *PromptTempFilePath);
-				return false;
-			}
-
-			return true;
-		}
-
 		bool SpawnProcess(const TArray<FString>& FilteredExtraArgs, FString& OutError)
 		{
 			const FString BashPath = TEXT("/bin/bash");
 			if (!FPaths::FileExists(BashPath))
 			{
-				OutError = TEXT("Codex provider requires /bin/bash for the prompt-file fallback command.");
+				OutError = TEXT("Codex provider requires /bin/bash.");
 				return false;
 			}
 
-			if (!FPlatformProcess::CreatePipe(ReadPipe, WritePipe))
+			if (!FPlatformProcess::CreatePipe(StdoutReadPipe, StdoutWritePipe))
 			{
-				OutError = TEXT("Failed to create pipe for Codex stdout.");
+				OutError = TEXT("Failed to create stdout pipe.");
+				return false;
+			}
+			if (!FPlatformProcess::CreatePipe(StderrReadPipe, StderrWritePipe))
+			{
+				OutError = TEXT("Failed to create stderr pipe.");
+				CleanupProcessResources();
+				return false;
+			}
+			if (!FPlatformProcess::CreatePipe(StdinReadPipe, StdinWritePipe, true))
+			{
+				OutError = TEXT("Failed to create stdin pipe.");
+				CleanupProcessResources();
 				return false;
 			}
 
-			const FString Command = ::UnrealMcp::Providers::Internal::BuildCodexStartCommand(
+			const FString ProjectAbsoluteDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			const FString Command = ::UnrealMcp::Providers::Internal::BuildCodexExecCommand(
 				Config.CodexBinaryPath.TrimStartAndEnd(),
-				::UnrealMcp::Providers::Internal::ComposePrompt(UserPrompt, ConversationContext),
-				FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
+				UserPrompt,
+				ProjectAbsoluteDir,
 				FilteredExtraArgs);
 			const FString Arguments = FString::Printf(TEXT("-c %s"), *Command);
 
@@ -706,48 +692,223 @@ namespace
 				true,
 				&ProcessId,
 				0,
-				*FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
-				WritePipe,
-				nullptr,
-				WritePipe);
+				*ProjectAbsoluteDir,
+				StdoutWritePipe,
+				StdinReadPipe,
+				StderrWritePipe);
 
 			if (!ProcessHandle.IsValid())
 			{
 				CleanupProcessResources();
-				OutError = TEXT("Failed to launch codex-agent subprocess.");
+				OutError = TEXT("Failed to launch codex CLI subprocess.");
 				return false;
 			}
 
 			return true;
 		}
 
-		bool DrainStdoutOnce()
+		void WriteConversationContextToStdin()
 		{
-			if (!ReadPipe)
+			if (!StdinWritePipe)
 			{
-				return false;
+				return;
 			}
 
-			const FString Chunk = FPlatformProcess::ReadPipe(ReadPipe);
-			if (Chunk.IsEmpty())
-			{
-				return false;
-			}
+			const FTCHARToUTF8 Utf8(*ConversationContext);
+			const int32 TotalBytes = Utf8.Length();
+			const uint8* DataPtr = reinterpret_cast<const uint8*>(Utf8.Get());
 
+			constexpr int32 ChunkSize = 16 * 1024;
+			int32 BytesWritten = 0;
+
+			while (BytesWritten < TotalBytes && !bCancellationRequested.load(std::memory_order_relaxed))
 			{
-				const FScopeLock Lock(&StateMutex);
-				AccumulatedText += Chunk;
-				if (CapturedJobId.IsEmpty())
+				const int32 BytesToWrite = FMath::Min(ChunkSize, TotalBytes - BytesWritten);
+				int32 BytesActuallyWritten = 0;
+				const bool bSuccess = FPlatformProcess::WritePipe(
+					StdinWritePipe,
+					DataPtr + BytesWritten,
+					BytesToWrite,
+					&BytesActuallyWritten);
+
+				if (!bSuccess || BytesActuallyWritten <= 0)
 				{
-					CapturedJobId = ExtractLikelyJobId(Chunk);
+					UE_LOG(LogUnrealMcp, Warning,
+						TEXT("CodexProvider: stdin write failed after %d/%d bytes; closing stdin and continuing without remaining context."),
+						BytesWritten, TotalBytes);
+					break;
+				}
+
+				BytesWritten += BytesActuallyWritten;
+			}
+
+			FPlatformProcess::ClosePipe(nullptr, StdinWritePipe);
+			StdinWritePipe = nullptr;
+		}
+
+		void DrainPipesOnce()
+		{
+			if (StdoutReadPipe)
+			{
+				const FString StdoutChunk = FPlatformProcess::ReadPipe(StdoutReadPipe);
+				if (!StdoutChunk.IsEmpty())
+				{
+					StdoutLineBuffer += StdoutChunk;
+					ConsumeStdoutBufferLines();
 				}
 			}
 
-			FUnrealMcpAssistantEvent Event;
-			Event.Type = EUnrealMcpAssistantEventType::TextDelta;
-			Event.Text = Chunk;
-			EmitEvent(Event);
-			return true;
+			if (StderrReadPipe)
+			{
+				const FString StderrChunk = FPlatformProcess::ReadPipe(StderrReadPipe);
+				if (!StderrChunk.IsEmpty())
+				{
+					StderrLineBuffer += StderrChunk;
+					StderrRecentText += StderrChunk;
+					if (StderrRecentText.Len() > 2000)
+					{
+						StderrRecentText = StderrRecentText.Right(2000);
+					}
+					ConsumeStderrBufferLines();
+				}
+			}
+		}
+
+		void ConsumeStdoutBufferLines()
+		{
+			int32 NewlineIdx = INDEX_NONE;
+			while (StdoutLineBuffer.FindChar(TEXT('\n'), NewlineIdx))
+			{
+				FString Line = StdoutLineBuffer.Left(NewlineIdx);
+				StdoutLineBuffer.RemoveAt(0, NewlineIdx + 1, EAllowShrinking::No);
+				Line.TrimEndInline();
+				if (Line.IsEmpty())
+				{
+					continue;
+				}
+
+				::UnrealMcp::Providers::Internal::FCodexJsonlEvent Event;
+				if (!::UnrealMcp::Providers::Internal::ParseCodexJsonlEvent(Line, Event))
+				{
+					UE_LOG(LogUnrealMcp, Verbose, TEXT("CodexProvider: skipping malformed JSONL: %s"), *Line);
+					continue;
+				}
+
+				DispatchCodexJsonlEvent(Event);
+			}
+		}
+
+		void ConsumeStderrBufferLines()
+		{
+			int32 NewlineIdx = INDEX_NONE;
+			while (StderrLineBuffer.FindChar(TEXT('\n'), NewlineIdx))
+			{
+				FString Line = StderrLineBuffer.Left(NewlineIdx);
+				StderrLineBuffer.RemoveAt(0, NewlineIdx + 1, EAllowShrinking::No);
+				Line.TrimEndInline();
+				if (Line.IsEmpty())
+				{
+					continue;
+				}
+
+				UE_LOG(LogUnrealMcp, Verbose, TEXT("CodexProvider stderr: %s"), *Line);
+				if (::UnrealMcp::Providers::Internal::DetectCodexAuthError(Line))
+				{
+					EmitFriendlyAuthError();
+				}
+			}
+		}
+
+		void FlushPartialPipeLines()
+		{
+			FString StdoutTail = StdoutLineBuffer;
+			StdoutLineBuffer.Reset();
+			StdoutTail.TrimEndInline();
+			if (!StdoutTail.IsEmpty())
+			{
+				::UnrealMcp::Providers::Internal::FCodexJsonlEvent Event;
+				if (::UnrealMcp::Providers::Internal::ParseCodexJsonlEvent(StdoutTail, Event))
+				{
+					DispatchCodexJsonlEvent(Event);
+				}
+				else
+				{
+					UE_LOG(LogUnrealMcp, Verbose, TEXT("CodexProvider: skipping malformed trailing JSONL: %s"), *StdoutTail);
+				}
+			}
+
+			FString StderrTail = StderrLineBuffer;
+			StderrLineBuffer.Reset();
+			StderrTail.TrimEndInline();
+			if (!StderrTail.IsEmpty())
+			{
+				UE_LOG(LogUnrealMcp, Verbose, TEXT("CodexProvider stderr: %s"), *StderrTail);
+				if (::UnrealMcp::Providers::Internal::DetectCodexAuthError(StderrTail))
+				{
+					EmitFriendlyAuthError();
+				}
+			}
+		}
+
+		void DispatchCodexJsonlEvent(const ::UnrealMcp::Providers::Internal::FCodexJsonlEvent& Event)
+		{
+			using EKind = ::UnrealMcp::Providers::Internal::ECodexJsonlEventKind;
+			switch (Event.Kind)
+			{
+			case EKind::ThreadStarted:
+				CodexThreadId = Event.ThreadId;
+				break;
+			case EKind::TurnStarted:
+				EmitStatus(TEXT("Codex turn started."));
+				break;
+			case EKind::ItemCompleted:
+				if (Event.ItemType == TEXT("agent_message") && !Event.ItemText.IsEmpty())
+				{
+					{
+						const FScopeLock Lock(&StateMutex);
+						AccumulatedText += Event.ItemText;
+					}
+					FUnrealMcpAssistantEvent OutEvent;
+					OutEvent.Type = EUnrealMcpAssistantEventType::TextDelta;
+					OutEvent.Text = Event.ItemText;
+					EmitEvent(OutEvent);
+				}
+				break;
+			case EKind::TurnCompleted:
+				bTurnCompletedSeen = true;
+				break;
+			case EKind::Error:
+				if (::UnrealMcp::Providers::Internal::DetectCodexAuthError(Event.ErrorMessage))
+				{
+					EmitFriendlyAuthError();
+				}
+				else
+				{
+					FUnrealMcpAssistantEvent ErrEvent;
+					ErrEvent.Type = EUnrealMcpAssistantEventType::Status;  // v0.25: EUnrealMcpAssistantEventType has no Error variant; chat panel renders Status text. The Text field below carries the explicit "Codex CLI error:" / "is not logged in" / "exited with code" prefix so users see the error wording. Terminal failure also sets bIsError=true on FUnrealMcpAssistantTurnResult in EmitTurnResult.
+					ErrEvent.Text = FString::Printf(TEXT("Codex CLI error: %s"), *Event.ErrorMessage);
+					EmitEvent(ErrEvent);
+				}
+				break;
+			case EKind::Unknown:
+				UE_LOG(LogUnrealMcp, Verbose, TEXT("CodexProvider: ignoring unknown JSONL event: %s"), *Event.RawJson);
+				break;
+			default:
+				break;
+			}
+		}
+
+		void EmitFriendlyAuthError()
+		{
+			if (bAuthErrorAlreadyEmitted)
+			{
+				return;
+			}
+			bAuthErrorAlreadyEmitted = true;
+			FUnrealMcpAssistantEvent ErrEvent;
+			ErrEvent.Type = EUnrealMcpAssistantEventType::Status;  // v0.25: EUnrealMcpAssistantEventType has no Error variant; chat panel renders Status text. The Text field below carries the explicit "Codex CLI error:" / "is not logged in" / "exited with code" prefix so users see the error wording. Terminal failure also sets bIsError=true on FUnrealMcpAssistantTurnResult in EmitTurnResult.
+			ErrEvent.Text = TEXT("Codex CLI is not logged in. Run 'codex login' in a terminal first, then retry the chat.");
+			EmitEvent(ErrEvent);
 		}
 
 		bool IsProcessRunning()
@@ -768,41 +929,6 @@ namespace
 			}
 		}
 
-		void TryKillCapturedJob()
-		{
-			FString JobId;
-			{
-				const FScopeLock Lock(&StateMutex);
-				JobId = CapturedJobId;
-			}
-			if (JobId.IsEmpty())
-			{
-				return;
-			}
-
-			const FString KillCommand = ::UnrealMcp::Providers::Internal::BuildCodexKillCommand(
-				Config.CodexBinaryPath.TrimStartAndEnd(),
-				JobId,
-				FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
-			const FString KillArguments = FString::Printf(TEXT("-c %s"), *KillCommand);
-
-			FProcHandle KillHandle = FPlatformProcess::CreateProc(
-				TEXT("/bin/bash"),
-				*KillArguments,
-				true,
-				true,
-				true,
-				nullptr,
-				0,
-				*FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
-				nullptr,
-				nullptr);
-			if (KillHandle.IsValid())
-			{
-				FPlatformProcess::CloseProc(KillHandle);
-			}
-		}
-
 		void CleanupProcessResources()
 		{
 			if (ProcessHandle.IsValid())
@@ -810,16 +936,23 @@ namespace
 				FPlatformProcess::CloseProc(ProcessHandle);
 				ProcessHandle.Reset();
 			}
-			if (ReadPipe || WritePipe)
+			if (StdoutReadPipe || StdoutWritePipe)
 			{
-				FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
-				ReadPipe = nullptr;
-				WritePipe = nullptr;
+				FPlatformProcess::ClosePipe(StdoutReadPipe, StdoutWritePipe);
+				StdoutReadPipe = nullptr;
+				StdoutWritePipe = nullptr;
 			}
-			if (!PromptTempFilePath.IsEmpty())
+			if (StderrReadPipe || StderrWritePipe)
 			{
-				IFileManager::Get().Delete(*PromptTempFilePath, false, true, true);
-				PromptTempFilePath.Reset();
+				FPlatformProcess::ClosePipe(StderrReadPipe, StderrWritePipe);
+				StderrReadPipe = nullptr;
+				StderrWritePipe = nullptr;
+			}
+			if (StdinReadPipe || StdinWritePipe)
+			{
+				FPlatformProcess::ClosePipe(StdinReadPipe, StdinWritePipe);
+				StdinReadPipe = nullptr;
+				StdinWritePipe = nullptr;
 			}
 		}
 
@@ -884,15 +1017,23 @@ namespace
 		TFunction<void(const FUnrealMcpAssistantEvent&)> OnEvent;
 		TFunction<void(const FUnrealMcpAssistantTurnResult&)> OnComplete;
 		FProcHandle ProcessHandle;
-		void* ReadPipe = nullptr;
-		void* WritePipe = nullptr;
+		void* StdinReadPipe = nullptr;
+		void* StdinWritePipe = nullptr;
+		void* StdoutReadPipe = nullptr;
+		void* StdoutWritePipe = nullptr;
+		void* StderrReadPipe = nullptr;
+		void* StderrWritePipe = nullptr;
 		FRunnableThread* PumpThread = nullptr;
 		FCriticalSection StateMutex;
 		TSharedPtr<FCodexRun, ESPMode::ThreadSafe> SelfKeepAlive;
 		TArray<FString> PendingSteerInstructions;
-		FString PromptTempFilePath;
-		FString CapturedJobId;
+		FString StdoutLineBuffer;
+		FString StderrLineBuffer;
+		FString StderrRecentText;
 		FString AccumulatedText;
+		bool bAuthErrorAlreadyEmitted = false;
+		bool bTurnCompletedSeen = false;
+		FString CodexThreadId;
 		std::atomic<bool> bCancellationRequested{false};
 		std::atomic<bool> bCompleted{false};
 	};
@@ -904,11 +1045,11 @@ namespace Providers
 {
 	const FString& GetCodexSubprocessPathPrefix()
 	{
-		// Augment PATH for subprocesses so codex-agent script interpreter calls
-		// such as bare bun/node resolve when Unreal Editor inherits a minimal
-		// macOS default PATH rather than the user's interactive shell PATH.
+		// Augment PATH for subprocesses so a bare codex CLI path or its
+		// interpreter shims resolve when Unreal Editor inherits a minimal macOS
+		// default PATH rather than the user's interactive shell PATH.
 		// Common Mac developer-tool dirs covered:
-		//   $HOME/.bun/bin      - Bun (Codex Orchestrator dependency)
+		//   $HOME/.bun/bin      - user-installed JS tooling shims
 		//   $HOME/.local/bin    - pip user installs and manual binaries
 		//   $HOME/.cargo/bin    - Rust cargo
 		//   /opt/homebrew/bin   - Homebrew on Apple Silicon
