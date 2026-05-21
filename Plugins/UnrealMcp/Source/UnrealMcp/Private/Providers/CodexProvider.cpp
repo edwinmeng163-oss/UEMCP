@@ -12,6 +12,11 @@
 #include "Misc/ScopeLock.h"
 #include <atomic>
 
+namespace UnrealMcp::Providers
+{
+	const FString& GetCodexSubprocessPathPrefix();
+}
+
 namespace
 {
 	const TCHAR* ForcedCodexModel = TEXT("gpt-5.5");
@@ -585,7 +590,8 @@ namespace
 				CommandParts.Add(JoinShellArgumentsNoSpaces(FilteredExtraArgs));
 			}
 
-			const FString Command = FString::Join(CommandParts, TEXT("${IFS}"));
+			const FString Command = UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
+				+ FString::Join(CommandParts, TEXT("${IFS}"));
 			const FString Arguments = FString::Printf(TEXT("-c %s"), *Command);
 
 			uint32 ProcessId = 0;
@@ -671,10 +677,18 @@ namespace
 				return;
 			}
 
-			const FString Args = FString::Printf(TEXT("kill %s"), *JobId);
+			TArray<FString> KillCommandParts;
+			KillCommandParts.Add(QuoteForBashWordNoSpaces(Config.CodexBinaryPath.TrimStartAndEnd()));
+			KillCommandParts.Add(TEXT("kill"));
+			KillCommandParts.Add(QuoteForBashWordNoSpaces(JobId));
+
+			const FString KillCommand = UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
+				+ FString::Join(KillCommandParts, TEXT("${IFS}"));
+			const FString KillArguments = FString::Printf(TEXT("-c %s"), *KillCommand);
+
 			FProcHandle KillHandle = FPlatformProcess::CreateProc(
-				*Config.CodexBinaryPath.TrimStartAndEnd(),
-				*Args,
+				TEXT("/bin/bash"),
+				*KillArguments,
 				true,
 				true,
 				true,
@@ -786,6 +800,31 @@ namespace
 
 namespace UnrealMcp
 {
+namespace Providers
+{
+	const FString& GetCodexSubprocessPathPrefix()
+	{
+		// Augment PATH for subprocesses so codex-agent script interpreter calls
+		// such as bare bun/node resolve when Unreal Editor inherits a minimal
+		// macOS default PATH rather than the user's interactive shell PATH.
+		// Common Mac developer-tool dirs covered:
+		//   $HOME/.bun/bin      - Bun (Codex Orchestrator dependency)
+		//   $HOME/.local/bin    - pip user installs and manual binaries
+		//   $HOME/.cargo/bin    - Rust cargo
+		//   /opt/homebrew/bin   - Homebrew on Apple Silicon
+		//   /usr/local/bin      - Homebrew on Intel Mac
+		// Shells silently ignore non-existent entries.
+		// IFS-safe: no literal spaces in the command fragment, so bash -c
+		// parameter parsing through UE CreateProc does not split on whitespace.
+		// Codex CLI is validated as Mac/Linux only; Windows users use
+		// CodexAppServer / Codex Desktop bridge instead.
+		static const FString Prefix = TEXT(
+			"export${IFS}PATH=\"$HOME/.bun/bin:$HOME/.local/bin:"
+			"$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"&&${IFS}");
+		return Prefix;
+	}
+}
+
 	EAiProviderKind FCodexProvider::GetKind() const
 	{
 		return EAiProviderKind::Codex;

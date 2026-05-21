@@ -206,6 +206,23 @@ GLM/Zhipu `https://api.z.ai/api/paas/v4/chat/completions`, Qwen
 v0.24.0/v0.24.1 的 provider 切到 international default, 请清空并重新选择 preset,
 或手动编辑 `BaseUrl`.
 
+##### v0.24.3 hotfix: Codex CLI subprocess PATH
+
+v0.24.3 修复 Unreal Editor 没有继承用户 interactive shell `PATH` 时, Codex CLI
+provider 子进程出现 `bun: not found` 或类似工具解析失败的问题。Codex CLI 子进程现在会在
+继承的 `PATH` 前追加这些常见 Mac developer-tool 目录:
+
+- `$HOME/.bun/bin`
+- `$HOME/.local/bin`
+- `$HOME/.cargo/bin`
+- `/opt/homebrew/bin`
+- `/usr/local/bin`
+
+chat exec 路径和 cleanup kill exec 路径都覆盖此 PATH 前缀。shell 会静默忽略不存在的
+PATH 条目。Codex CLI provider 仍只支持 macOS/Linux; Windows 用户应继续使用 Codex
+Desktop / CodexAppServer provider。此 hotfix 不涉及 INI/settings migration; 已有用户的
+Codex Binary Path 设置会保留。
+
 | Preset | Default Model |
 |---|---|
 | Custom OpenAI-compatible | empty/manual |
@@ -481,6 +498,25 @@ defaults to `open.bigmodel.cn`. Existing saved provider `BaseUrl` values are
 preserved on upgrade; to switch an existing v0.24.0/v0.24.1 provider to the
 intl defaults, clear and re-pick the preset or manually edit `BaseUrl`.
 
+##### v0.24.3 hotfix: Codex CLI subprocess PATH
+
+v0.24.3 fixes Codex CLI provider subprocess `bun: not found` and similar tool
+resolution failures when Unreal Editor is launched without inheriting the
+user's interactive shell `PATH`. Codex CLI subprocesses now prepend these common
+Mac developer-tool directories before the inherited `PATH`:
+
+- `$HOME/.bun/bin`
+- `$HOME/.local/bin`
+- `$HOME/.cargo/bin`
+- `/opt/homebrew/bin`
+- `/usr/local/bin`
+
+Both the chat exec path and the cleanup kill exec path use this PATH prefix.
+Shells silently ignore non-existent PATH entries. The Codex CLI provider remains
+macOS/Linux only; Windows users should continue using the Codex Desktop /
+CodexAppServer provider. No INI/settings migration is involved; existing user
+Codex Binary Path values are preserved.
+
 | Preset | Default Model |
 |---|---|
 | Custom OpenAI-compatible | empty/manual |
@@ -752,6 +788,23 @@ preset は international endpoints を default にします: Kimi
 `open.bigmodel.cn` を default にしません。upgrade 時、既存 provider の saved
 `BaseUrl` は保持されます。v0.24.0/v0.24.1 既存 provider を intl default に切り替えるには、
 preset を clear して選び直すか、`BaseUrl` を手動編集してください。
+
+##### v0.24.3 hotfix: Codex CLI subprocess PATH
+
+v0.24.3 では、Unreal Editor がユーザーの interactive shell `PATH` を継承せずに起動した場合に、
+Codex CLI provider の子プロセスで `bun: not found` などの tool 解決エラーが起きる問題を修正します。
+Codex CLI 子プロセスは、継承した `PATH` の前に次の一般的な Mac developer-tool directory を追加します:
+
+- `$HOME/.bun/bin`
+- `$HOME/.local/bin`
+- `$HOME/.cargo/bin`
+- `/opt/homebrew/bin`
+- `/usr/local/bin`
+
+chat exec path と cleanup kill exec path の両方がこの PATH prefix を使います。存在しない
+PATH entry は shell が静かに無視します。Codex CLI provider は引き続き macOS/Linux 専用です。
+Windows ユーザーは Codex Desktop / CodexAppServer provider を使ってください。この hotfix では
+INI/settings migration は行わず、既存ユーザーの Codex Binary Path 値は保持されます。
 
 | Preset | Default Model |
 |---|---|

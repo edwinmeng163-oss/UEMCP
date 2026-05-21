@@ -9,6 +9,11 @@
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 
+namespace UnrealMcp::Providers
+{
+	const FString& GetCodexSubprocessPathPrefix();
+}
+
 namespace UnrealMcpProviderPresetTests
 {
 	class FProviderBackupFileGuard
@@ -396,6 +401,29 @@ bool FUnrealMcpProviderPresetsIntlPresetURLsTest::RunTest(const FString& Paramet
 				Preset.BaseUrl.Contains(TEXT(".cn"), ESearchCase::IgnoreCase));
 		}
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpCodexProviderSubprocessPathPrefixTest,
+	"UnrealMcp.CodexProvider.SubprocessPathPrefix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpCodexProviderSubprocessPathPrefixTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	const FString& Prefix = UnrealMcp::Providers::GetCodexSubprocessPathPrefix();
+
+	TestFalse(TEXT("Prefix is not empty."), Prefix.IsEmpty());
+	TestTrue(TEXT("Prefix contains $HOME/.bun/bin."), Prefix.Contains(TEXT("$HOME/.bun/bin")));
+	TestTrue(TEXT("Prefix contains $HOME/.local/bin."), Prefix.Contains(TEXT("$HOME/.local/bin")));
+	TestTrue(TEXT("Prefix contains $HOME/.cargo/bin."), Prefix.Contains(TEXT("$HOME/.cargo/bin")));
+	TestTrue(TEXT("Prefix contains /opt/homebrew/bin."), Prefix.Contains(TEXT("/opt/homebrew/bin")));
+	TestTrue(TEXT("Prefix contains /usr/local/bin."), Prefix.Contains(TEXT("/usr/local/bin")));
+	TestTrue(TEXT("Prefix ends with :$PATH\"&&${IFS}."), Prefix.EndsWith(TEXT(":$PATH\"&&${IFS}")));
+	TestFalse(TEXT("Prefix has no literal ASCII space."), Prefix.Contains(TEXT(" ")));
 
 	return true;
 }
