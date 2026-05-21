@@ -12,9 +12,180 @@
 #include "Misc/ScopeLock.h"
 #include <atomic>
 
+// =====================================================================
+// CodexProvider shell-quoting invariants (v0.24.4 - authoritative copy
+// of Docs/AIProviderArchitecture.md Section B; keep both in sync)
+// =====================================================================
+// The full Arguments string passed to FPlatformProcess::CreateProc as the
+// Arguments parameter, for the bash subprocess that wraps codex-agent,
+// must satisfy ALL of the following invariants:
+//
+// - The full `Arguments` string passed to `FPlatformProcess::CreateProc` has
+//   exactly one literal ASCII space: the separator in `-c <command>`.
+// - The full `Arguments` string contains zero literal ASCII double-quote
+//   characters (`0x22`).
+// - Trusted generated shell fragments MAY contain required shell syntax:
+//   assignment `=`, `$HOME`, `$PATH`, `${IFS}`, `&&`, and `$'...'`
+//   ANSI-C single-quote delimiters. NOTE: the `export` builtin is forbidden
+//   for PATH augmentation (see invariant 8 below).
+// - User-supplied or config-derived values MUST NEVER be concatenated raw into
+//   the command.
+// - User-supplied or config-derived values MUST appear only as output of
+//   `QuoteForBashWordNoSpaces(...)`, or be rejected upstream by
+//   `ContainsDangerousShellCharacters(...)`.
+// - Command parts MUST be joined with `${IFS}`, never with literal ASCII space.
+// - The command MUST NOT use `"..."` double-quote wrapping, `"$(cat ...)"`
+//   substitution, or any other construct that introduces literal `"`
+//   characters.
+// - PATH augmentation MUST use the bare assignment form
+//   `PATH=...:$PATH&&${IFS}<cmd>` (NOT `export${IFS}PATH=...&&${IFS}<cmd>`).
+//   Reason: `export VAR=value` is the export BUILTIN, which word-splits its
+//   single argument (`VAR=value`) after parameter expansion. When inherited
+//   $PATH contains directories with literal spaces (e.g. macOS
+//   `/Library/Application Support/JetBrains/Toolbox/scripts`), the expanded
+//   assignment splits at the space and `export` receives multiple args, the
+//   second of which is not a valid identifier and fails:
+//     `export: 'Support/JetBrains/...': not a valid identifier`.
+//   The bare `PATH=value` form (no `export` keyword) is a current-shell
+//   variable assignment and POSIX guarantees its RHS is NOT word-split
+//   post-expansion. PATH is already exported by the parent UE Editor
+//   process, so re-assignment preserves the exported status and the new
+//   value propagates to child processes via standard env inheritance.
+//
+// Rationale: UE Unix CreateProc parses Arguments via ParseCmdLineToken in
+// Engine/Source/Runtime/Core/Private/Unix/UnixPlatformProcess.cpp, which
+// treats '"' as a quote delimiter and captures double-double-quoted text
+// into argv. Any literal " in Arguments mangles the bash -c payload.
+//
+// Case studies:
+//   - v0.24.3 introduced an invariant-(2) and -(7) violation via
+//     literal "..." wrapping around the PATH= assignment; produced
+//     "bash: -c: option requires an argument" at runtime.
+//   - v0.24.4 Edit A removed that wrapping. Edit B removed a parallel
+//     pre-existing invariant-(2) and -(7) violation in the prompt-pass
+//     cat-substitution at line 577. The Edit-A change exposed an
+//     invariant-(8) gap (`export` builtin word-splits $PATH containing
+//     spaces); the v0.24.4 ship-time fix changed `export${IFS}PATH=`
+//     to the bare `PATH=` assignment form and added the explicit
+//     invariant (8) above.
+// =====================================================================
+
 namespace UnrealMcp::Providers
 {
 	const FString& GetCodexSubprocessPathPrefix();
+}
+
+namespace UnrealMcp::Providers::Internal
+{
+	FString QuoteForBashWordNoSpaces(const FString& Value)
+	{
+		FString Escaped;
+		Escaped.Reserve(Value.Len() + 8);
+		for (const TCHAR Character : Value)
+		{
+			switch (Character)
+			{
+			case TEXT('\\'):
+				Escaped += TEXT("\\\\");
+				break;
+			case TEXT('\''):
+				Escaped += TEXT("\\'");
+				break;
+			case TEXT(' '):
+				Escaped += TEXT("\\x20");
+				break;
+			case TEXT('\t'):
+				Escaped += TEXT("\\t");
+				break;
+			case TEXT('\n'):
+				Escaped += TEXT("\\n");
+				break;
+			case TEXT('\r'):
+				Escaped += TEXT("\\r");
+				break;
+			case TEXT('"'):
+				Escaped += TEXT("\\x22");
+				break;
+			default:
+				Escaped.AppendChar(Character);
+				break;
+			}
+		}
+		return FString::Printf(TEXT("$'%s'"), *Escaped);
+	}
+
+	FString JoinShellArgumentsNoSpaces(const TArray<FString>& Args)
+	{
+		TArray<FString> QuotedArgs;
+		QuotedArgs.Reserve(Args.Num());
+		for (const FString& Arg : Args)
+		{
+			QuotedArgs.Add(QuoteForBashWordNoSpaces(Arg));
+		}
+		return FString::Join(QuotedArgs, TEXT("${IFS}"));
+	}
+
+	FString ComposePrompt(const FString& UserPrompt, const FString& ConversationContext)
+	{
+		const FString TrimmedContext = ConversationContext.TrimStartAndEnd();
+		if (TrimmedContext.IsEmpty())
+		{
+			return UserPrompt;
+		}
+		return FString::Printf(
+			TEXT("--- conversation context ---\n\n%s\n\n--- latest user prompt ---\n\n%s"),
+			*TrimmedContext,
+			*UserPrompt);
+	}
+
+	FString BuildCodexStartCommand(
+		const FString& CodexBinaryPath,
+		const FString& ComposedPromptText,
+		const FString& ProjectAbsoluteDir,
+		const TArray<FString>& FilteredExtraArgs)
+	{
+		static const TCHAR* const ForcedCodexModel = TEXT("gpt-5.5");
+		static const TCHAR* const ForcedCodexReasoning = TEXT("xhigh");
+		static const TCHAR* const ForcedCodexSandbox = TEXT("workspace-write");
+
+		TArray<FString> CommandParts;
+		CommandParts.Add(QuoteForBashWordNoSpaces(CodexBinaryPath));
+		CommandParts.Add(TEXT("start"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(ComposedPromptText));
+		CommandParts.Add(TEXT("-m"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexModel));
+		CommandParts.Add(TEXT("-r"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexReasoning));
+		CommandParts.Add(TEXT("-s"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexSandbox));
+		CommandParts.Add(TEXT("-d"));
+		CommandParts.Add(QuoteForBashWordNoSpaces(ProjectAbsoluteDir));
+		CommandParts.Add(TEXT("-w"));
+		CommandParts.Add(TEXT("--strip-ansi"));
+		if (!FilteredExtraArgs.IsEmpty())
+		{
+			CommandParts.Add(JoinShellArgumentsNoSpaces(FilteredExtraArgs));
+		}
+
+		return UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
+			+ FString::Join(CommandParts, TEXT("${IFS}"));
+	}
+
+	FString BuildCodexKillCommand(
+		const FString& CodexBinaryPath,
+		const FString& JobId,
+		const FString& ProjectAbsoluteDir)
+	{
+		static_cast<void>(ProjectAbsoluteDir);
+
+		TArray<FString> KillCommandParts;
+		KillCommandParts.Add(QuoteForBashWordNoSpaces(CodexBinaryPath));
+		KillCommandParts.Add(TEXT("kill"));
+		KillCommandParts.Add(QuoteForBashWordNoSpaces(JobId));
+
+		return UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
+			+ FString::Join(KillCommandParts, TEXT("${IFS}"));
+	}
 }
 
 namespace
@@ -222,61 +393,6 @@ namespace
 		}
 		return true;
 	}
-	FString QuoteForBashWordNoSpaces(const FString& Value)
-	{
-		FString Escaped;
-		Escaped.Reserve(Value.Len() + 8);
-		for (const TCHAR Character : Value)
-		{
-			switch (Character)
-			{
-			case TEXT('\\'):
-				Escaped += TEXT("\\\\");
-				break;
-			case TEXT('\''):
-				Escaped += TEXT("\\'");
-				break;
-			case TEXT(' '):
-				Escaped += TEXT("\\x20");
-				break;
-			case TEXT('\t'):
-				Escaped += TEXT("\\t");
-				break;
-			case TEXT('\n'):
-				Escaped += TEXT("\\n");
-				break;
-			case TEXT('\r'):
-				Escaped += TEXT("\\r");
-				break;
-			default:
-				Escaped.AppendChar(Character);
-				break;
-			}
-		}
-		return FString::Printf(TEXT("$'%s'"), *Escaped);
-	}
-	FString JoinShellArgumentsNoSpaces(const TArray<FString>& Args)
-	{
-		TArray<FString> QuotedArgs;
-		QuotedArgs.Reserve(Args.Num());
-		for (const FString& Arg : Args)
-		{
-			QuotedArgs.Add(QuoteForBashWordNoSpaces(Arg));
-		}
-		return FString::Join(QuotedArgs, TEXT("${IFS}"));
-	}
-	FString ComposePrompt(const FString& UserPrompt, const FString& ConversationContext)
-	{
-		const FString TrimmedContext = ConversationContext.TrimStartAndEnd();
-		if (TrimmedContext.IsEmpty())
-		{
-			return UserPrompt;
-		}
-		return FString::Printf(
-			TEXT("--- conversation context ---\n\n%s\n\n--- latest user prompt ---\n\n%s"),
-			*TrimmedContext,
-			*UserPrompt);
-	}
 	bool LooksLikeJobId(const FString& Candidate)
 	{
 		const FString Trimmed = Candidate.TrimStartAndEnd();
@@ -375,6 +491,11 @@ namespace
 				return;
 			}
 
+			// TODO(v0.25 Reform B): WritePromptTempFile's output is no longer read by
+			// the bash command after the v0.24.4 prompt-pass refactor. The function is
+			// retained for one release to preserve any external tooling that may inspect
+			// the temp file; Reform B will rewrite SpawnProcess to use `codex exec`
+			// (one-shot) and remove this branch.
 			if (!WritePromptTempFile(Error))
 			{
 				Finish(Error, true);
@@ -544,7 +665,7 @@ namespace
 				PromptDir,
 				FString::Printf(TEXT("%s.txt"), *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower)));
 
-			const FString PromptText = ComposePrompt(UserPrompt, ConversationContext);
+			const FString PromptText = ::UnrealMcp::Providers::Internal::ComposePrompt(UserPrompt, ConversationContext);
 			if (!FFileHelper::SaveStringToFile(PromptText, *PromptTempFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 			{
 				OutError = FString::Printf(TEXT("Failed to write Codex prompt file: %s"), *PromptTempFilePath);
@@ -569,29 +690,11 @@ namespace
 				return false;
 			}
 
-			TArray<FString> CommandParts;
-			CommandParts.Add(QuoteForBashWordNoSpaces(Config.CodexBinaryPath.TrimStartAndEnd()));
-			CommandParts.Add(TEXT("start"));
-			// codex-agent --help does not currently expose --prompt-file or stdin input. This fallback keeps the user prompt in a temp file, then expands it as one quoted argument inside bash.
-			// v1 uses direct wait mode (-w) and pumps this process's stdout; job-control start/watch/await can replace this later for cancellation that survives editor shutdown.
-			CommandParts.Add(FString::Printf(TEXT("\"$(cat${IFS}%s)\""), *QuoteForBashWordNoSpaces(PromptTempFilePath)));
-			CommandParts.Add(TEXT("-m"));
-			CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexModel));
-			CommandParts.Add(TEXT("-r"));
-			CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexReasoning));
-			CommandParts.Add(TEXT("-s"));
-			CommandParts.Add(QuoteForBashWordNoSpaces(ForcedCodexSandbox));
-			CommandParts.Add(TEXT("-d"));
-			CommandParts.Add(QuoteForBashWordNoSpaces(FPaths::ConvertRelativePathToFull(FPaths::ProjectDir())));
-			CommandParts.Add(TEXT("-w"));
-			CommandParts.Add(TEXT("--strip-ansi"));
-			if (!FilteredExtraArgs.IsEmpty())
-			{
-				CommandParts.Add(JoinShellArgumentsNoSpaces(FilteredExtraArgs));
-			}
-
-			const FString Command = UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
-				+ FString::Join(CommandParts, TEXT("${IFS}"));
+			const FString Command = ::UnrealMcp::Providers::Internal::BuildCodexStartCommand(
+				Config.CodexBinaryPath.TrimStartAndEnd(),
+				::UnrealMcp::Providers::Internal::ComposePrompt(UserPrompt, ConversationContext),
+				FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()),
+				FilteredExtraArgs);
 			const FString Arguments = FString::Printf(TEXT("-c %s"), *Command);
 
 			uint32 ProcessId = 0;
@@ -677,13 +780,10 @@ namespace
 				return;
 			}
 
-			TArray<FString> KillCommandParts;
-			KillCommandParts.Add(QuoteForBashWordNoSpaces(Config.CodexBinaryPath.TrimStartAndEnd()));
-			KillCommandParts.Add(TEXT("kill"));
-			KillCommandParts.Add(QuoteForBashWordNoSpaces(JobId));
-
-			const FString KillCommand = UnrealMcp::Providers::GetCodexSubprocessPathPrefix()
-				+ FString::Join(KillCommandParts, TEXT("${IFS}"));
+			const FString KillCommand = ::UnrealMcp::Providers::Internal::BuildCodexKillCommand(
+				Config.CodexBinaryPath.TrimStartAndEnd(),
+				JobId,
+				FPaths::ConvertRelativePathToFull(FPaths::ProjectDir()));
 			const FString KillArguments = FString::Printf(TEXT("-c %s"), *KillCommand);
 
 			FProcHandle KillHandle = FPlatformProcess::CreateProc(
@@ -814,13 +914,29 @@ namespace Providers
 		//   /opt/homebrew/bin   - Homebrew on Apple Silicon
 		//   /usr/local/bin      - Homebrew on Intel Mac
 		// Shells silently ignore non-existent entries.
-		// IFS-safe: no literal spaces in the command fragment, so bash -c
-		// parameter parsing through UE CreateProc does not split on whitespace.
+		//
+		// Invariants:
+		//   (1) Contains NO literal ASCII space and NO literal double-quote.
+		//   (2) Uses `PATH=...&&${IFS}<cmd>` (assignment + control-op + IFS-join),
+		//       NOT `export PATH=...&&${IFS}<cmd>`. The `export VAR=value` form
+		//       word-splits its VALUE post-expansion when the inherited $PATH
+		//       contains directories with literal spaces (e.g. `/Library/
+		//       Application Support/JetBrains/Toolbox/scripts` on macOS), which
+		//       splits the assignment argument and produces:
+		//         "export: `Support/...': not a valid identifier".
+		//       The bare `PATH=` form treats the assignment as a current-shell
+		//       variable update (not a builtin invocation), so word-splitting
+		//       does NOT occur on the value. PATH was already exported by the
+		//       parent UE Editor process, so child processes inherit the new
+		//       value via the standard env-propagation rules.
+		//   (3) See Docs/AIProviderArchitecture.md Section B for the
+		//       CreateProc tokenizer rationale (UE Unix ParseCmdLineToken treats
+		//       `"` as a quote delimiter; literal `"` in argv breaks bash -c).
 		// Codex CLI is validated as Mac/Linux only; Windows users use
 		// CodexAppServer / Codex Desktop bridge instead.
 		static const FString Prefix = TEXT(
-			"export${IFS}PATH=\"$HOME/.bun/bin:$HOME/.local/bin:"
-			"$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"&&${IFS}");
+			"PATH=$HOME/.bun/bin:$HOME/.local/bin:"
+			"$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH&&${IFS}");
 		return Prefix;
 	}
 }
