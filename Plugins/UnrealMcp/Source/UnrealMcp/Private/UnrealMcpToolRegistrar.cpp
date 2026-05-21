@@ -3,7 +3,10 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Misc/App.h"
+#include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpUserToolLock.h"
+#include "UnrealMcpUserToolRegistry.h"
 
 namespace UnrealMcp
 {
@@ -1160,6 +1163,55 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("acceptChangedHashes"), MakeBoolProperty(TEXT("If true, accept main.py edits that change sha256 and record the new hash in the user overlay."), false));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Walk and categorize project-local user Python tools without mutating the overlay registry."), false));
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.mcp_user_registry_reload"),
+					TEXT("Reload User Tool Registry"),
+					TEXT("Rescans project-local user Python tools at Tools/UnrealMcpPyTools and hot-reloads main.py via the Python bridge without an editor restart."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpUserRegistryReloadTool.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.DocsPath = TEXT("Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.26 user-extension overlay refresh control tool for project-local Python tools.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("toolName"), MakeStringProperty(TEXT("Loaded user tool name to smoke-test, for example user.my_python_tool."), FString()));
+				TSharedPtr<FJsonObject> DryRunArgsProperty = MakeShared<FJsonObject>();
+				DryRunArgsProperty->SetStringField(TEXT("type"), TEXT("object"));
+				DryRunArgsProperty->SetBoolField(TEXT("additionalProperties"), true);
+				DryRunArgsProperty->SetStringField(TEXT("description"), TEXT("Arguments forwarded to execute(args); dryRun=true is always injected."));
+				Properties->SetObjectField(TEXT("dryRunArgs"), DryRunArgsProperty);
+				Properties->SetObjectField(TEXT("timeoutSeconds"), MakeNumberProperty(TEXT("Bounded execution timeout in seconds. Timeout detects late completion but cannot safely interrupt wedged embedded Python execution."), 10.0));
+				TSharedPtr<FJsonObject> Schema = MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("toolName") });
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.mcp_user_tool_smoke"),
+					TEXT("Smoke-test User Tool"),
+					TEXT("Invokes a loaded user Python tool with dryRun args under a bounded timeout and reports smoke_passed or smoke_failed lifecycle. Timeout detection does not safely interrupt wedged in-process Python."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpUserToolSmokeTool.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.DocsPath = TEXT("Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.26 user-extension smoke verification control tool before assistants claim a user Python tool is callable.");
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
 				Properties->SetObjectField(TEXT("includeDetails"), MakeBoolProperty(TEXT("Include full per-check details and recommended fixes when available."), false));
 				Properties->SetObjectField(TEXT("refresh"), MakeBoolProperty(TEXT("Run checks now instead of using a recent cached result."), false));
 				Properties->SetObjectField(TEXT("deepScanEnginePlugins"), MakeBoolProperty(TEXT("Opt in to a bounded two-level scan under Engine/Plugins for duplicate UnrealMcp copies."), false));
@@ -1755,6 +1807,43 @@ namespace UnrealMcp
 			if (ToolsArray.Num() > PreviousToolCount)
 			{
 				AddedToolNames.Add(Entry.Name);
+			}
+		}
+
+		{
+			UserToolLock::FSharedGuard UserRegistryGuard;
+			for (const UserRegistry::FUserToolEntry* UserTool : UserRegistry::GetAllUserTools())
+			{
+				if (!UserTool || AddedToolNames.Contains(UserTool->ToolName))
+				{
+					continue;
+				}
+
+				FString ToolTitle = UserTool->ToolName;
+				FString ToolDescription = TEXT("Project-local user Python MCP tool.");
+				TSharedPtr<FJsonObject> InputSchema = MakeObjectSchema();
+				if (UserTool->ToolJson.IsValid())
+				{
+					UserTool->ToolJson->TryGetStringField(TEXT("title"), ToolTitle);
+					UserTool->ToolJson->TryGetStringField(TEXT("description"), ToolDescription);
+					const TSharedPtr<FJsonObject>* InputSchemaObject = nullptr;
+					if (UserTool->ToolJson->TryGetObjectField(TEXT("inputSchema"), InputSchemaObject) && InputSchemaObject && (*InputSchemaObject).IsValid())
+					{
+						InputSchema = *InputSchemaObject;
+					}
+				}
+
+				const int32 PreviousToolCount = ToolsArray.Num();
+				AddToolDefinition(
+					ToolsArray,
+					UserTool->ToolName,
+					ToolTitle.IsEmpty() ? UserTool->ToolName : ToolTitle,
+					ToolDescription,
+					InputSchema);
+				if (ToolsArray.Num() > PreviousToolCount)
+				{
+					AddedToolNames.Add(UserTool->ToolName);
+				}
 			}
 		}
 	}

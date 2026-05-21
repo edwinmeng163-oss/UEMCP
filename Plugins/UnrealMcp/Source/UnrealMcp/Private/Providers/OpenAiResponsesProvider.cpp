@@ -1,5 +1,6 @@
 #include "Providers/OpenAiResponsesProvider.h"
 #include "Providers/ProviderHelpers.h"
+#include "Providers/UnrealMcpApprovalPolicy.h"
 
 #include "UnrealMcpAssistantRun.h"
 
@@ -44,6 +45,7 @@ namespace UnrealMcp
 		TFunction<void(const FUnrealMcpAssistantTurnResult&)> OnComplete)
 	{
 		const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+		// FUnrealMcpAssistantRun owns approval-aware tool execution for the Responses provider.
 		return UnrealMcp::CreateAssistantRun(
 			Config,
 			*Settings,

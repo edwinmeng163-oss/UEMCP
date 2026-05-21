@@ -3960,6 +3960,92 @@
       "notes": ""
     },
     {
+      "name": "unreal.mcp_user_registry_reload",
+      "category": "self-extension",
+      "handlerName": "unreal.mcp_user_registry_reload",
+      "title": "Reload User Tool Registry",
+      "description": "Rescan project-local user Python tools at <projDir>/Tools/UnrealMcpPyTools/ and refresh the overlay registry. Hot-reloads main.py via Python module reimport (sys.modules.pop + reimport; no editor restart needed). Reports added/updated/removed/rejected tools with structured lifecycle.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md",
+      "reason": "Explicit registry: user-extension overlay refresh. Required v0.26 control tool for hot-reload of project-local Python user tools without editor restart.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "acceptChangedHashes": {
+            "type": "boolean",
+            "description": "If true, accept main.py edits that change sha256 (records new hash). Default false rejects with python_sha_mismatch.",
+            "default": false
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "If true, walk and categorize without mutating overlay.",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "notes": ""
+    },
+    {
+      "name": "unreal.mcp_user_tool_smoke",
+      "category": "self-extension",
+      "handlerName": "unreal.mcp_user_tool_smoke",
+      "title": "Smoke-test User Tool",
+      "description": "Invoke a loaded user Python tool with minimal/dryRun args under a bounded timeout. Reports smoke_passed | smoke_failed structured lifecycle. Assistant may only claim a user tool is callable after smoke_passed confirms successful invocation.",
+      "exposure": "visible",
+      "riskLevel": "low",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md",
+      "reason": "Explicit registry: user-extension smoke verification. Required v0.26 control tool to confirm a hot-loaded user Python tool is actually callable (lifecycle.smoke_passed) before AI claims tool works.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "toolName": {
+            "type": "string",
+            "description": "User tool name to smoke-test (e.g. 'user.my_python_tool')."
+          },
+          "dryRunArgs": {
+            "type": "object",
+            "description": "Args to pass to the tool's execute(args) function. Defaults to {dryRun: true}.",
+            "additionalProperties": true
+          },
+          "timeoutSeconds": {
+            "type": "number",
+            "description": "Bounded execution timeout (seconds). NOTE: timeout DETECTS late completion but may NOT INTERRUPT wedged Python execution; see v0.26 known limit.",
+            "default": 10.0
+          }
+        },
+        "required": [
+          "toolName"
+        ]
+      },
+      "notes": "Known v0.26 limit: timeout detects late completion but may not interrupt wedged in-process UE Python execution; Python work may continue until it returns or the editor restarts."
+    },
+    {
       "name": "unreal.install_doctor",
       "category": "self-extension",
       "handlerName": "unreal.install_doctor",
@@ -4985,6 +5071,15 @@
           "implementationNotes": {
             "type": "string",
             "description": "Optional implementation notes to include in the generated README."
+          },
+          "implementationTrack": {
+            "type": "string",
+            "enum": [
+              "cpp",
+              "python"
+            ],
+            "description": "Default 'python' (project-local user track at Tools/UnrealMcpPyTools/<tool_id>/main.py). 'cpp' requires user approval via v0.26 Job A approval gate.",
+            "default": "python"
           },
           "category": {
             "type": "string",

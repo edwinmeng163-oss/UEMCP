@@ -8,7 +8,9 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "UnrealMcpAssistantRun.h"
+#include "UnrealMcpAssistantSystemPromptBuilder.h"
 #include "UnrealMcpToolRegistrar.h"
+#include "Providers/UnrealMcpApprovalPolicy.h"
 #include <atomic>
 namespace UnrealMcp
 {
@@ -98,6 +100,16 @@ namespace
 			PendingSteerInstructions.Add(Trimmed);
 			return true;
 		}
+		virtual void ResolveAssistantApproval(const FString& ApprovalIdString, bool bApproved) override
+		{
+			FGuid ApprovalId;
+			if (FGuid::Parse(ApprovalIdString, ApprovalId))
+			{
+				UnrealMcp::Approval::ResolveApproval(
+					ApprovalId,
+					bApproved ? UnrealMcp::Approval::EUserDecision::Approved : UnrealMcp::Approval::EUserDecision::Rejected);
+			}
+		}
 	private:
 		void BuildTools()
 		{
@@ -155,16 +167,10 @@ namespace
 		}
 		FString BuildInstructions() const
 		{
-			FString Instructions =
-				TEXT("You are Unreal MCP AI running inside Unreal Editor. Help the user build, inspect, and modify the current Unreal project by using the provided function tools when helpful. ")
-				TEXT("Prefer the smallest safe set of tool calls. Inspect before concluding for read-only questions, act directly for clear modification requests, and avoid destructive actions unless explicitly asked. ")
-				TEXT("Prefer AI-safe wrapper tools before falling back to execute_python. Keep answers compact and focused on what changed or was found.");
-			if (!CachedSettings.AssistantSystemPrompt.TrimStartAndEnd().IsEmpty())
-			{
-				Instructions += TEXT("\n\nAdditional instructions:\n");
-				Instructions += CachedSettings.AssistantSystemPrompt.TrimStartAndEnd();
-			}
-			return Instructions;
+			UnrealMcp::FAssistantSystemPromptInput Input;
+			Input.UserAssistantSystemPrompt = CachedSettings.AssistantSystemPrompt;
+			Input.Transport = UnrealMcp::EAssistantSystemPromptTransport::OpenAiChatCompat;
+			return UnrealMcp::BuildAssistantSystemPrompt(Input);
 		}
 		void BuildInitialMessages()
 		{
@@ -409,6 +415,62 @@ namespace
 			Object->SetObjectField(TEXT("function"), Function);
 			return MakeShared<FJsonValueObject>(Object);
 		}
+		FUnrealMcpExecutionResult ExecuteToolWithApproval(const FChatToolCall& ToolCall, const TSharedPtr<FJsonObject>& Arguments)
+		{
+			using namespace UnrealMcp::Approval;
+
+			ERiskLevel Risk = ERiskLevel::Low;
+			FString Reason;
+			const EDecision Decision = EvaluateApprovalPolicy(ToolCall.UnrealToolName, Arguments, true, Risk, Reason);
+			if (Decision == EDecision::Block)
+			{
+				FUnrealMcpExecutionResult Result;
+				Result.Text = FString::Printf(TEXT("Tool '%s' blocked by policy: %s"), *ToolCall.UnrealToolName, *Reason);
+				Result.bIsError = true;
+				return Result;
+			}
+
+			if (Decision == EDecision::RequireApproval)
+			{
+				FApprovalRequest Request;
+				Request.ToolName = ToolCall.UnrealToolName;
+				Request.RiskLevelLabel = RiskLevelToString(Risk);
+				Request.ReasonHumanReadable = Reason;
+				Request.ArgumentsPreview = Arguments;
+
+				const FGuid ApprovalId = RegisterPendingApproval(Request);
+
+				FUnrealMcpAssistantEvent Event;
+				Event.Type = EUnrealMcpAssistantEventType::ApprovalRequired;
+				Event.ToolName = ToolCall.UnrealToolName;
+				Event.ToolCallId = ToolCall.Id;
+				Event.ToolArgumentsJson = ToolCall.ArgumentsJson.TrimStartAndEnd().IsEmpty()
+					? UnrealMcp::JsonObjectToString(Arguments)
+					: ToolCall.ArgumentsJson;
+				Event.ApprovalIdString = ApprovalId.ToString();
+				Event.ApprovalRiskLevel = RiskLevelToString(Risk);
+				Event.ApprovalReason = Reason;
+				EmitEvent(Event);
+
+				const EUserDecision UserDecision = WaitForApproval(ApprovalId, 300.0);
+				if (UserDecision == EUserDecision::Rejected)
+				{
+					FUnrealMcpExecutionResult Result;
+					Result.Text = FString::Printf(TEXT("Tool '%s' rejected by user."), *ToolCall.UnrealToolName);
+					Result.bIsError = true;
+					return Result;
+				}
+				if (UserDecision != EUserDecision::Approved)
+				{
+					FUnrealMcpExecutionResult Result;
+					Result.Text = FString::Printf(TEXT("Tool '%s' approval timed out (300s)."), *ToolCall.UnrealToolName);
+					Result.bIsError = true;
+					return Result;
+				}
+			}
+
+			return Module->ExecuteToolFromEditorUI(ToolCall.UnrealToolName, *Arguments);
+		}
 		TSharedPtr<FJsonObject> RunToolCall(const FChatToolCall& ToolCall)
 		{
 			EmitToolStarted(ToolCall);
@@ -428,7 +490,7 @@ namespace
 				}
 				else
 				{
-					Result = Module->ExecuteToolFromEditorUI(ToolCall.UnrealToolName, *Arguments);
+					Result = ExecuteToolWithApproval(ToolCall, Arguments);
 				}
 			}
 			EmitToolFinished(ToolCall, Result);

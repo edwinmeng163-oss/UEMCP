@@ -8,7 +8,9 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "UnrealMcpAssistantRun.h"
+#include "UnrealMcpAssistantSystemPromptBuilder.h"
 #include "UnrealMcpToolRegistrar.h"
+#include "Providers/UnrealMcpApprovalPolicy.h"
 
 #include <atomic>
 
@@ -121,6 +123,16 @@ namespace
 			PendingSteerInstructions.Add(Trimmed);
 			return true;
 		}
+		virtual void ResolveAssistantApproval(const FString& ApprovalIdString, bool bApproved) override
+		{
+			FGuid ApprovalId;
+			if (FGuid::Parse(ApprovalIdString, ApprovalId))
+			{
+				UnrealMcp::Approval::ResolveApproval(
+					ApprovalId,
+					bApproved ? UnrealMcp::Approval::EUserDecision::Approved : UnrealMcp::Approval::EUserDecision::Rejected);
+			}
+		}
 
 	private:
 		void BuildTools()
@@ -178,21 +190,11 @@ namespace
 
 		FString BuildInstructions() const
 		{
-			FString Instructions =
-				TEXT("You are Unreal MCP AI running inside Unreal Editor. Help the user build, inspect, and modify the current Unreal project by using the provided function tools when helpful. ")
-				TEXT("Prefer the smallest safe set of tool calls. Inspect before concluding for read-only questions, act directly for clear modification requests, and avoid destructive actions unless explicitly asked. ")
-				TEXT("Prefer AI-safe wrapper tools before falling back to execute_python. Keep answers compact and focused on what changed or was found.");
-			if (!CachedSettings.AssistantSystemPrompt.TrimStartAndEnd().IsEmpty())
-			{
-				Instructions += TEXT("\n\nAdditional instructions:\n");
-				Instructions += CachedSettings.AssistantSystemPrompt.TrimStartAndEnd();
-			}
-			if (!AppliedSteerInstructions.IsEmpty())
-			{
-				Instructions += TEXT("\n\nUser steering updates for the current turn:\n- ");
-				Instructions += FString::Join(AppliedSteerInstructions, TEXT("\n- "));
-			}
-			return Instructions;
+			UnrealMcp::FAssistantSystemPromptInput Input;
+			Input.UserAssistantSystemPrompt = CachedSettings.AssistantSystemPrompt;
+			Input.SteerInstructions = AppliedSteerInstructions;
+			Input.Transport = UnrealMcp::EAssistantSystemPromptTransport::AnthropicMessages;
+			return UnrealMcp::BuildAssistantSystemPrompt(Input);
 		}
 
 		void BuildInitialMessages()
@@ -493,7 +495,7 @@ namespace
 			}
 			else
 			{
-				Result = Module->ExecuteToolFromEditorUI(ToolUse.UnrealToolName, *Arguments);
+				Result = ExecuteToolWithApproval(ToolUse, Arguments);
 			}
 			EmitToolFinished(ToolUse, Result);
 			TSharedPtr<FJsonObject> ResultBlock = MakeShared<FJsonObject>();
@@ -502,6 +504,61 @@ namespace
 			ResultBlock->SetStringField(TEXT("content"), UnrealMcp::Providers::SerializeToolResult(Result));
 			ResultBlock->SetBoolField(TEXT("is_error"), Result.bIsError);
 			return MakeShared<FJsonValueObject>(ResultBlock);
+		}
+
+		FUnrealMcpExecutionResult ExecuteToolWithApproval(const FAnthropicToolUse& ToolUse, const TSharedPtr<FJsonObject>& Arguments)
+		{
+			using namespace UnrealMcp::Approval;
+
+			ERiskLevel Risk = ERiskLevel::Low;
+			FString Reason;
+			const EDecision Decision = EvaluateApprovalPolicy(ToolUse.UnrealToolName, Arguments, true, Risk, Reason);
+			if (Decision == EDecision::Block)
+			{
+				FUnrealMcpExecutionResult Result;
+				Result.Text = FString::Printf(TEXT("Tool '%s' blocked by policy: %s"), *ToolUse.UnrealToolName, *Reason);
+				Result.bIsError = true;
+				return Result;
+			}
+
+			if (Decision == EDecision::RequireApproval)
+			{
+				FApprovalRequest Request;
+				Request.ToolName = ToolUse.UnrealToolName;
+				Request.RiskLevelLabel = RiskLevelToString(Risk);
+				Request.ReasonHumanReadable = Reason;
+				Request.ArgumentsPreview = Arguments;
+
+				const FGuid ApprovalId = RegisterPendingApproval(Request);
+
+				FUnrealMcpAssistantEvent Event;
+				Event.Type = EUnrealMcpAssistantEventType::ApprovalRequired;
+				Event.ToolName = ToolUse.UnrealToolName;
+				Event.ToolCallId = ToolUse.Id;
+				Event.ToolArgumentsJson = GetToolArgumentsJson(ToolUse);
+				Event.ApprovalIdString = ApprovalId.ToString();
+				Event.ApprovalRiskLevel = RiskLevelToString(Risk);
+				Event.ApprovalReason = Reason;
+				EmitEvent(Event);
+
+				const EUserDecision UserDecision = WaitForApproval(ApprovalId, 300.0);
+				if (UserDecision == EUserDecision::Rejected)
+				{
+					FUnrealMcpExecutionResult Result;
+					Result.Text = FString::Printf(TEXT("Tool '%s' rejected by user."), *ToolUse.UnrealToolName);
+					Result.bIsError = true;
+					return Result;
+				}
+				if (UserDecision != EUserDecision::Approved)
+				{
+					FUnrealMcpExecutionResult Result;
+					Result.Text = FString::Printf(TEXT("Tool '%s' approval timed out (300s)."), *ToolUse.UnrealToolName);
+					Result.bIsError = true;
+					return Result;
+				}
+			}
+
+			return Module->ExecuteToolFromEditorUI(ToolUse.UnrealToolName, *Arguments);
 		}
 
 		bool LoadToolArguments(const FAnthropicToolUse& ToolUse, TSharedPtr<FJsonObject>& OutArguments) const

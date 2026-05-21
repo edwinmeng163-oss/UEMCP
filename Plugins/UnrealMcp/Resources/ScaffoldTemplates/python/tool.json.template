@@ -1,0 +1,35 @@
+{
+  "name": "user.{{TOOL_ID}}",
+  "category": "user",
+  "title": "{{TOOL_ID}}",
+  "description": "{{DESCRIPTION}}",
+  "exposure": "visible",
+  "riskLevel": "low",
+  "implementationTrack": "python",
+  "pythonHandlerSha256": "{{SHA256}}",
+  "importAllowlist": [],
+  "requiresWrite": false,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": true,
+  "preflightSupport": false,
+  "postcheckSupport": false,
+  "wouldWrite": [],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "dryRun": {
+        "type": "boolean",
+        "default": true,
+        "description": "If true, return wouldWrite preview without mutation."
+      }
+    }
+  },
+  "owner": "user",
+  "docsPath": "Tools/UnrealMcpPyTools/{{TOOL_ID}}/README.md",
+  "reason": "User-generated Python tool; not part of canonical core registry.",
+  "notes": "Scaffolded by unreal.scaffold_mcp_tool implementationTrack=python. Edit main.py to implement; sha256 must match after edit (re-run mcp_user_registry_reload with acceptChangedHashes=true)."
+}

@@ -13,6 +13,16 @@
 
 namespace UnrealMcp
 {
+	namespace UnrealMcpUserRegistryReloadTool
+	{
+		FUnrealMcpExecutionResult Execute(const FJsonObject& Arguments);
+	}
+
+	namespace UnrealMcpUserToolSmokeTool
+	{
+		FUnrealMcpExecutionResult Execute(const FJsonObject& Arguments);
+	}
+
 	namespace
 	{
 		class FScopedSelfExtensionToolLock
@@ -166,6 +176,18 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.mcp_tool_audit"))
 		{
 			OutResult = AuditMcpTools(ToolsArray);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.mcp_user_registry_reload"))
+		{
+			OutResult = UnrealMcpUserRegistryReloadTool::Execute(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.mcp_user_tool_smoke"))
+		{
+			OutResult = UnrealMcpUserToolSmokeTool::Execute(Arguments);
 			return true;
 		}
 

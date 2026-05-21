@@ -3,6 +3,8 @@
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSharedPathResolver.h"
 #include "UnrealMcpToolHandlerRegistry.h"
+#include "UnrealMcpUserToolLock.h"
+#include "UnrealMcpUserToolRegistry.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -535,10 +537,77 @@ namespace UnrealMcpPythonToolBridge
 			OutResultJson = CapturedOutput.Mid(JsonStartIndex, EndIndex - JsonStartIndex).TrimStartAndEnd();
 			return !OutResultJson.IsEmpty();
 		}
+
+		class FUserPythonExecutionLocks
+		{
+		public:
+			explicit FUserPythonExecutionLocks(const FToolHandlerRegistryEntry& InHandlerEntry)
+				: HandlerEntry(InHandlerEntry)
+			{
+				if (!HandlerEntry.bLoadedFromUserRegistry || HandlerEntry.bUserToolLocksAlreadyHeld)
+				{
+					bAcquired = true;
+					return;
+				}
+
+				UnrealMcp::UserToolLock::AcquireShared();
+				bSharedLockAcquired = true;
+				if (!UnrealMcp::UserToolLock::SerializeSameToolExecution(HandlerEntry.HandlerName, -1.0))
+				{
+					FailureReason = FString::Printf(TEXT("Timed out waiting to serialize user tool execution for '%s'."), *HandlerEntry.HandlerName);
+					return;
+				}
+
+				bSameToolLockAcquired = true;
+				bAcquired = true;
+			}
+
+			~FUserPythonExecutionLocks()
+			{
+				if (bSameToolLockAcquired)
+				{
+					UnrealMcp::UserToolLock::ReleaseSameToolExecution(HandlerEntry.HandlerName);
+				}
+				if (bSharedLockAcquired)
+				{
+					UnrealMcp::UserToolLock::ReleaseShared();
+				}
+			}
+
+			bool IsAcquired() const
+			{
+				return bAcquired;
+			}
+
+			FString GetFailureReason() const
+			{
+				return FailureReason;
+			}
+
+		private:
+			const FToolHandlerRegistryEntry& HandlerEntry;
+			bool bAcquired = false;
+			bool bSharedLockAcquired = false;
+			bool bSameToolLockAcquired = false;
+			FString FailureReason;
+		};
 	}
 
 	FUnrealMcpExecutionResult ExecutePythonRegisteredTool(const FToolHandlerRegistryEntry& HandlerEntry, const FJsonObject& Arguments)
 	{
+		FUserPythonExecutionLocks UserExecutionLocks(HandlerEntry);
+		if (!UserExecutionLocks.IsAcquired())
+		{
+			return MakeBridgeError(HandlerEntry, UserExecutionLocks.GetFailureReason());
+		}
+
+		if (HandlerEntry.bLoadedFromUserRegistry
+			&& !HandlerEntry.bUserToolLocksAlreadyHeld
+			&& !UserRegistry::FindUserTool(HandlerEntry.HandlerName))
+		{
+			return MakeBridgeError(HandlerEntry, FString::Printf(TEXT("User tool '%s' is no longer loaded in the user registry."), *HandlerEntry.HandlerName));
+		}
+
 		FString NormalizedHandlerPath;
 		FString FailureReason;
 		if (!ValidatePythonHandlerPath(HandlerEntry.PythonHandlerPath, NormalizedHandlerPath, FailureReason))
@@ -716,6 +785,24 @@ namespace UnrealMcpPythonToolBridge
 		}
 
 		return MakeBridgeResult(Text, ParsedResult, bPythonReturnedError || !bExecuted);
+	}
+
+	void InvalidateUserToolCache(const FString& ToolName)
+	{
+		IPythonScriptPlugin* PythonPlugin = LoadPythonScriptPlugin();
+		if (!PythonPlugin || !PythonPlugin->IsPythonInitialized() || !PythonPlugin->IsPythonAvailable())
+		{
+			UE_LOG(LogUnrealMcp, Log, TEXT("Skipped Python cache invalidation for user tool '%s' because Python is not initialized."), *ToolName);
+			return;
+		}
+
+		FPythonCommandEx PythonCommand;
+		PythonCommand.Command = TEXT("import sys\nsys.modules.pop('main', None)\n");
+		PythonCommand.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
+		PythonCommand.FileExecutionScope = EPythonFileExecutionScope::Private;
+		PythonCommand.Flags = EPythonCommandFlags::Unattended;
+		PythonPlugin->ExecPythonCommandEx(PythonCommand);
+		UE_LOG(LogUnrealMcp, Log, TEXT("Invalidated Python module cache for user tool '%s'."), *ToolName);
 	}
 }
 }

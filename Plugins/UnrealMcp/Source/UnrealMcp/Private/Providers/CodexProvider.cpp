@@ -11,6 +11,7 @@
 #include "Misc/ScopeLock.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Providers/UnrealMcpApprovalPolicy.h"
 #include <atomic>
 
 // =====================================================================
@@ -506,6 +507,17 @@ namespace
 			}
 			EmitStatus(TEXT("Steering is queued for the next turn; the Codex provider does not currently support mid-run guidance."));
 			return false;
+		}
+
+		virtual void ResolveAssistantApproval(const FString& ApprovalIdString, bool bApproved) override
+		{
+			FGuid ApprovalId;
+			if (FGuid::Parse(ApprovalIdString, ApprovalId))
+			{
+				UnrealMcp::Approval::ResolveApproval(
+					ApprovalId,
+					bApproved ? UnrealMcp::Approval::EUserDecision::Approved : UnrealMcp::Approval::EUserDecision::Rejected);
+			}
 		}
 
 		virtual uint32 Run() override

@@ -318,3 +318,50 @@ redacted from persisted logs.
 event with `item.type == "agent_message"`, not token-level deltas. UE chat shows
 the full reply atomically in v0.25. A future enhancement could investigate
 whether codex exposes a streaming mode suitable for this provider.
+
+## v0.26.0 Reform C — root cause resolution
+
+- **RC-1 — empty or under-specified server-message system prompt: RESOLVED.**
+  `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpAssistantSystemPromptBuilder.cpp`
+  now always emits a non-empty base prompt plus the six Reform C safety rules,
+  even when `UUnrealMcpSettings::AssistantSystemPrompt` is empty. Coverage:
+  `Plugins/UnrealMcp/Source/UnrealMcp/Private/Tests/UnrealMcpAssistantSystemPromptBuilderTests.cpp`.
+- **RC-2 — prompt/provider divergence between server-message providers:
+  RESOLVED.** `UnrealMcpAssistantRun.cpp`,
+  `Providers/OpenAiChatCompletionsProvider.cpp`, and
+  `Providers/AnthropicMessagesProvider.cpp` all call
+  `UnrealMcp::BuildAssistantSystemPrompt`; Anthropic still passes
+  `AppliedSteerInstructions`, while OpenAI Responses and Chat Compat keep their
+  existing separate steering-message paths. `Providers/CodexProvider.cpp` and
+  `Providers/CodexAppServerProvider.cpp` are intentionally not wired in v0.26
+  because their injection points are subprocess/app-server specific; central
+  prompt injection for those providers is a v0.27 follow-up.
+- **RC-3 — autonomous core-source writes lacked an explicit user approval
+  stop point: RESOLVED.** The approval policy contract in
+  `Plugins/UnrealMcp/Source/UnrealMcp/Private/Providers/UnrealMcpApprovalPolicy.h`
+  and the provider seam in `UnrealMcpAssistantRun.cpp` surface
+  `approval_required` / `requiresApproval=true` and require explicit user
+  approval before retry.
+- **RC-4 — assistants could claim a new tool was callable before runtime proof:
+  RESOLVED.** `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpExtensionLifecycle.h`
+  defines `lifecycle.callableNow`, `nextRequiredAction`, handler/source kinds,
+  and derived flags; scaffold/apply/audit/reload/smoke results carry that
+  schema so assistants must inspect lifecycle after registry-changing tools.
+- **RC-5 — new capabilities defaulted to core C++ patches, forcing build and
+  restart hazards: RESOLVED.** `UnrealMcpScaffoldGenerator.cpp` and
+  `UnrealMcpScaffoldTools.cpp` make project-local Python user extensions under
+  `Tools/UnrealMcpPyTools/<tool_id>/main.py` the default path, while the C++
+  path remains core developer mode with approval, dry run, build, restart, and
+  test gates.
+- **RC-6 — audit output could not distinguish registry, handler, source, and
+  lifecycle failure modes: RESOLVED.** `UnrealMcpSelfExtensionAuditTools.cpp`
+  reports the v0.26 11-code taxonomy, backed by
+  `Tests/UnrealMcpToolAuditTaxonomyTests.cpp`, so broken states are classified
+  instead of flattened into generic missing-tool failures.
+- **RC-7 — user Python tools had no first-class reload/smoke lifecycle:
+  RESOLVED.** `UnrealMcpUserToolRegistry.cpp`,
+  `UnrealMcpUserRegistryReloadTool.cpp`, `UnrealMcpUserToolSmokeTool.cpp`, and
+  `UnrealMcpPythonToolBridge.cpp` provide the reload/smoke/callableNow loop for
+  `unreal.mcp_user_registry_reload` and `unreal.mcp_user_tool_smoke`, with
+  write-capable user tools required to expose dry-run/wouldWrite behavior before
+  mutation.

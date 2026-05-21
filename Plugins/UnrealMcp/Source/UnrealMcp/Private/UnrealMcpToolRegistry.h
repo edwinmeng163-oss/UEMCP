@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UnrealMcpExtensionLifecycle.h"
 
 class FJsonObject;
 class FJsonValue;
@@ -73,6 +74,9 @@ namespace UnrealMcp
 	FString GetToolRegistrySourcePath();
 	bool ShouldExposeToolToAi(const FString& ToolName);
 	FString ResolveToolHandlerName(const FString& ToolName);
+	Extension::ESourceKind ResolveToolSourceKind(const FString& ToolName);
+	int32 GetCoreToolCount();
+	int32 GetUserToolCount();
 	FToolPolicy GetToolPolicy(const FString& ToolName);
 	FString LexToString(EToolRiskLevel RiskLevel);
 	FString LexToString(EToolImplementationTrack ImplementationTrack);

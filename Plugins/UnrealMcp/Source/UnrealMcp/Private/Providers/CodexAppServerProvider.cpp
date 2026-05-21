@@ -10,6 +10,7 @@
 #include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Providers/UnrealMcpApprovalPolicy.h"
 #include "WebSocketsModule.h"
 
 #include <atomic>
@@ -155,6 +156,17 @@ namespace
 			Payload->SetStringField(TEXT("requestId"), CurrentRequestId);
 			Payload->SetStringField(TEXT("instruction"), Trimmed);
 			return SendJson(Payload);
+		}
+
+		virtual void ResolveAssistantApproval(const FString& ApprovalIdString, bool bApproved) override
+		{
+			FGuid ApprovalId;
+			if (FGuid::Parse(ApprovalIdString, ApprovalId))
+			{
+				UnrealMcp::Approval::ResolveApproval(
+					ApprovalId,
+					bApproved ? UnrealMcp::Approval::EUserDecision::Approved : UnrealMcp::Approval::EUserDecision::Rejected);
+			}
 		}
 
 	private:

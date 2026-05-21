@@ -1064,6 +1064,22 @@ streaming なし）で、いずれも deferred です。
 
 ---
 
+## v0.26.0 — 2026-05-22 — Reform C
+
+### 中文
+
+v0.26.0 完成 Reform C：三个 server-message provider 共享 `UnrealMcpAssistantSystemPromptBuilder`，内置 6 条安全规则，避免空 system prompt 与 provider prompt divergence；AssistantRun seam 接入 approval gate，遇到 `approval_required` / `requiresApproval=true` 必须等待用户批准；Python user-extension 成为一等默认路径，工具位于 `Tools/UnrealMcpPyTools/<tool_id>/main.py`，新增 `unreal.mcp_user_registry_reload` 与 `unreal.mcp_user_tool_smoke` 两个 control tools，配合 11-code audit taxonomy 与 scaffold/apply/audit/reload/smoke 全链路 lifecycle schema，只有 `lifecycle.callableNow=true` 且 smoke/audit 通过后才可声称新工具可调用。
+
+### EN
+
+v0.26.0 completes Reform C: the three server-message providers now share `UnrealMcpAssistantSystemPromptBuilder`, which always emits the six safety rules and prevents empty system prompts or provider prompt drift; the AssistantRun seam enforces the approval gate for `approval_required` / `requiresApproval=true`; Python user extensions are first-class by default at `Tools/UnrealMcpPyTools/<tool_id>/main.py`, backed by the new `unreal.mcp_user_registry_reload` and `unreal.mcp_user_tool_smoke` control tools, the 11-code audit taxonomy, and one lifecycle schema across scaffold/apply/audit/reload/smoke so a new tool is only callable after `lifecycle.callableNow=true` plus smoke or audit confirmation.
+
+### 日本語
+
+v0.26.0 では Reform C を完了しました。3 つの server-message provider は `UnrealMcpAssistantSystemPromptBuilder` を共有し、6 つの safety rules を常に含めることで空の system prompt と provider prompt divergence を防ぎます。AssistantRun seam では approval gate を適用し、`approval_required` / `requiresApproval=true` ではユーザー承認を待ちます。Python user-extension は `Tools/UnrealMcpPyTools/<tool_id>/main.py` を使う default path となり、新しい `unreal.mcp_user_registry_reload` と `unreal.mcp_user_tool_smoke` control tools、11-code audit taxonomy、scaffold/apply/audit/reload/smoke をまたぐ lifecycle schema により、`lifecycle.callableNow=true` と smoke/audit confirmation が揃うまで新しい tool を callable と主張できません。
+
+---
+
 ## トラブルシューティング / Troubleshooting / 故障排查
 
 | 症状 / Symptom | 原因 / Cause | 対処 / Fix |

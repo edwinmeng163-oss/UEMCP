@@ -8,6 +8,7 @@ class FUnrealMcpModule;
 class FJsonObject;
 class IHttpRequest;
 class IUnrealMcpAssistantHandle;
+class SApprovalCard;
 class SEditableTextBox;
 class SScrollBox;
 class STextBlock;
@@ -119,6 +120,9 @@ private:
 		const FUnrealMcpExecutionResult& Result);
 	TSharedPtr<FUnrealMcpChatEntry> AppendMessage(EUnrealMcpChatEntryType Type, const FString& Speaker, const FString& Message, bool bIsError = false);
 	TSharedPtr<FUnrealMcpChatEntry> AppendToolCard(const FString& ToolName, const FString& ToolCallId, const FString& ArgumentsJson);
+	void AppendApprovalCard(const FString& ApprovalId, const FString& ToolName, const FString& RiskLevel, const FString& Reason, const FString& ArgumentsJson);
+	void OnApprovalDecided(const FString& ApprovalId, bool bApproved);
+	void ReaddPendingApprovalCards();
 	void AddEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry);
 	void AddEntryWidgetToPane(const TSharedPtr<FUnrealMcpChatEntry>& Entry, bool bScrollAfterAdd);
 	TSharedRef<SWidget> BuildEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry);
@@ -167,6 +171,7 @@ private:
 	TMap<FString, TArray<FString>> RecentModelsByProvider;
 	TSharedPtr<FUnrealMcpChatEntry> ActiveAssistantEntry;
 	TSharedPtr<IUnrealMcpAssistantHandle, ESPMode::ThreadSafe> ActiveAssistantHandle;
+	TMap<FString, TSharedPtr<SApprovalCard>> PendingApprovalCards;
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveAiTestRequest;
 	TSharedPtr<SEditableTextBox> InputTextBox;
 	TSharedPtr<SEditableTextBox> SkillTaskTextBox;

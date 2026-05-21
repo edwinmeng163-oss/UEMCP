@@ -4,54 +4,62 @@ Use this skill when extending the Unreal MCP plugin itself from Editor Chat or t
 
 Reviewer/agent-side rules are in `Tools/codex-prompt-header.md` § Self-extension workflow.
 
-## Two kinds of tools
+## v0.26 tool tracks
 
-- Built-in tools live in shared plugin source such as `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpEditorTools.cpp`, `UnrealMcpBlueprintTools.cpp`, `UnrealMcpActorTools.cpp`, and related category files. They ship with the plugin and travel through normal git history.
-- User-extended tools begin as project-local scaffold drafts under
-  `<ProjectDir>/Tools/UnrealMcpToolScaffolds/<toolId>/`.
-- A scaffold draft contains `ScaffoldMetadata.json`, `ToolRegistryPatch.json`, descriptor-first `.patch.cpp` fragments, `TestRequest.json`, and human-readable review docs.
-- Applying a scaffold with `unreal.mcp_apply_scaffold` or `unreal.mcp_extension_pipeline` merges the handler, dispatcher, registrar, and registry entry into the shared plugin source.
-- After apply, the tool is no longer isolated: it ships with the plugin,
-  participates in the shared registry, and needs build, restart, and tests.
-- The scaffold directory remains after apply as history and package source; do
-  not delete it just because the tool was promoted.
+- **Default path: user Python extension.** Project-local tools live under
+  `<ProjectDir>/Tools/UnrealMcpPyTools/<tool_id>/` with a registry manifest and
+  `main.py`. This path does not use `.patch.cpp`, does not edit plugin C++
+  source, and does not require UBT or an editor restart.
+- A freshly scaffolded user Python tool is not callable yet. The required gate
+  is `unreal.scaffold_mcp_tool` -> `unreal.mcp_user_registry_reload` ->
+  `unreal.mcp_user_tool_smoke`; only call the tool after
+  `structuredContent.lifecycle.callableNow=true` and the smoke/audit result says
+  it is available.
+- **Core developer mode (requires approval):** built-in tools live in shared
+  plugin source such as `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcpEditorTools.cpp`,
+  `UnrealMcpBlueprintTools.cpp`, `UnrealMcpActorTools.cpp`, and related category
+  files. They ship with the plugin and travel through normal git history.
+- Core C++ scaffolds use descriptor-first `.patch.cpp` fragments under
+  `<ProjectDir>/Tools/UnrealMcpToolScaffolds/<toolId>/`, then require explicit
+  approval, dry-run apply, real apply, build, editor restart, audit/smoke, and
+  tests before the tool can be claimed callable.
+- Direct `unreal.execute_python` is a footgun for repeatable tool creation: it
+  bypasses registry metadata, lifecycle state, reload/smoke, and dry-run policy.
+  Use a user Python tool scaffold unless the user explicitly asked for one-off
+  editor scripting.
 
 ## Scaffold location is project-local
 
-- Scaffold drafts are Category B local project artifacts and must be rooted at
-  `FPaths::ProjectDir()`.
+- User Python tools and core C++ scaffold drafts are Category B local project
+  artifacts and must be rooted at `FPaths::ProjectDir()`.
 - If the editor runs `UEvolve.uproject`, `<ProjectDir>` is the repo root and
-  drafts land at `<repoRoot>/Tools/UnrealMcpToolScaffolds/`.
+  user Python tools land at `<repoRoot>/Tools/UnrealMcpPyTools/`.
 - If the editor runs
   `Examples/UEvolveExample57/UEvolveExample57.uproject`, `<ProjectDir>` is that
-  example project and drafts land under
-  `Examples/UEvolveExample57/Tools/UnrealMcpToolScaffolds/`.
-- Do not walk up to the repository root when writing scaffolds.
+  example project and user Python tools land under
+  `Examples/UEvolveExample57/Tools/UnrealMcpPyTools/`.
+- Do not walk up to the repository root when writing user tools, scaffolds,
+  `Saved/UnrealMcp/*`, or `SkillDrafts`.
 - `UnrealMcpSharedPathResolver` is for Category A shared inputs such as skills,
-  tests, and knowledge, not for scaffolds, `Saved/UnrealMcp/*`, or
-  `SkillDrafts`.
-- Project-local drafts let two editor sessions on different `.uproject` files
-  iterate on separate tool drafts without colliding.
+  tests, and knowledge, not for project-local generated tools.
+- Project-local tools let two editor sessions on different `.uproject` files
+  iterate separately without colliding.
 
 ## Lifecycle state interpretation
 
-`unreal.mcp_inspect_scaffold` reports orthogonal facts. `toolListed` means the
-running editor's MCP `tools/list` knows the tool right now. `readyForApply`
-means the scaffold files on disk are present, patch-safe, registry-valid, and
-test-request-valid; it does not mean the tool is live.
+Every tool that may change registry state can return
+`structuredContent.lifecycle`. Read it before making availability claims.
+`lifecycle.callableNow` is the primary callable signal; `toolListed`,
+`readyForApply`, file existence, or a successful dry run are not enough.
 
-| `toolListed` | `readyForApply` | State | Assistant action |
-| --- | --- | --- | --- |
-| `true` | `true` | Already promoted | Treat the tool as live and the scaffold as historical reference; do not re-apply it. |
-| `false` | `true` | Ready draft | Use `unreal.mcp_extension_pipeline` or stepwise apply, build, test, and restart. |
-| `false` | `false` | Incomplete draft | Use inspect warnings as a checklist, repair metadata, patches, or test request, then validate again. |
-| `true` | `false` | Drifted or orphaned | Treat the live tool as authoritative and the scaffold as broken history; do not re-apply it. |
-
-Schema or patch warnings on an already-promoted scaffold are informational
-unless the user is intentionally repairing the historical scaffold. For a
-multi-scaffold overview, prefer `unreal.mcp_workbench_status` and
-`unreal.mcp_pipeline_status` before iterating `unreal.mcp_inspect_scaffold` by
-hand.
+| Lifecycle signal | Assistant action |
+| --- | --- |
+| `callableNow=true` and smoke/audit passed | The tool can be called. |
+| `nextRequiredAction=unreal.mcp_user_registry_reload` | Run reload, then inspect lifecycle again. |
+| `nextRequiredAction=unreal.mcp_user_tool_smoke` | Run smoke, then inspect lifecycle again. |
+| `requiresApproval=true` or `approval_required` | Stop and surface the original approval request; do not retry. |
+| `dryRun=true` result | Treat as a plan only, not proof that a write happened. |
+| Core C++ state requires build/restart | Do not claim same-session availability; build, restart, audit/smoke, then test. |
 
 ## Canonical workflow
 
@@ -84,30 +92,34 @@ analyzer says so, not a fallback.
    side effects, call `unreal.workflow_run` with `dryRun=true` AND
    `writeMemory=false`; the default `writeMemory=true` writes
    `chat.active_task` even in dry-run, which is not what a probe wants.
-7. **Scaffold a new tool when the gap analyzer says so.** Run
-   `unreal.scaffold_mcp_tool` to produce a project-local descriptor-first
-   draft under `<ProjectDir>/Tools/UnrealMcpToolScaffolds/<toolId>/`. This
-   is the first-class path when `scaffold_new_tool` is the decision.
-8. **Validate the draft.** Run `unreal.mcp_validate_cpp_patch` and
-   `unreal.mcp_validate_tool_schema`. Repair patches or schema before
-   moving on.
-9. **Re-preview if scope changed.** If the concrete scaffold raises the
-   risk class or touches more files than the step 2 preview anticipated,
-   re-run `unreal.preview_change_plan` so the gate reflects reality.
-10. **Apply, build, test.** `unreal.mcp_extension_pipeline` is preferred
-    and orchestrates the full gate: preview, validation, generated test,
-    dry-run apply, before-snapshot, apply, build, test suite,
-    after-snapshot, diff, and outcome verification. The stepwise path
-    (`unreal.mcp_apply_scaffold` -> `unreal.mcp_build_editor` ->
-    `unreal.mcp_run_tool_test`) exists when finer control is needed; use
-    it only with `dryRun=true` for apply first.
-11. **Restart, confirm, hand off.** After the pipeline's manifest lands,
-    restart the editor and confirm the new tool appears in `tools/list`.
-    Re-run `unreal.mcp_tool_audit` and the generated or category test.
-    Run `unreal.knowledge_eval_run` only when the change touched docs,
-    ToolRegistry metadata, search scoring, or recommendation behavior.
-    Finish with `unreal.verify_task_outcome`, then record restart handoff
-    or next steps with `unreal.project_memory_write` or
+7. **Scaffold a user Python tool when the gap analyzer says so.** Run
+   `unreal.scaffold_mcp_tool` on the Python user-extension track. The output
+   should be project-local under
+   `<ProjectDir>/Tools/UnrealMcpPyTools/<tool_id>/`; it should not create or
+   require `.patch.cpp` fragments.
+8. **Reload the user registry.** Run `unreal.mcp_user_registry_reload`, then
+   inspect `structuredContent.lifecycle`. If `callableNow` is still false,
+   follow `nextRequiredAction` instead of calling the tool.
+9. **Smoke the tool.** Run `unreal.mcp_user_tool_smoke`. Only after smoke
+   passes and lifecycle reports `callableNow=true` may you call the new tool or
+   tell the user it is available.
+10. **Default user writes to dry run.** Write-capable user Python tools must
+    default to `dryRun=true` and return `wouldWrite`. When the user explicitly
+    requests the write, set `dryRun=false` and state the intended mutation
+    before the call.
+11. **Core developer mode (requires approval).** Use the C++ scaffold path only
+    when the user or reviewer explicitly asks for a built-in plugin tool. The
+    required gate is dry-run -> `unreal.mcp_apply_scaffold` real apply -> build
+    -> editor restart -> audit/smoke -> generated/category tests. Never claim a
+    core C++ tool is usable in the same editor session in which it was applied.
+12. **Cross-engine warning.** Both user Python tools and core C++ tools must use
+    APIs that work on UE 5.6 and UE 5.7. Any C++ engine-version shim belongs
+    only in `UnrealMcpEngineCompat.h`; Python should prefer stable `unreal`
+    module APIs and be smoke-tested in the target host.
+13. **Finish and hand off.** Run `unreal.knowledge_eval_run` only when the
+    change touched docs, ToolRegistry metadata, search scoring, or
+    recommendation behavior. Finish with `unreal.verify_task_outcome`, then
+    record restart handoff or next steps with `unreal.project_memory_write` or
     `unreal.project_memory_edit`.
 
 ## Cross-developer transfer

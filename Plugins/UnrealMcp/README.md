@@ -2,6 +2,8 @@
 
 This plugin runs a local Model Context Protocol server inside Unreal Editor and adds an in-editor command and AI chat window.
 
+Current plugin `VersionName: 0.26.0`.
+
 ## What It Exposes
 
 Read-only and context tools:
@@ -117,6 +119,8 @@ Editor action tools:
 - `unreal.mcp_diff_last_apply`
 - `unreal.mcp_clean_test_artifacts`
 - `unreal.mcp_tool_audit`
+- `unreal.mcp_user_registry_reload`
+- `unreal.mcp_user_tool_smoke`
 - `unreal.tools.export_package`
 - `unreal.tools.import_package`
 - `unreal.knowledge_index_refresh`
@@ -291,9 +295,12 @@ The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
 tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
 v0.19 `Make Tool` scaffold draft creation.
-The plugin registry currently contains 160 registered MCP tools across actors,
+The plugin registry currently contains 162 registered MCP tools across actors,
 blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget categories.
+Reform C centralizes the assistant safety prompt, adds the AssistantRun approval
+gate, and makes project-local Python user extensions the default self-extension
+path before core C++ promotion.
 
 The chat panel supports both direct slash commands and AI-assisted requests, and uses the same tool execution layer as the HTTP MCP server.
 

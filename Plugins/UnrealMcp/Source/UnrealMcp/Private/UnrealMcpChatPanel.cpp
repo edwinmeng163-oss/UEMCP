@@ -928,6 +928,139 @@ namespace UnrealMcpChat
 	}
 }
 
+DECLARE_DELEGATE_TwoParams(FUnrealMcpApprovalDecisionDelegate, const FString&, bool);
+
+class SApprovalCard final : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SApprovalCard) {}
+		SLATE_ARGUMENT(FString, ApprovalId)
+		SLATE_ARGUMENT(FString, ToolName)
+		SLATE_ARGUMENT(FString, RiskLevel)
+		SLATE_ARGUMENT(FString, Reason)
+		SLATE_ARGUMENT(FString, ArgumentsJson)
+		SLATE_EVENT(FUnrealMcpApprovalDecisionDelegate, OnDecision)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		ApprovalId = InArgs._ApprovalId;
+		ToolName = InArgs._ToolName;
+		RiskLevel = InArgs._RiskLevel;
+		Reason = InArgs._Reason;
+		ArgumentsJson = InArgs._ArgumentsJson;
+		OnDecision = InArgs._OnDecision;
+
+		ChildSlot
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(FLinearColor(0.86f, 0.42f, 0.16f, 1.0f))
+			.Padding(1.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.18f, 0.11f, 0.08f, 0.98f))
+				.Padding(10.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+						.ColorAndOpacity(FLinearColor(1.0f, 0.86f, 0.58f, 1.0f))
+						.AutoWrapText(true)
+						.Text(FText::FromString(FString::Printf(
+							TEXT("Approval Required: %s (risk: %s)"),
+							*ToolName,
+							*RiskLevel)))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("NormalFont"))
+						.ColorAndOpacity(FLinearColor(0.95f, 0.90f, 0.82f, 1.0f))
+						.AutoWrapText(true)
+						.Text(FText::FromString(Reason))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					[
+						SNew(SExpandableArea)
+						.Visibility(ArgumentsJson.TrimStartAndEnd().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+						.InitiallyCollapsed(true)
+						.HeaderContent()
+						[
+							SNew(STextBlock)
+							.Font(FAppStyle::GetFontStyle("SmallFont"))
+							.Text(LOCTEXT("ApprovalShowArgs", "Show args"))
+						]
+						.BodyContent()
+						[
+							UnrealMcpChat::MakeSelectableReadOnlyText(
+								TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
+								{
+									return FText::FromString(ArgumentsJson);
+								})),
+								FAppStyle::GetFontStyle("SmallFont"))
+						]
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							SNew(SButton)
+							.ContentPadding(FMargin(10.0f, 3.0f))
+							.Text(LOCTEXT("ApprovalApprove", "Approve"))
+							.OnClicked_Lambda([this]()
+							{
+								return HandleDecision(true);
+							})
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+						[
+							SNew(SButton)
+							.ContentPadding(FMargin(10.0f, 3.0f))
+							.Text(LOCTEXT("ApprovalReject", "Reject"))
+							.OnClicked_Lambda([this]()
+							{
+								return HandleDecision(false);
+							})
+						]
+					]
+				]
+			]
+		];
+	}
+
+private:
+	FReply HandleDecision(bool bApproved) const
+	{
+		if (OnDecision.IsBound())
+		{
+			OnDecision.Execute(ApprovalId, bApproved);
+		}
+		return FReply::Handled();
+	}
+
+	FString ApprovalId;
+	FString ToolName;
+	FString RiskLevel;
+	FString Reason;
+	FString ArgumentsJson;
+	FUnrealMcpApprovalDecisionDelegate OnDecision;
+};
+
 void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* InOwnerModule)
 {
 	OwnerModule = InOwnerModule;
@@ -3126,13 +3259,30 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 				case EUnrealMcpAssistantEventType::ToolCallStarted:
 					PinnedThis->AppendToolCard(Event.ToolName, Event.ToolCallId, Event.ToolArgumentsJson);
 					break;
-					case EUnrealMcpAssistantEventType::ToolCallFinished:
-						if (const TSharedPtr<FUnrealMcpChatEntry>* ExistingEntry = PinnedThis->ToolEntriesByCallId.Find(Event.ToolCallId))
+				case EUnrealMcpAssistantEventType::ToolCallFinished:
+					if (const TSharedPtr<FUnrealMcpChatEntry>* ExistingEntry = PinnedThis->ToolEntriesByCallId.Find(Event.ToolCallId))
+					{
+						(*ExistingEntry)->Body = Event.Text;
+						(*ExistingEntry)->bIsPending = false;
+						(*ExistingEntry)->bIsError = Event.bIsError;
+						UnrealMcpChat::UpdateToolSummaryFromTemplate(**ExistingEntry, (*ExistingEntry)->Details, nullptr);
+						if (!Event.bIsError && Event.ToolName.Equals(TEXT("unreal.tail_log"), ESearchCase::CaseSensitive))
 						{
-							(*ExistingEntry)->Body = Event.Text;
-							(*ExistingEntry)->bIsPending = false;
-							(*ExistingEntry)->bIsError = Event.bIsError;
-							UnrealMcpChat::UpdateToolSummaryFromTemplate(**ExistingEntry, (*ExistingEntry)->Details, nullptr);
+							PinnedThis->LastLogText = Event.Text;
+						}
+						PinnedThis->InvalidateEntryWidgets();
+						PinnedThis->ScrollToolLogToEnd();
+						PinnedThis->SaveHistory();
+					}
+					else
+					{
+						TSharedPtr<FUnrealMcpChatEntry> ToolEntry = PinnedThis->AppendToolCard(Event.ToolName, Event.ToolCallId, Event.ToolArgumentsJson);
+						if (ToolEntry.IsValid())
+						{
+							ToolEntry->Body = Event.Text;
+							ToolEntry->bIsPending = false;
+							ToolEntry->bIsError = Event.bIsError;
+							UnrealMcpChat::UpdateToolSummaryFromTemplate(*ToolEntry, Event.ToolArgumentsJson, nullptr);
 							if (!Event.bIsError && Event.ToolName.Equals(TEXT("unreal.tail_log"), ESearchCase::CaseSensitive))
 							{
 								PinnedThis->LastLogText = Event.Text;
@@ -3140,25 +3290,16 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 							PinnedThis->InvalidateEntryWidgets();
 							PinnedThis->ScrollToolLogToEnd();
 							PinnedThis->SaveHistory();
+						}
 					}
-					else
-					{
-						TSharedPtr<FUnrealMcpChatEntry> ToolEntry = PinnedThis->AppendToolCard(Event.ToolName, Event.ToolCallId, Event.ToolArgumentsJson);
-							if (ToolEntry.IsValid())
-							{
-								ToolEntry->Body = Event.Text;
-								ToolEntry->bIsPending = false;
-								ToolEntry->bIsError = Event.bIsError;
-								UnrealMcpChat::UpdateToolSummaryFromTemplate(*ToolEntry, Event.ToolArgumentsJson, nullptr);
-								if (!Event.bIsError && Event.ToolName.Equals(TEXT("unreal.tail_log"), ESearchCase::CaseSensitive))
-								{
-									PinnedThis->LastLogText = Event.Text;
-								}
-								PinnedThis->InvalidateEntryWidgets();
-								PinnedThis->ScrollToolLogToEnd();
-								PinnedThis->SaveHistory();
-							}
-					}
+					break;
+				case EUnrealMcpAssistantEventType::ApprovalRequired:
+					PinnedThis->AppendApprovalCard(
+						Event.ApprovalIdString,
+						Event.ToolName,
+						Event.ApprovalRiskLevel,
+						Event.ApprovalReason,
+						Event.ToolArgumentsJson);
 					break;
 				case EUnrealMcpAssistantEventType::Status:
 				default:
@@ -3189,6 +3330,17 @@ void SUnrealMcpChatPanel::StartAssistantRequest(const FString& UserPrompt)
 				PinnedThis->bAssistantRequestInFlight = false;
 				PinnedThis->ActiveAssistantRequestStartTime = FDateTime();
 				PinnedThis->ActiveAssistantHandle.Reset();
+				if (PinnedThis->TranscriptEntriesBox.IsValid())
+				{
+					for (const TPair<FString, TSharedPtr<SApprovalCard>>& PendingApprovalCard : PinnedThis->PendingApprovalCards)
+					{
+						if (PendingApprovalCard.Value.IsValid())
+						{
+							PinnedThis->TranscriptEntriesBox->RemoveSlot(PendingApprovalCard.Value.ToSharedRef());
+						}
+					}
+				}
+				PinnedThis->PendingApprovalCards.Reset();
 				if (!Result.bIsError && !Result.ResponseId.IsEmpty())
 				{
 					PinnedThis->LastAssistantResponseId = Result.ResponseId;
@@ -3285,6 +3437,74 @@ TSharedPtr<FUnrealMcpChatEntry> SUnrealMcpChatPanel::AppendToolCard(const FStrin
 	return Entry;
 }
 
+void SUnrealMcpChatPanel::AppendApprovalCard(const FString& ApprovalId, const FString& ToolName, const FString& RiskLevel, const FString& Reason, const FString& ArgumentsJson)
+{
+	if (ApprovalId.IsEmpty() || !TranscriptEntriesBox.IsValid())
+	{
+		return;
+	}
+
+	TSharedPtr<SApprovalCard> ApprovalCard =
+		SNew(SApprovalCard)
+		.ApprovalId(ApprovalId)
+		.ToolName(ToolName)
+		.RiskLevel(RiskLevel)
+		.Reason(Reason)
+		.ArgumentsJson(ArgumentsJson)
+		.OnDecision(FUnrealMcpApprovalDecisionDelegate::CreateSP(this, &SUnrealMcpChatPanel::OnApprovalDecided));
+
+	PendingApprovalCards.Add(ApprovalId, ApprovalCard);
+
+	TranscriptEntriesBox->AddSlot()
+	.AutoHeight()
+	.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+	[
+		ApprovalCard.ToSharedRef()
+	];
+
+	ScrollTranscriptToEnd();
+}
+
+void SUnrealMcpChatPanel::OnApprovalDecided(const FString& ApprovalId, bool bApproved)
+{
+	if (ActiveAssistantHandle.IsValid())
+	{
+		ActiveAssistantHandle->ResolveAssistantApproval(ApprovalId, bApproved);
+	}
+
+	if (const TSharedPtr<SApprovalCard>* ApprovalCard = PendingApprovalCards.Find(ApprovalId))
+	{
+		if (TranscriptEntriesBox.IsValid() && ApprovalCard->IsValid())
+		{
+			TranscriptEntriesBox->RemoveSlot((*ApprovalCard).ToSharedRef());
+		}
+		PendingApprovalCards.Remove(ApprovalId);
+	}
+}
+
+void SUnrealMcpChatPanel::ReaddPendingApprovalCards()
+{
+	if (!TranscriptEntriesBox.IsValid())
+	{
+		return;
+	}
+
+	for (const TPair<FString, TSharedPtr<SApprovalCard>>& PendingApprovalCard : PendingApprovalCards)
+	{
+		if (!PendingApprovalCard.Value.IsValid())
+		{
+			continue;
+		}
+
+		TranscriptEntriesBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+		[
+			PendingApprovalCard.Value.ToSharedRef()
+		];
+	}
+}
+
 void SUnrealMcpChatPanel::AddEntryWidget(const TSharedPtr<FUnrealMcpChatEntry>& Entry)
 {
 	AddEntryWidgetToPane(Entry, true);
@@ -3347,6 +3567,7 @@ void SUnrealMcpChatPanel::RebuildEntryWidgets(bool bScrollTranscript, bool bScro
 	{
 		AddEntryWidgetToPane(Entry, false);
 	}
+	ReaddPendingApprovalCards();
 
 	InvalidateEntryWidgets();
 	if (bShouldScrollTranscript)

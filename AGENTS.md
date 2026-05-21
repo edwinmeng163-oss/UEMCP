@@ -16,7 +16,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: UEAtelier
-VersionName: 0.25.0
+VersionName: 0.26.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -135,9 +135,11 @@ drafts unless explicitly asked.
 - Actor, Blueprint, Widget, and Material tools: readback, guarded edits,
   creation, layout, graph/pin inspection, parameter inspection, and strict
   schema writes.
-- Self-extension: schema/C++ patch validation, patch editing, dry-run apply,
-  backups, build matrix, tests, pipeline, audit, rollback, locks, error
-  classification, supervisor install, and reviewed package export/import.
+- Self-extension: schema/C++ patch validation, Python user-extension scaffolds,
+  `unreal.mcp_user_registry_reload`, `unreal.mcp_user_tool_smoke`, patch
+  editing, dry-run apply, backups, build matrix, tests, pipeline, audit,
+  rollback, locks, error classification, supervisor install, and reviewed
+  package export/import.
 - RAG/recommendation, memory, skills, Task Atlas, and verification:
   knowledge index/search/eval, tool/workflow recommend, project memory CRUD,
   skill activity/drafts/promote, task extract/list/describe/rate/pin/promote,
@@ -153,7 +155,7 @@ The explicit ToolRegistry is central. Do not bypass it:
 `Tools/UnrealMcpToolRegistry/schema.json`, and
 `Schemas/UnrealMcpToolRegistry.schema.json`.
 
-At the time this file was written, the registry contained 160 entries across:
+At the time this file was written, the registry contained 162 entries across:
 actors, blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget.
 
@@ -165,9 +167,13 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.24 adds AI provider presets, Kimi
-`reasoning_content` compatibility, enriched input schemas, generated per-tool
-docs under `Tools/UnrealMcpToolDocs/`, and progressive-disclosure agent docs;
+Current project status: v0.26 completes Reform C with centralized server-message
+provider system prompt assembly, six baked safety rules, the AssistantRun
+approval gate, Python user-extension default scaffolds, lifecycle-aware
+reload/smoke controls, and the 11-code audit taxonomy; v0.25 rewrites Codex CLI
+exec; v0.24 adds AI provider presets, Kimi `reasoning_content` compatibility,
+enriched input schemas, generated per-tool docs under
+`Tools/UnrealMcpToolDocs/`, and progressive-disclosure agent docs;
 v0.23 adds `cli-anything-ueatelier`; v0.22 adds `unreal.pie_smoke`; v0.21 adds
 `unreal.editor_diagnostics`; v0.20 hardens async automation runs and watchdog
 stale recovery; v0.19 completes Task Atlas Make Tool, To RAG ingestion, and
@@ -175,6 +181,13 @@ label backfill; v0.19.1 disables Unity build for the UnrealMcp module after a
 UE 5.6 collision. `unreal.configure_fps_settings` and
 `unreal.bp_add_input_axis_event_node` remain scaffold-only pending functional
 verification.
+
+Reform C v0.26 resolves the v0.25 self-extension incident by centralizing
+server-message provider prompts in
+`UnrealMcpAssistantSystemPromptBuilder`, baking in the six lifecycle/dry-run/
+approval safety rules, enforcing the approval gate at the AssistantRun provider
+seam, and making project-local Python user extensions the default path before
+core C++ tool promotion.
 
 Visible tool counts can differ because hidden entries and aliases are filtered.
 Trust `/tool unreal.mcp_workbench_status {}` and

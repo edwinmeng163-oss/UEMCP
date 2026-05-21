@@ -22,7 +22,8 @@ enum class EUnrealMcpAssistantEventType : uint8
 	Status,
 	TextDelta,
 	ToolCallStarted,
-	ToolCallFinished
+	ToolCallFinished,
+	ApprovalRequired
 };
 
 struct FUnrealMcpExecutionResult
@@ -40,6 +41,10 @@ struct FUnrealMcpAssistantEvent
 	FString ToolCallId;
 	FString ToolArgumentsJson;
 	bool bIsError = false;
+
+	FString ApprovalIdString;
+	FString ApprovalRiskLevel;
+	FString ApprovalReason;
 };
 
 struct FUnrealMcpAssistantTurnResult
@@ -56,6 +61,7 @@ public:
 	virtual ~IUnrealMcpAssistantHandle() = default;
 	virtual void Cancel() = 0;
 	virtual bool Steer(const FString& Instruction) = 0;
+	virtual void ResolveAssistantApproval(const FString& ApprovalIdString, bool bApproved) { }
 };
 
 class FUnrealMcpModule final : public IModuleInterface

@@ -7,9 +7,11 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UnrealMcpActivityLog.h"
+#include "UnrealMcpAssistantSystemPromptBuilder.h"
 #include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpToolRegistry.h"
+#include "Providers/UnrealMcpApprovalPolicy.h"
 
 #include <atomic>
 
@@ -156,6 +158,17 @@ public:
 		return true;
 	}
 
+	virtual void ResolveAssistantApproval(const FString& ApprovalIdString, bool bApproved) override
+	{
+		FGuid ApprovalId;
+		if (FGuid::Parse(ApprovalIdString, ApprovalId))
+		{
+			UnrealMcp::Approval::ResolveApproval(
+				ApprovalId,
+				bApproved ? UnrealMcp::Approval::EUserDecision::Approved : UnrealMcp::Approval::EUserDecision::Rejected);
+		}
+	}
+
 private:
 	struct FAssistantToolCall
 	{
@@ -229,6 +242,69 @@ private:
 		Event.Text = ToolResult.Text;
 		Event.bIsError = ToolResult.bIsError;
 		EmitEvent(Event);
+	}
+
+	FUnrealMcpExecutionResult ExecuteToolWithApproval(const FAssistantToolCall& ToolCall, const TSharedPtr<FJsonObject>& ArgumentsObject) const
+	{
+		using namespace UnrealMcp::Approval;
+
+		ERiskLevel Risk = ERiskLevel::Low;
+		FString Reason;
+		const EDecision Decision = EvaluateApprovalPolicy(
+			ToolCall.UnrealToolName,
+			ArgumentsObject,
+			true,
+			Risk,
+			Reason);
+
+		if (Decision == EDecision::Block)
+		{
+			return UnrealMcp::MakeExecutionResult(
+				FString::Printf(TEXT("Tool '%s' blocked by policy: %s"), *ToolCall.UnrealToolName, *Reason),
+				nullptr,
+				true);
+		}
+
+		if (Decision == EDecision::RequireApproval)
+		{
+			FApprovalRequest Request;
+			Request.ToolName = ToolCall.UnrealToolName;
+			Request.RiskLevelLabel = RiskLevelToString(Risk);
+			Request.ReasonHumanReadable = Reason;
+			Request.ArgumentsPreview = ArgumentsObject;
+
+			const FGuid ApprovalId = RegisterPendingApproval(Request);
+
+			FUnrealMcpAssistantEvent Event;
+			Event.Type = EUnrealMcpAssistantEventType::ApprovalRequired;
+			Event.ToolName = ToolCall.UnrealToolName;
+			Event.ToolCallId = ToolCall.CallId;
+			Event.ToolArgumentsJson = ToolCall.ArgumentsJson.TrimStartAndEnd().IsEmpty()
+				? UnrealMcp::JsonObjectToString(ArgumentsObject)
+				: ToolCall.ArgumentsJson;
+			Event.ApprovalIdString = ApprovalId.ToString();
+			Event.ApprovalRiskLevel = RiskLevelToString(Risk);
+			Event.ApprovalReason = Reason;
+			EmitEvent(Event);
+
+			const EUserDecision UserDecision = WaitForApproval(ApprovalId, 300.0);
+			if (UserDecision == EUserDecision::Rejected)
+			{
+				return UnrealMcp::MakeExecutionResult(
+					FString::Printf(TEXT("Tool '%s' rejected by user."), *ToolCall.UnrealToolName),
+					nullptr,
+					true);
+			}
+			if (UserDecision != EUserDecision::Approved)
+			{
+				return UnrealMcp::MakeExecutionResult(
+					FString::Printf(TEXT("Tool '%s' approval timed out (300s)."), *ToolCall.UnrealToolName),
+					nullptr,
+					true);
+			}
+		}
+
+		return Module->ExecuteTool(ToolCall.UnrealToolName, *ArgumentsObject);
 	}
 
 	static FString CollapseForActiveTaskMemory(const FString& Text, int32 MaxChars)
@@ -629,32 +705,10 @@ private:
 
 	FString BuildAssistantInstructions() const
 	{
-		FString Instructions =
-			TEXT("You are Unreal MCP AI running inside Unreal Editor. ")
-			TEXT("Help the user build, inspect, and modify the current Unreal project by using the provided function tools when they are helpful. ")
-			TEXT("Prefer the smallest safe set of tool calls. ")
-			TEXT("For read-only questions, inspect first before concluding. ")
-			TEXT("For modifications, act directly when the user clearly asked for a change. ")
-			TEXT("Avoid destructive actions such as deleting actors unless the user explicitly asked for that result. ")
-			TEXT("Prefer AI-safe wrapper tools such as spawn_actor_basic, spawn_actor_batch_basic, spawn_static_mesh_actor, batch_set_actor_scale, batch_set_actor_tags, batch_set_point_light_properties, batch_configure_static_mesh_actors, bp_* Blueprint graph editing tools, widget_* UMG editing tools, scaffold_recipe, workflow_run, scaffold_mcp_tool, and mcp_* self-extension tools before falling back to execute_python. ")
-			TEXT("Self-extension capability briefing: from the first turn, assume this plugin can inspect its registered tools, scaffold new MCP tools, validate schemas, apply descriptor-first patches, build the editor target, run tool tests, roll back failed extensions, and store continuation memory. ")
-			TEXT("Use mcp_workbench_status or mcp_tool_audit to discover current coverage, policies, handlers, tests, and health. ")
-			TEXT("For uncertain tasks, use tool_recommend and knowledge_search before inventing new tools; if knowledge_search reports a missing index, run knowledge_index_refresh and retry the search. ")
-			TEXT("When the user asks for a high-level or repeatable workflow, prefer scaffold_recipe to generate a bounded recipe and workflow_run to dry-run or execute a sequence of existing tools. ")
-			TEXT("workflow_run defaults to dryRun=true; run it as a plan first, then execute with dryRun=false only when the requested changes, risks, and verification steps are clear. ")
-			TEXT("For new MCP capabilities, follow the safe self-extension gate: preview_change_plan, scaffold_mcp_tool, mcp_validate_tool_schema, mcp_apply_scaffold dryRun, mcp_apply_scaffold real apply, mcp_build_editor, editor restart if needed, mcp_run_tool_test or mcp_run_test_suite, then verify_task_outcome. ")
-			TEXT("If a long task pauses, fails, or approaches the tool-round limit, read or write project memory key chat.active_task and continue from the smallest verified next step. ")
-			TEXT("Keep answers compact by default and avoid repeating the user's prompt. ")
-			TEXT("When a task is blocked because no suitable tool exists, say so plainly and suggest the closest supported path. ")
-			TEXT("After tool use, give a concise final answer focused on what you changed or found.");
-
-		if (!CachedSettings.AssistantSystemPrompt.TrimStartAndEnd().IsEmpty())
-		{
-			Instructions += TEXT("\n\nAdditional instructions:\n");
-			Instructions += CachedSettings.AssistantSystemPrompt.TrimStartAndEnd();
-		}
-
-		return Instructions;
+		UnrealMcp::FAssistantSystemPromptInput Input;
+		Input.UserAssistantSystemPrompt = CachedSettings.AssistantSystemPrompt;
+		Input.Transport = UnrealMcp::EAssistantSystemPromptTransport::OpenAiResponses;
+		return UnrealMcp::BuildAssistantSystemPrompt(Input);
 	}
 
 	TSharedPtr<FJsonValueObject> BuildInputMessage(const FString& Text) const
@@ -1367,7 +1421,7 @@ private:
 			}
 			else
 			{
-				ToolResult = Module->ExecuteTool(ToolCall.UnrealToolName, *ArgumentsObject);
+				ToolResult = ExecuteToolWithApproval(ToolCall, ArgumentsObject);
 			}
 
 			AddRecentToolSummary(ToolCall, ToolResult);

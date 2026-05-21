@@ -2,7 +2,11 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Misc/Paths.h"
+#include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpUserToolLock.h"
+#include "UnrealMcpUserToolRegistry.h"
 
 namespace UnrealMcp
 {
@@ -138,6 +142,34 @@ namespace UnrealMcp
 			HandlerToIndex.Add(HandlerName, Entries.Num());
 			Entries.Add(MoveTemp(Entry));
 		}
+
+		FString MakeUserRegistryRelativeHandlerPath(const UserRegistry::FUserToolEntry& UserToolEntry)
+		{
+			FString NormalizedScaffoldDir = UserToolEntry.ScaffoldDir;
+			FPaths::NormalizeFilename(NormalizedScaffoldDir);
+			NormalizedScaffoldDir.RemoveFromEnd(TEXT("/"));
+			return FPaths::Combine(
+				::UnrealMcp::Extension::UserPyToolsRelativeRoot,
+				FPaths::GetCleanFilename(NormalizedScaffoldDir),
+				TEXT("main.py"));
+		}
+
+		FToolHandlerRegistryEntry MakeUserHandlerEntry(const UserRegistry::FUserToolEntry& UserToolEntry)
+		{
+			FToolHandlerRegistryEntry Entry;
+			Entry.HandlerName = UserToolEntry.ToolName;
+			Entry.Category = TEXT("user");
+			Entry.SourceFile = UserToolEntry.PythonHandlerPath;
+			Entry.ImplementationTrack = EToolImplementationTrack::Python;
+			Entry.PythonHandlerPath = MakeUserRegistryRelativeHandlerPath(UserToolEntry);
+			Entry.PythonHandlerSha256 = UserToolEntry.PythonHandlerSha256;
+			Entry.PythonImportAllowList = UserToolEntry.ImportAllowlist;
+			Entry.ToolNames.Add(UserToolEntry.ToolName);
+			Entry.bLoadedFromExplicitRegistry = false;
+			Entry.bLoadedFromDescriptor = false;
+			Entry.bLoadedFromUserRegistry = true;
+			return Entry;
+		}
 	}
 
 	const TArray<FToolHandlerRegistryEntry>& GetToolHandlerRegistryEntries()
@@ -171,12 +203,33 @@ namespace UnrealMcp
 				}
 			}
 		}
+
+		UserToolLock::FSharedGuard UserRegistryGuard;
+		if (const UserRegistry::FUserToolEntry* UserToolEntry = UserRegistry::FindUserTool(HandlerName))
+		{
+			static thread_local FToolHandlerRegistryEntry UserHandlerEntry;
+			UserHandlerEntry = MakeUserHandlerEntry(*UserToolEntry);
+			return &UserHandlerEntry;
+		}
+
 		return nullptr;
 	}
 
 	bool IsRegisteredToolHandler(const FString& HandlerName)
 	{
 		return FindToolHandlerRegistryEntry(HandlerName) != nullptr;
+	}
+
+	Extension::EHandlerKind ResolveToolHandlerKind(const FString& ToolName)
+	{
+		if (const FToolHandlerRegistryEntry* HandlerEntry = FindToolHandlerRegistryEntry(ResolveToolHandlerName(ToolName)))
+		{
+			return HandlerEntry->ImplementationTrack == EToolImplementationTrack::Python
+				? Extension::EHandlerKind::PythonBridge
+				: Extension::EHandlerKind::CppDispatcher;
+		}
+
+		return Extension::EHandlerKind::None;
 	}
 
 	TSharedPtr<FJsonObject> MakeToolHandlerRegistryStatusObject()
@@ -202,6 +255,7 @@ namespace UnrealMcp
 			EntryObject->SetArrayField(TEXT("pythonImportAllowList"), MakeStringArrayValues(Entry.PythonImportAllowList));
 			EntryObject->SetBoolField(TEXT("explicitRegistryBacked"), Entry.bLoadedFromExplicitRegistry);
 			EntryObject->SetBoolField(TEXT("descriptorBacked"), Entry.bLoadedFromDescriptor);
+			EntryObject->SetBoolField(TEXT("userRegistryBacked"), Entry.bLoadedFromUserRegistry);
 			EntryObject->SetNumberField(TEXT("routedToolCount"), Entry.ToolNames.Num());
 			EntryObject->SetArrayField(TEXT("routedTools"), RoutedToolValues);
 			HandlerValues.Add(MakeShared<FJsonValueObject>(EntryObject));
@@ -223,6 +277,8 @@ namespace UnrealMcp
 
 		TSharedPtr<FJsonObject> StatusObject = MakeShared<FJsonObject>();
 		StatusObject->SetNumberField(TEXT("handlerCount"), GetToolHandlerRegistryEntries().Num());
+		StatusObject->SetNumberField(TEXT("coreHandlerCount"), GetToolHandlerRegistryEntries().Num());
+		StatusObject->SetNumberField(TEXT("userHandlerOverlayCount"), UserRegistry::GetUserToolCount());
 		StatusObject->SetObjectField(TEXT("categoryCounts"), CategoryCountsObject);
 		StatusObject->SetObjectField(TEXT("implementationTrackCounts"), ImplementationTrackCountsObject);
 		StatusObject->SetArrayField(TEXT("handlers"), HandlerValues);

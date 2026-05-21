@@ -1,7 +1,9 @@
 #include "UnrealMcpScaffoldTools.h"
 
+#include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpModule.h"
+#include "UnrealMcpScaffoldGenerator.h"
 #include "UnrealMcpSharedPathResolver.h"
 
 #include "Dom/JsonObject.h"
@@ -1472,8 +1474,51 @@ namespace UnrealMcp
 			*MakeCppBoolLiteral(bNeedsChecks));
 	}
 
+	FString ScaffoldToolsDerivePythonToolIdFromExistingToolNameContract(const FJsonObject& Arguments)
+	{
+		FString RawToolId;
+		if (!Arguments.TryGetStringField(TEXT("toolName"), RawToolId) || RawToolId.TrimStartAndEnd().IsEmpty())
+		{
+			if (!Arguments.TryGetStringField(TEXT("toolId"), RawToolId) || RawToolId.TrimStartAndEnd().IsEmpty())
+			{
+				Arguments.TryGetStringField(TEXT("id"), RawToolId);
+			}
+		}
+
+		RawToolId = RawToolId.TrimStartAndEnd();
+		if (RawToolId.StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+		{
+			RawToolId.RightChopInline(5);
+		}
+		else if (RawToolId.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive))
+		{
+			RawToolId.RightChopInline(7);
+		}
+		return RawToolId.TrimStartAndEnd();
+	}
+
 		FUnrealMcpExecutionResult ScaffoldMcpTool(const FJsonObject& Arguments)
 		{
+			FString ImplementationTrackString;
+			Arguments.TryGetStringField(TEXT("implementationTrack"), ImplementationTrackString);
+			ImplementationTrackString = ImplementationTrackString.TrimStartAndEnd();
+			if (ImplementationTrackString.IsEmpty())
+			{
+				ImplementationTrackString = TEXT("python");
+			}
+
+			const Extension::EImplementationTrack ImplementationTrack =
+				Extension::ImplementationTrackFromString(ImplementationTrackString, Extension::EImplementationTrack::Python);
+			if (ImplementationTrack == Extension::EImplementationTrack::Python)
+			{
+				const FString ToolId = ScaffoldToolsDerivePythonToolIdFromExistingToolNameContract(Arguments);
+				if (ToolId.IsEmpty())
+				{
+					return MakeExecutionResult(TEXT("Missing required field 'toolName' for Python scaffold track."), nullptr, true);
+				}
+				return Scaffold::BuildScaffoldExecutionResult(Scaffold::GeneratePythonScaffoldFiles(ToolId, Arguments));
+			}
+
 			FString ToolName;
 			if (!Arguments.TryGetStringField(TEXT("toolName"), ToolName) || ToolName.TrimStartAndEnd().IsEmpty())
 		{

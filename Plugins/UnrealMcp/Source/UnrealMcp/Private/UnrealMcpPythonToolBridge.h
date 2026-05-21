@@ -11,6 +11,7 @@ namespace UnrealMcp
 	namespace UnrealMcpPythonToolBridge
 	{
 		FUnrealMcpExecutionResult ExecutePythonRegisteredTool(const FToolHandlerRegistryEntry& HandlerEntry, const FJsonObject& Arguments);
+		void InvalidateUserToolCache(const FString& ToolName);
 	}
 }
 

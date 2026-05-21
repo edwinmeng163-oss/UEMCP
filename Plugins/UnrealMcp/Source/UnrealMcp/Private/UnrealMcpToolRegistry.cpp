@@ -8,8 +8,11 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UnrealMcpSharedPathResolver.h"
+#include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistrar.h"
+#include "UnrealMcpUserToolLock.h"
+#include "UnrealMcpUserToolRegistry.h"
 
 namespace UnrealMcp
 {
@@ -665,6 +668,32 @@ namespace UnrealMcp
 		return ToolName;
 	}
 
+	Extension::ESourceKind ResolveToolSourceKind(const FString& ToolName)
+	{
+		if (FindToolRegistryEntry(ToolName))
+		{
+			return Extension::ESourceKind::CoreRegistry;
+		}
+
+		UserToolLock::FSharedGuard UserRegistryGuard;
+		if (UserRegistry::FindUserTool(ToolName))
+		{
+			return Extension::ESourceKind::UserRegistry;
+		}
+
+		return Extension::ESourceKind::DescriptorOnly;
+	}
+
+	int32 GetCoreToolCount()
+	{
+		return GetToolRegistryEntries().Num();
+	}
+
+	int32 GetUserToolCount()
+	{
+		return UserRegistry::GetUserToolCount();
+	}
+
 	FString LexToString(EToolRiskLevel RiskLevel)
 	{
 		switch (RiskLevel)
@@ -916,6 +945,8 @@ namespace UnrealMcp
 				ValidationObject->SetStringField(TEXT("sourceResolutionWarning"), GetLoadedToolRegistry().SourceWarning);
 			}
 			ValidationObject->SetNumberField(TEXT("entryCount"), Entries.Num());
+		ValidationObject->SetNumberField(TEXT("coreEntryCount"), GetCoreToolCount());
+		ValidationObject->SetNumberField(TEXT("userEntryCount"), GetUserToolCount());
 		ValidationObject->SetNumberField(TEXT("explicitEntryCount"), ExplicitEntryCount);
 		ValidationObject->SetNumberField(TEXT("descriptorBackedCount"), DescriptorBackedCount);
 		ValidationObject->SetNumberField(TEXT("descriptorOnlyCount"), DescriptorOnlyCount);
@@ -983,6 +1014,9 @@ namespace UnrealMcp
 
 		StructuredContent->SetStringField(TEXT("toolRegistrySourcePath"), GetToolRegistrySourcePath());
 		StructuredContent->SetNumberField(TEXT("toolRegistryEntryCount"), GetToolRegistryEntries().Num());
+		StructuredContent->SetNumberField(TEXT("coreToolRegistryEntryCount"), GetCoreToolCount());
+		StructuredContent->SetNumberField(TEXT("userToolRegistryEntryCount"), GetUserToolCount());
+		StructuredContent->SetNumberField(TEXT("totalToolRegistryEntryCount"), GetCoreToolCount() + GetUserToolCount());
 		StructuredContent->SetNumberField(TEXT("explicitToolRegistryEntryCount"), ExplicitEntryCount);
 		StructuredContent->SetNumberField(TEXT("descriptorBackedToolCount"), DescriptorBackedCount);
 		StructuredContent->SetNumberField(TEXT("descriptorOnlyToolCount"), DescriptorOnlyCount);

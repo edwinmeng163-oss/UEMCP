@@ -8,6 +8,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UnrealMcpActivityLog.h"
+#include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpSharedPathResolver.h"
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistrar.h"
@@ -165,6 +166,49 @@ namespace UnrealMcp
 				StepObject->SetStringField(TEXT("reason"), Reason);
 			}
 			NextSteps.Add(MakeShared<FJsonValueObject>(StepObject));
+		}
+
+		void SetApplyScaffoldLifecycle(
+			const TSharedPtr<FJsonObject>& StructuredContent,
+			const FString& ToolName,
+			const FString& ScaffoldDirectory,
+			const FString& RegistryPath,
+			const FString& ManifestPath,
+			bool bDryRun,
+			bool bCanApply)
+		{
+			if (!StructuredContent.IsValid())
+			{
+				return;
+			}
+
+			Extension::FToolLifecycle Lifecycle;
+			Lifecycle.ToolName = ToolName;
+			Lifecycle.ExtensionScope = Extension::EExtensionScope::Core;
+			Lifecycle.ImplementationTrack = Extension::EImplementationTrack::Cpp;
+			Lifecycle.HandlerKind = Extension::EHandlerKind::None;
+			Lifecycle.SourceKind = bDryRun ? Extension::ESourceKind::DescriptorOnly : Extension::ESourceKind::CoreRegistry;
+			if (!bCanApply)
+			{
+				Lifecycle.State = Extension::ELifecycleState::Blocked;
+				Lifecycle.SourceKind = Extension::ESourceKind::DescriptorOnly;
+				Lifecycle.NextRequiredAction = TEXT("repair scaffold validation or dependency issues, then rerun mcp_apply_scaffold with dryRun=true");
+			}
+			else if (bDryRun)
+			{
+				Lifecycle.State = Extension::ELifecycleState::DryRunReady;
+				Lifecycle.NextRequiredAction = TEXT("call mcp_apply_scaffold with dryRun=false to apply patches");
+			}
+			else
+			{
+				Lifecycle.State = Extension::ELifecycleState::AppliedCoreCppBuildRequired;
+				Lifecycle.NextRequiredAction = TEXT("run UBT to rebuild plugin dylib, then restart editor");
+			}
+			Lifecycle.bCallableNow = Extension::IsLifecycleStateCallable(Lifecycle.State);
+			Lifecycle.ScaffoldDir = ScaffoldDirectory;
+			Lifecycle.RegistryPath = RegistryPath;
+			Lifecycle.ManifestPath = ManifestPath;
+			StructuredContent->SetObjectField(TEXT("lifecycle"), Extension::BuildLifecycleJson(Lifecycle));
 		}
 
 		FString MakeMcpGeneratedFunctionSuffixForApply(const FString& ToolName)
@@ -1885,6 +1929,7 @@ namespace UnrealMcp
 			StructuredContent->SetArrayField(TEXT("dependencyChain"), DependencyChain);
 			StructuredContent->SetObjectField(TEXT("registrationStatus"), RegistrationStatusObject);
 			StructuredContent->SetArrayField(TEXT("nextSteps"), NextSteps);
+			SetApplyScaffoldLifecycle(StructuredContent, ToolName, ScaffoldDirectory, FString(), FString(), bDryRun, false);
 			return StructuredContent;
 		}
 
@@ -1914,7 +1959,7 @@ namespace UnrealMcp
 			const int32 TargetDiffPreviewLines = FMath::Min(GetPositiveIntArgument(Arguments, TEXT("targetDiffPreviewLines"), 120), 1000);
 
 			TArray<TSharedPtr<FJsonValue>> Issues;
-			auto MakeEarlyFailureContent = [&ToolName, &ScaffoldDirectory, &Issues, &ScaffoldResolution](const FString& Reason, const FString& FirstStep, const FString& FirstTool)
+			auto MakeEarlyFailureContent = [&ToolName, &ScaffoldDirectory, &Issues, &ScaffoldResolution, &bDryRun](const FString& Reason, const FString& FirstStep, const FString& FirstTool)
 			{
 				TSharedPtr<FJsonObject> RegistrationStatusObject = MakeShared<FJsonObject>();
 				RegistrationStatusObject->SetBoolField(TEXT("scaffoldExists"), FPaths::DirectoryExists(ScaffoldDirectory));
@@ -1945,6 +1990,7 @@ namespace UnrealMcp
 				StructuredContent->SetArrayField(TEXT("issues"), Issues);
 				StructuredContent->SetObjectField(TEXT("registrationStatus"), RegistrationStatusObject);
 				StructuredContent->SetArrayField(TEXT("nextSteps"), NextSteps);
+				SetApplyScaffoldLifecycle(StructuredContent, ToolName, ScaffoldDirectory, FString(), FString(), bDryRun, false);
 				return StructuredContent;
 			};
 
@@ -2554,6 +2600,7 @@ namespace UnrealMcp
 			StructuredContent->SetObjectField(TEXT("registrationStatus"), RegistrationStatusObject);
 			StructuredContent->SetArrayField(TEXT("nextSteps"), NextSteps);
 			StructuredContent->SetBoolField(TEXT("rolledBackOnApplyFailure"), false);
+			SetApplyScaffoldLifecycle(StructuredContent, ToolName, ScaffoldDirectory, RegistrySourcePath, FString(), bDryRun, bCanApply);
 
 			if (!bCanApply)
 			{
@@ -2974,6 +3021,7 @@ namespace UnrealMcp
 				FString ManifestFailure;
 				ManifestPath = FPaths::Combine(BackupDirectory, TEXT("Manifest.json"));
 				LatestManifestPath = GetLatestMcpExtensionManifestPath();
+				SetApplyScaffoldLifecycle(StructuredContent, ToolName, ScaffoldDirectory, RegistrySourcePath, ManifestPath, false, true);
 				if (!SaveJsonObjectToFile(ManifestObject, ManifestPath, ManifestFailure)
 					|| !SaveJsonObjectToFile(ManifestObject, LatestManifestPath, ManifestFailure))
 				{
