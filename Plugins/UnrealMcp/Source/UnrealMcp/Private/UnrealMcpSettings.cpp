@@ -193,6 +193,26 @@ void UUnrealMcpSettings::PostInitProperties()
 	ApplyLegacyOpenAIMigration_IfNeeded();
 }
 
+FAiProviderConfig UUnrealMcpSettings::MakeProviderFromLegacyOpenAI(
+	const FString& ApiKey,
+	const FString& ResponsesUrl,
+	const FString& Model,
+	const FString& ReasoningEffort,
+	int32 MaxOutputTokens)
+{
+	FAiProviderConfig Provider;
+	Provider.Id = TEXT("openai-default");
+	Provider.DisplayName = TEXT("OpenAI (migrated)");
+	Provider.Kind = EAiProviderKind::OpenAiResponses;
+	Provider.PresetId = TEXT("openai-responses");
+	Provider.BaseUrl = ResponsesUrl;
+	Provider.ApiKey = ApiKey;
+	Provider.Model = Model;
+	Provider.ReasoningEffort = ReasoningEffort;
+	Provider.MaxOutputTokens = MaxOutputTokens;
+	return Provider;
+}
+
 void UUnrealMcpSettings::ApplyLegacyOpenAIMigration_IfNeeded()
 {
 	if (!OpenAIApiKey.TrimStartAndEnd().IsEmpty())
@@ -201,19 +221,15 @@ void UUnrealMcpSettings::ApplyLegacyOpenAIMigration_IfNeeded()
 			[](const FAiProviderConfig& Provider)
 			{
 				return Provider.Id == TEXT("openai-default");
-			});
+		});
 		if (!bHasMigratedDefaultProvider && Providers.Num() == 0)
 		{
-			FAiProviderConfig& Provider = Providers.AddDefaulted_GetRef();
-			Provider.Id = TEXT("openai-default");
-			Provider.DisplayName = TEXT("OpenAI (migrated)");
-			Provider.Kind = EAiProviderKind::OpenAiResponses;
-			Provider.PresetId = TEXT("openai-responses");
-			Provider.BaseUrl = OpenAIResponsesUrl;
-			Provider.ApiKey = OpenAIApiKey;
-			Provider.Model = OpenAIModel;
-			Provider.ReasoningEffort = OpenAIReasoningEffort;
-			Provider.MaxOutputTokens = AiMaxOutputTokens;
+			Providers.Add(MakeProviderFromLegacyOpenAI(
+				OpenAIApiKey,
+				OpenAIResponsesUrl,
+				OpenAIModel,
+				OpenAIReasoningEffort,
+				AiMaxOutputTokens));
 			ActiveProviderId = TEXT("openai-default");
 
 			SaveConfig();

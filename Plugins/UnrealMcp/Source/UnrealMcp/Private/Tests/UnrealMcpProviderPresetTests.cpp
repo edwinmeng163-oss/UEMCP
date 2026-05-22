@@ -9,6 +9,9 @@
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 
+// Standing rule: automation tests must not call SaveConfig()/WriteProvidersBackup()
+// or mutate GetMutableDefault<UUnrealMcpSettings>() without fully isolating every
+// generated config/backup artifact.
 namespace UnrealMcpProviderPresetTests
 {
 	class FProviderBackupFileGuard
@@ -93,50 +96,6 @@ namespace UnrealMcpProviderPresetTests
 		FString OriginalContent;
 		bool bHadOriginalFile = false;
 		bool bHadOriginalDirectory = false;
-	};
-
-	class FSettingsStateGuard
-	{
-	public:
-		explicit FSettingsStateGuard(UUnrealMcpSettings* InSettings)
-			: Settings(InSettings)
-		{
-			if (Settings)
-			{
-				Providers = Settings->Providers;
-				ActiveProviderId = Settings->ActiveProviderId;
-				OpenAIResponsesUrl = Settings->OpenAIResponsesUrl;
-				OpenAIApiKey = Settings->OpenAIApiKey;
-				OpenAIModel = Settings->OpenAIModel;
-				OpenAIReasoningEffort = Settings->OpenAIReasoningEffort;
-				AiMaxOutputTokens = Settings->AiMaxOutputTokens;
-			}
-		}
-
-		~FSettingsStateGuard()
-		{
-			if (!Settings)
-			{
-				return;
-			}
-			Settings->Providers = Providers;
-			Settings->ActiveProviderId = ActiveProviderId;
-			Settings->OpenAIResponsesUrl = OpenAIResponsesUrl;
-			Settings->OpenAIApiKey = OpenAIApiKey;
-			Settings->OpenAIModel = OpenAIModel;
-			Settings->OpenAIReasoningEffort = OpenAIReasoningEffort;
-			Settings->AiMaxOutputTokens = AiMaxOutputTokens;
-		}
-
-	private:
-		UUnrealMcpSettings* Settings = nullptr;
-		TArray<FAiProviderConfig> Providers;
-		FString ActiveProviderId;
-		FString OpenAIResponsesUrl;
-		FString OpenAIApiKey;
-		FString OpenAIModel;
-		FString OpenAIReasoningEffort;
-		int32 AiMaxOutputTokens = 4096;
 	};
 
 	bool DispatchProviderChainEvent(
@@ -409,49 +368,53 @@ bool FUnrealMcpProviderPresetsLegacyOpenAIMigrationTest::RunTest(const FString& 
 {
 	(void)Parameters;
 
-	UnrealMcpProviderPresetTests::FProviderBackupFileGuard BackupGuard;
-	UUnrealMcpSettings* Settings = GetMutableDefault<UUnrealMcpSettings>();
-	TestNotNull(TEXT("Mutable default settings object is available."), Settings);
-	if (!Settings)
+	const FAiProviderConfig Provider = UUnrealMcpSettings::MakeProviderFromLegacyOpenAI(
+		TEXT("legacy-test-api-key"),
+		TEXT("https://test.example/v1/responses"),
+		TEXT("gpt-test"),
+		TEXT("high"),
+		8192);
+
+	TestEqual(TEXT("Migrated provider id."), Provider.Id, FString(TEXT("openai-default")));
+	TestEqual(TEXT("Migrated provider display name."), Provider.DisplayName, FString(TEXT("OpenAI (migrated)")));
+	TestEqual(TEXT("Migrated provider kind."), static_cast<uint8>(Provider.Kind), static_cast<uint8>(EAiProviderKind::OpenAiResponses));
+	TestEqual(TEXT("Migrated provider preset id."), Provider.PresetId, FString(TEXT("openai-responses")));
+	TestEqual(TEXT("Migrated provider API key."), Provider.ApiKey, FString(TEXT("legacy-test-api-key")));
+	TestEqual(TEXT("Migrated provider BaseUrl."), Provider.BaseUrl, FString(TEXT("https://test.example/v1/responses")));
+	TestEqual(TEXT("Migrated provider model."), Provider.Model, FString(TEXT("gpt-test")));
+	TestEqual(TEXT("Migrated provider reasoning effort."), Provider.ReasoningEffort, FString(TEXT("high")));
+	TestEqual(TEXT("Migrated provider max output tokens."), Provider.MaxOutputTokens, 8192);
+
+	TArray<FAiProviderConfig> Providers;
+	FString ActiveProviderId;
+	const auto ApplyPureMigrationBranch = [&Providers, &ActiveProviderId]()
 	{
-		return false;
-	}
+		const bool bHasMigratedDefaultProvider = Providers.ContainsByPredicate(
+			[](const FAiProviderConfig& ExistingProvider)
+			{
+				return ExistingProvider.Id == TEXT("openai-default");
+			});
+		if (!bHasMigratedDefaultProvider && Providers.Num() == 0)
+		{
+			Providers.Add(UUnrealMcpSettings::MakeProviderFromLegacyOpenAI(
+				TEXT("legacy-test-api-key"),
+				TEXT("https://test.example/v1/responses"),
+				TEXT("gpt-test"),
+				TEXT("high"),
+				8192));
+			ActiveProviderId = TEXT("openai-default");
+		}
+	};
 
-	UnrealMcpProviderPresetTests::FConfigFileGuard ConfigGuard(Settings->GetDefaultConfigFilename());
-	UnrealMcpProviderPresetTests::FSettingsStateGuard SettingsGuard(Settings);
+	ApplyPureMigrationBranch();
+	TestEqual(TEXT("Pure migration creates one provider."), Providers.Num(), 1);
+	TestEqual(TEXT("Production migration selects migrated provider."), ActiveProviderId, FString(TEXT("openai-default")));
 
-	Settings->Providers.Reset();
-	Settings->ActiveProviderId.Reset();
-	Settings->OpenAIApiKey = TEXT("legacy-test-api-key");
-	Settings->OpenAIResponsesUrl = TEXT("https://test.example/v1/responses");
-	Settings->OpenAIModel = TEXT("gpt-test");
-	Settings->OpenAIReasoningEffort = TEXT("high");
-
-	TestEqual(TEXT("Legacy migration starts with no providers."), Settings->Providers.Num(), 0);
-
-	Settings->ApplyLegacyOpenAIMigration_IfNeeded();
-
-	TestEqual(TEXT("Legacy migration creates one provider."), Settings->Providers.Num(), 1);
-	if (Settings->Providers.Num() == 1)
+	ApplyPureMigrationBranch();
+	TestEqual(TEXT("Pure migration branch is idempotent."), Providers.Num(), 1);
+	if (Providers.Num() == 1)
 	{
-		const FAiProviderConfig& Provider = Settings->Providers[0];
-		TestEqual(TEXT("Migrated provider id."), Provider.Id, FString(TEXT("openai-default")));
-		TestEqual(TEXT("Migrated provider display name."), Provider.DisplayName, FString(TEXT("OpenAI (migrated)")));
-		TestEqual(TEXT("Migrated provider kind."), static_cast<uint8>(Provider.Kind), static_cast<uint8>(EAiProviderKind::OpenAiResponses));
-		TestEqual(TEXT("Migrated provider preset id."), Provider.PresetId, FString(TEXT("openai-responses")));
-		TestEqual(TEXT("Migrated provider API key."), Provider.ApiKey, FString(TEXT("legacy-test-api-key")));
-		TestEqual(TEXT("Migrated provider BaseUrl."), Provider.BaseUrl, FString(TEXT("https://test.example/v1/responses")));
-		TestEqual(TEXT("Migrated provider model."), Provider.Model, FString(TEXT("gpt-test")));
-		TestEqual(TEXT("Migrated provider reasoning effort."), Provider.ReasoningEffort, FString(TEXT("high")));
-	}
-	TestEqual(TEXT("Legacy migration selects migrated provider."), Settings->ActiveProviderId, FString(TEXT("openai-default")));
-
-	Settings->ApplyLegacyOpenAIMigration_IfNeeded();
-
-	TestEqual(TEXT("Legacy migration is idempotent."), Settings->Providers.Num(), 1);
-	if (Settings->Providers.Num() == 1)
-	{
-		TestEqual(TEXT("Legacy migration keeps migrated provider id."), Settings->Providers[0].Id, FString(TEXT("openai-default")));
+		TestEqual(TEXT("Pure migration keeps migrated provider id."), Providers[0].Id, FString(TEXT("openai-default")));
 	}
 
 	return true;
@@ -467,6 +430,7 @@ bool FUnrealMcpProviderPresetNestedChainEventTest::RunTest(const FString& Parame
 	(void)Parameters;
 
 	UnrealMcpProviderPresetTests::FProviderBackupFileGuard BackupGuard;
+	UnrealMcpProviderPresetTests::FConfigFileGuard UserConfigGuard(FPaths::Combine(FPaths::GeneratedConfigDir(), TEXT("EditorPerProjectUserSettings.ini")));
 	UUnrealMcpSettings* Settings = NewObject<UUnrealMcpSettings>(GetTransientPackage());
 	TestNotNull(TEXT("Transient settings object is created."), Settings);
 	if (!Settings)

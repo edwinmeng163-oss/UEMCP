@@ -188,6 +188,36 @@ bool FUnrealMcpAudit_StaticOnlyTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpAudit_AllVisibleToolsSchemaCompatibleTest,
+	"UnrealMcp.Audit.AllVisibleToolsSchemaCompatible",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpAudit_AllVisibleToolsSchemaCompatibleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpAuditTaxonomyTests;
+	AuditDeleteTestDirs();
+	AuditReloadClean();
+
+	const TSharedPtr<FJsonObject> StructuredContent = InvokeAuditAndGetStructured();
+	TestTrue(TEXT("structuredContent present"), StructuredContent.IsValid());
+	TestEqual(TEXT("visible core tools are strict-schema compatible"), GetIntField(StructuredContent, TEXT("schemaIncompatibleCount")), 0);
+
+	const TArray<TSharedPtr<FJsonValue>>* SchemaIncompatibleTools = nullptr;
+	TestTrue(
+		TEXT("schemaIncompatibleTools present"),
+		StructuredContent.IsValid() && StructuredContent->TryGetArrayField(TEXT("schemaIncompatibleTools"), SchemaIncompatibleTools) && SchemaIncompatibleTools != nullptr);
+	if (SchemaIncompatibleTools)
+	{
+		TestEqual(TEXT("schemaIncompatibleTools empty"), SchemaIncompatibleTools->Num(), 0);
+	}
+
+	AuditDeleteTestDirs();
+	AuditReloadClean();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FUnrealMcpAudit_CountSplitTest,
 	"UnrealMcp.Audit.CountSplit",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

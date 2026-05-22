@@ -13,6 +13,7 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
+#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
@@ -71,8 +72,18 @@ namespace UnrealMcp
 		TSharedPtr<FJsonObject> UserToolSmokeMakeArguments(const FJsonObject& Arguments)
 		{
 			TSharedPtr<FJsonObject> SmokeArgs = MakeShared<FJsonObject>();
+			FString DryRunArgsText;
+			if (Arguments.TryGetStringField(TEXT("dryRunArgs"), DryRunArgsText))
+			{
+				TSharedPtr<FJsonObject> ParsedDryRunArgs;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(DryRunArgsText);
+				if (FJsonSerializer::Deserialize(Reader, ParsedDryRunArgs) && ParsedDryRunArgs.IsValid())
+				{
+					SmokeArgs->Values = ParsedDryRunArgs->Values;
+				}
+			}
 			const TSharedPtr<FJsonObject>* DryRunArgsObject = nullptr;
-			if (Arguments.TryGetObjectField(TEXT("dryRunArgs"), DryRunArgsObject) && DryRunArgsObject && (*DryRunArgsObject).IsValid())
+			if (SmokeArgs->Values.Num() == 0 && Arguments.TryGetObjectField(TEXT("dryRunArgs"), DryRunArgsObject) && DryRunArgsObject && (*DryRunArgsObject).IsValid())
 			{
 				SmokeArgs->Values = (*DryRunArgsObject)->Values;
 			}

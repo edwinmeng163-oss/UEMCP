@@ -79,6 +79,12 @@ public:
 	UFUNCTION()
 	TArray<FString> GetProviderPresetOptions() const;
 
+	// Pure: builds the migrated provider config from legacy OpenAI* fields.
+	// No SaveConfig, no member mutation -- safe to unit-test without touching disk.
+	static FAiProviderConfig MakeProviderFromLegacyOpenAI(
+		const FString& ApiKey, const FString& ResponsesUrl, const FString& Model,
+		const FString& ReasoningEffort, int32 MaxOutputTokens);
+
 	UPROPERTY(EditAnywhere, Config, Category="Server")
 	bool bEnableServer = true;
 
@@ -135,9 +141,6 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="AI", meta=(MultiLine=true, ToolTip="Optional additional instructions appended to the built-in assistant prompt."))
 	FString AssistantSystemPrompt;
 private:
-#if WITH_DEV_AUTOMATION_TESTS
-	friend class FUnrealMcpProviderPresetsLegacyOpenAIMigrationTest;
-#endif
 	static const TCHAR* const BackupFileRelativePath;
 	void ApplyLegacyOpenAIMigration_IfNeeded();
 	void WriteProvidersBackup() const;

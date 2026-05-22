@@ -411,3 +411,21 @@ markdown file and refreshes the index again even when the assertion fails.
 
 Gate C would validate Make Tool full apply from a Task Atlas workflow. It is
 deferred to v0.20.1 hardening and is not release-blocking for v0.20.
+
+## Manual editor smoke checklist (v0.26.2+)
+
+These checks cover runtime/editor behaviors that the current automation suite
+does not fully protect.
+
+- v0.26.2-blocking: AI provider settings survive an editor restart. The
+  selected provider/model must remain what the user chose and must not reset to
+  `gpt-test` or `openai-default`.
+- v0.26.2-blocking: A user Python tool `reload -> smoke` round-trip returns a
+  real pass/fail result from `unreal.mcp_user_registry_reload` followed by
+  `unreal.mcp_user_tool_smoke`.
+- v0.26.2-blocking: `unreal.mcp_tool_audit` reports
+  `schemaIncompatibleCount=0`.
+- v0.26.2-blocking: `unreal.tools.export_package` produces a real `.zip` and
+  sidecar manifest.
+- v0.26.3-pending: model-edit UX polish remains deferred.
+- v0.26.3-pending: export Save-As UX remains deferred.

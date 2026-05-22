@@ -1187,11 +1187,9 @@ namespace UnrealMcp
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
 				Properties->SetObjectField(TEXT("toolName"), MakeStringProperty(TEXT("Loaded user tool name to smoke-test, for example user.my_python_tool."), FString()));
-				TSharedPtr<FJsonObject> DryRunArgsProperty = MakeShared<FJsonObject>();
-				DryRunArgsProperty->SetStringField(TEXT("type"), TEXT("object"));
-				DryRunArgsProperty->SetBoolField(TEXT("additionalProperties"), true);
-				DryRunArgsProperty->SetStringField(TEXT("description"), TEXT("Arguments forwarded to execute(args); dryRun=true is always injected."));
-				Properties->SetObjectField(TEXT("dryRunArgs"), DryRunArgsProperty);
+				Properties->SetObjectField(TEXT("dryRunArgs"), MakeStringProperty(
+					TEXT("Optional JSON object (encoded as a string) of args forwarded to execute(args); dryRun=true is always injected."),
+					FString()));
 				Properties->SetObjectField(TEXT("timeoutSeconds"), MakeNumberProperty(TEXT("Bounded execution timeout in seconds. Timeout detects late completion but cannot safely interrupt wedged embedded Python execution."), 10.0));
 				TSharedPtr<FJsonObject> Schema = MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("toolName") });
 

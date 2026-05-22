@@ -4029,9 +4029,8 @@
             "description": "User tool name to smoke-test (e.g. 'user.my_python_tool')."
           },
           "dryRunArgs": {
-            "type": "object",
-            "description": "Args to pass to the tool's execute(args) function. Defaults to {dryRun: true}.",
-            "additionalProperties": true
+            "type": "string",
+            "description": "Optional JSON object (encoded as a string) of args passed to the tool's execute(args). Example: '{\"dryRun\": true}'. Defaults to {\"dryRun\": true}. dryRun is always forced true for smoke."
           },
           "timeoutSeconds": {
             "type": "number",
