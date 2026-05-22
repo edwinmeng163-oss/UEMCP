@@ -214,7 +214,47 @@ Run `codex-agent clean` periodically to drop orphaned sessions.
 
 ---
 
-## 9. End-to-end verification at integration boundaries
+## 9. Untracked working-tree files leak into the local Mac zip
+
+### Trap
+`Tools/package_plugin.sh` stages whole directories (`rsync --archive` of `Tools/UnrealMcpSkills/`, etc.). It copies from the **working tree**, not from git — so any **untracked** file or directory under a staged subtree is swept into the zip **even though it was never committed**. On v0.26.0 the AI-incident skill `Tools/UnrealMcpSkills/third-person-ground-character/SKILL.md` (untracked, deliberately excluded from the commit) leaked into the first Mac zip. `git status` was clean for the commit, and a local build passed — neither catches this, because the leak is a working-tree artifact the packager picks up directly.
+
+The packager's allowlist *does* filter some noise (`.Rhistory`, `Tools/git-hooks/*`, `__pycache__`), but it does **not** filter untracked **skill** subdirs or untracked tool dirs that live under an otherwise-staged tree.
+
+### Detection (mandatory before `gh release create`)
+Extract the produced zip into a scratch dir and diff its tree against expectations. Specifically grep the swept subtrees for stray untracked entries:
+
+```bash
+cd /tmp && rm -rf zver && mkdir zver && cd zver
+unzip -q "$REPO/Saved/UnrealMcp/Packages/UnrealMcp-vX.Y.Z-mac-ue56-ue57-projectroot.zip"
+ls Tools/UnrealMcpSkills/                 # only committed skills should appear
+find Tools/UnrealMcpPyTools -maxdepth 1    # no incident/test tool dirs
+python3 -c "import json;print(len(json.load(open('Plugins/UnrealMcp/Resources/ToolRegistry/tools.json'))['tools']))"  # expect canonical count
+```
+
+This is the concrete form of the standing rule: **never declare a release ready off `git status` clean + local build alone — run extract-and-verify on the actual zip.**
+
+### Fix when a leak is found
+Move the stray untracked dir out of the working tree (preserve it for forensics rather than hard-deleting), rebuild, and replace the already-uploaded asset:
+
+```bash
+mv Tools/UnrealMcpSkills/<stray-dir> /tmp/forensic/
+bash Tools/package_plugin.sh --version X.Y.Z          # rebuild (new sha)
+shasum -a 256 <zip> > <zip>.sha256                    # regenerate sidecar
+gh release upload vX.Y.Z <zip> <zip>.sha256 --clobber # replace asset
+gh release edit vX.Y.Z --notes-file <body>            # if the body quoted the old sha
+```
+
+### Avoidance
+- Triage untracked files **before** packaging: `git status --short | grep '^??'` — anything under `Tools/`, `Plugins/UnrealMcp/Resources/` that isn't meant to ship must be moved out first.
+- Note the CI Win zip does **not** have this failure mode: `win-release-package.yml` does `actions/checkout` at the tag, so it builds from the **committed** tree only. Untracked cruft can't reach it. (Win-zip attach has a *different* gotcha — a timing race — documented in `Docs/WindowsPackaging.md` top caveat + § 3.2.)
+
+### Sub-trap — stray `__pycache__` trips the integrity check
+If a test (or manual run) imports the Python scaffold templates, it leaves `Plugins/UnrealMcp/Resources/ScaffoldTemplates/python/__pycache__/`. The packager's staging-integrity check rejects it (`excluded path present: …/__pycache__`) and aborts. It's gitignored (won't commit) but is physically present. Fix: `rm -rf` that `__pycache__` before running `package_plugin.sh`.
+
+---
+
+## 10. End-to-end verification at integration boundaries
 
 ### Trap
 A write operation succeeds — file lands on disk, structured response says `success: true` — but the consumer downstream never sees it. v0.18's `[→ RAG]` button wrote `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/<taskId>.md` and called `knowledge_index_refresh`, both reported success. But `knowledge_index_refresh` only scans `documents.jsonl` manifests, not `*.md` — the file was written but never indexed.
@@ -227,7 +267,7 @@ When wiring a new producer-consumer chain, **read the consumer's ingestion code*
 
 ---
 
-## 10. Codex spec deviations — when to accept
+## 11. Codex spec deviations — when to accept
 
 ### Trap
 Codex may implement a request differently than the prompt specifies. v0.19 Part C's prompt said "use existing AnthropicMessagesProvider abstraction"; Codex instead used direct HTTP. PM accepted the deviation.
@@ -247,7 +287,7 @@ When in doubt, send Codex a targeted correction via `codex-agent send <jobId> ".
 
 ---
 
-## 11. Distinguish editor-load warnings from UBT errors
+## 12. Distinguish editor-load warnings from UBT errors
 
 ### Trap
 Errors printed in the UE editor's Output Log during project load look like "build errors" but are content-layer issues — package version mismatches, missing external actor references, stale Blueprint references. These come from the asset system loading content, not from UBT compiling code.
@@ -262,7 +302,7 @@ A successful UBT `Result: Succeeded` means the plugin built. Content warnings on
 
 ---
 
-## 12. Mac-only build verify misses MSVC-promoted-to-error warnings
+## 13. Mac-only build verify misses MSVC-promoted-to-error warnings
 
 ### Trap
 Mac's clang and Windows MSVC have different warning-to-error promotion behavior. C4459 (declaration of '<name>' hides global declaration) is treated as a warning by clang under UE's flags but is promoted to **error** by MSVC. The most common shadow target is a UE global log category symbol (`LogPath`, `LogCore`, `LogAutomation`, ...).

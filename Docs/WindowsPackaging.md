@@ -2,7 +2,9 @@
 
 > **Update (post-v0.22.0)**: The Windows source-only zip is now produced automatically by `.github/workflows/win-release-package.yml` on every `v*.*.*` tag push, then attached to the matching GitHub release via `gh release upload --clobber`. **No manual Windows packaging is required for new tags going forward.** The workflow runs on a `windows-2022` GitHub Actions runner so the zip retains `Compress-Archive`'s backslash entry paths (the canonical Windows-tested artifact shape). If the GitHub Actions run fails for any reason, the steps in this guide are the manual fallback.
 >
-> The guide below stays canonical for: (1) the manual fallback if the workflow fails, (2) back-filling Windows zips on tags that pre-date the workflow, and (3) the rare full-experience zip with prebuilt Win64 binaries (not produced by the workflow).
+> **⚠️ Timing-race caveat (seen on v0.26.0)**: the attach step is **best-effort** — it does `gh release view <tag>` and skips upload if the release doesn't exist yet. Tag-push triggers CI **immediately**, but PM usually creates the GitHub release ~1 minute later (after the Mac zip builds). So the CI attach almost always loses the race: the Win zip lands only as a **30-day workflow artifact**, NOT on the release. **PM must back-fill it** — see § 3.2 below. Two ways to avoid the race next time: (a) `gh release create <tag>` **before** `git push origin <tag>` so the release exists when CI checks, or (b) re-run the workflow via `workflow_dispatch` (with the `tag` input) after the release exists.
+>
+> The guide below stays canonical for: (1) the manual fallback if the workflow fails, (2) back-filling Windows zips on tags that pre-date the workflow (or that lost the timing race), and (3) the rare full-experience zip with prebuilt Win64 binaries (not produced by the workflow).
 
 This guide tells a Windows collaborator how to produce a `UnrealMcp-vX.Y.Z-win-*.zip` and attach it to an existing GitHub release. PM does the Mac zip and creates the release; this side packages the Windows companion.
 
@@ -201,6 +203,36 @@ gh release upload v0.19.0 `
     Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip `
     Saved\UnrealMcp\Packages\UnrealMcp-v0.19.0-win-ue56-ue57-projectroot.zip.sha256
 ```
+
+### 3.2 Back-fill the CI-built Win zip from the workflow artifact (PM, from Mac)
+
+When the `win-release-package.yml` CI ran but lost the timing race (see the caveat at the top — the Win zip is a workflow artifact, not on the release), **PM can attach it from a Mac without a Windows machine** — the CI already built + verified the zip on `windows-2022`:
+
+```bash
+# 1. Find the CI run for the tag (look for "Windows Release Package" / the tag name)
+gh run list --repo edwinmeng163-oss/UEAtelier --limit 5
+
+# 2. Download the artifact (name is UnrealMcp-<tag>-win-zip)
+cd /tmp && rm -rf winbf && mkdir winbf && cd winbf
+gh run download <run-id> --repo edwinmeng163-oss/UEAtelier --name "UnrealMcp-v0.26.0-win-zip"
+
+# 3. Verify hash. The CI sidecar has CRLF line endings, so `shasum -c` FAILS spuriously —
+#    strip CR and compare manually instead:
+SIDE=$(tr -d '\r' < UnrealMcp-v0.26.0-win-ue56-ue57-projectroot.zip.sha256 | awk '{print $1}')
+COMP=$(shasum -a 256 UnrealMcp-v0.26.0-win-ue56-ue57-projectroot.zip | awk '{print $1}')
+[ "$SIDE" = "$COMP" ] && echo "MATCH" || echo "MISMATCH"
+
+# 4. (Optional but recommended) extract-verify it's clean — CI builds from the committed
+#    tag tree, so untracked working-tree cruft can't leak in (unlike the local Mac packager;
+#    see Docs/BuildAndPackagingPitfalls.md § 9).
+
+# 5. Attach to the release
+gh release upload v0.26.0 --repo edwinmeng163-oss/UEAtelier --clobber \
+  UnrealMcp-v0.26.0-win-ue56-ue57-projectroot.zip \
+  UnrealMcp-v0.26.0-win-ue56-ue57-projectroot.zip.sha256
+```
+
+The CI-built Win zip is the canonical Windows artifact (backslash entry paths, built on `windows-2022`). Prefer back-filling it over a manual Windows rebuild — they produce the same shape, and the CI one is already verified.
 
 ---
 
