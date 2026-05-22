@@ -261,6 +261,24 @@ distributable plugin state; installing over both engine-level and project-level
 plugin copies; assuming newly built C++ tools are visible until Editor restarts;
 treating ChatHistory as canonical product docs.
 
+### Coding discipline (Karpathy guidelines)
+
+Full text + attribution: `Tools/UnrealMcpSkills/karpathy-guidelines/SKILL.md` (MIT,
+from Andrej Karpathy's observations on LLM coding pitfalls). These are the
+behavioral counter to the v0.26 incident class (a 291-line embedded-Python
+handler = "Simplicity First" violation; hand-merging into core = "Surgical
+Changes" violation):
+
+1. **Think Before Coding** — state assumptions; surface tradeoffs and multiple
+   interpretations; push back when a simpler path exists; stop and ask when confused.
+2. **Simplicity First** — minimum code that solves the problem; no speculative
+   features/abstractions/flexibility; if 200 lines could be 50, rewrite.
+3. **Surgical Changes** — touch only what the task requires; don't "improve"
+   adjacent code/comments/formatting; mention unrelated dead code, don't delete it;
+   only remove orphans your own change created. Every changed line traces to the request.
+4. **Goal-Driven Execution** — turn tasks into verifiable success criteria
+   (tests-first, dual-engine build + automation green) and loop until verified.
+
 ## Current Local Caveat
 
 Re-check current state with `git status --short`, `git branch --show-current`,

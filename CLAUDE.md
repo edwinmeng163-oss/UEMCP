@@ -32,6 +32,15 @@ Standard PM workflow:
 
 Hermes carries permanent project memory at `~/.hermes/memories/MEMORY.md`. Every fresh Hermes chat session auto-loads it (`memory_char_limit: 20000` in `~/.hermes/config.yaml`). PM updates that memory after any meaningful project event — chunk landing, tag move, release publish, issue closure, tool-count change, dispatch-rule revision. See § "Hermes memory maintenance" below.
 
+## Coding Discipline (Karpathy guidelines)
+
+Apply these to every review and bake them into every Codex prompt. Full text + attribution: [`Tools/UnrealMcpSkills/karpathy-guidelines/SKILL.md`](Tools/UnrealMcpSkills/karpathy-guidelines/SKILL.md) (MIT, from Andrej Karpathy's observations on LLM coding pitfalls). They are the behavioral counter to the v0.26 incident class (a 291-line embedded-Python handler = "Simplicity First" violation; hand-merging into core = "Surgical Changes" violation).
+
+1. **Think Before Coding** — don't assume; state assumptions; surface tradeoffs and multiple interpretations; push back when a simpler path exists; stop and ask when confused. (As PM: do this in R1/R2 with Hermes before any dispatch.)
+2. **Simplicity First** — minimum code that solves the problem; no speculative features/abstractions/flexibility; if 200 lines could be 50, rewrite. (As PM: reject over-scoped Codex prompts and bloated diffs at review.)
+3. **Surgical Changes** — touch only what the task requires; don't "improve" adjacent code/comments/formatting; match existing style; mention unrelated dead code, don't delete it; only remove orphans your own change created. (As PM: every staged line must trace to the task; this is also why we selective-stage, never `git add -A`.)
+4. **Goal-Driven Execution** — turn tasks into verifiable success criteria (tests-first, dual-engine build + automation green) and loop until verified. (As PM: this is the EDIT-list + DONE-block + validator/build gate in every prompt.)
+
 ## Codex Orchestration Rules
 
 - **Codex must use model `gpt-5.5` with effort level `xhigh`.** Always specify this when dispatching tasks.
