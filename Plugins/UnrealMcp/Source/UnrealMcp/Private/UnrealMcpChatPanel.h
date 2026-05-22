@@ -9,6 +9,7 @@ class FJsonObject;
 class IHttpRequest;
 class IUnrealMcpAssistantHandle;
 class SApprovalCard;
+class SComboButton;
 class SEditableTextBox;
 class SScrollBox;
 class STextBlock;
@@ -103,6 +104,7 @@ private:
 	TSharedRef<SWidget> MakeSkillComboOption(TSharedPtr<FUnrealMcpSkillOption> SkillOption) const;
 	TSharedRef<SWidget> MakeSkillApplyModeComboOption(TSharedPtr<FString> ApplyMode) const;
 	TSharedRef<SWidget> MakeExportableToolComboOption(TSharedPtr<FUnrealMcpExportableToolOption> ToolOption) const;
+	TSharedRef<SWidget> MakeRecentModelsMenu();
 	FText GetSelectedSkillText() const;
 	FText GetSelectedSkillDescriptionText() const;
 	FText GetSelectedSkillApplyModeText() const;
@@ -175,7 +177,7 @@ private:
 	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveAiTestRequest;
 	TSharedPtr<SEditableTextBox> InputTextBox;
 	TSharedPtr<SEditableTextBox> SkillTaskTextBox;
-	TSharedPtr<SEditableTextBox> ModelEditableTextBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ProviderComboBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ModelComboBox;
+	TSharedPtr<SEditableTextBox> ModelEditableTextBox; TSharedPtr<SComboBox<TSharedPtr<FString>>> ProviderComboBox; TSharedPtr<SComboButton> ModelComboButton;
 	TSharedPtr<SComboBox<TSharedPtr<FUnrealMcpSkillOption>>> SkillComboBox;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> SkillApplyModeComboBox;
 	TSharedPtr<STextBlock> SkillDescriptionText;
@@ -189,4 +191,5 @@ private:
 	bool bDeferredToolLogScrollActive = false;
 	bool bDeferredToolLogShouldAutoScroll = true;
 	int32 DeferredToolLogScrollFrames = 0;
+	FString LastExportCopyDir;
 };

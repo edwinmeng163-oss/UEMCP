@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 38,
-	"VersionName": "0.26.2",
+	"Version": 39,
+	"VersionName": "0.26.3",
 	"FriendlyName": "UEAtelier",
 	"Description": "Runs an MCP server inside the Unreal Editor, exposes editor automation, batch editing, Python scripting, debugging, and AI-assisted tool use over localhost, and includes an in-editor copilot-style command and chat window.",
 	"Category": "AI",

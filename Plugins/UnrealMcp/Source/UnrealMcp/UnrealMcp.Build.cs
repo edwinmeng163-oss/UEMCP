@@ -33,6 +33,7 @@ public class UnrealMcp : ModuleRules
 			"ContentBrowser",
 			"CoreUObject",
 			"DeveloperSettings",
+			"DesktopPlatform",
 			"Engine",
 			"FileUtilities",
 			"HTTP",

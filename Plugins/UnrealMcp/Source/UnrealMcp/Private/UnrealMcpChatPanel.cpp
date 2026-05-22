@@ -1,12 +1,16 @@
 #include "UnrealMcpChatPanel.h"
 
 #include "Algo/Reverse.h"
+#include "DesktopPlatformModule.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
 #include "HttpModule.h"
+#include "IDesktopPlatform.h"
 #include "ISettingsModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -26,6 +30,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -1346,23 +1351,13 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 								return ProviderOptionIds.Num() > 0 && !IsActiveProviderModelLocked() ? EVisibility::Visible : EVisibility::Collapsed;
 							})
 							[
-								SAssignNew(ModelComboBox, SComboBox<TSharedPtr<FString>>)
-								.OptionsSource(&ModelOptions)
-								.InitiallySelectedItem(SelectedModel)
-								.OnGenerateWidget_Lambda([](TSharedPtr<FString> Model)
-								{
-									return SNew(STextBlock).Text(FText::FromString(Model.IsValid() ? *Model : TEXT("<model>")));
-								})
-								.OnSelectionChanged(this, &SUnrealMcpChatPanel::HandleModelSelectionChanged)
-								.ToolTipText_Lambda([this]()
-								{
-									return bAssistantRequestInFlight
-										? LOCTEXT("ModelInFlightTooltip", "Changes apply to the next request - current run continues.")
-										: LOCTEXT("ModelSelectorTooltip", "Edit the active provider model, or pick a recent model.");
-								})
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
+								.VAlign(VAlign_Center)
 								[
 									SAssignNew(ModelEditableTextBox, SEditableTextBox)
-									.Text(GetCurrentModelDisplayText())
+									.Text(this, &SUnrealMcpChatPanel::GetCurrentModelDisplayText)
 									.HintText(LOCTEXT("ModelSelectorLabel", "Model"))
 									.SelectAllTextWhenFocused(true)
 									.OnTextCommitted(this, &SUnrealMcpChatPanel::HandleModelTextCommitted)
@@ -1372,6 +1367,25 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 											? LOCTEXT("ModelTextInFlightTooltip", "Changes apply to the next request - current run continues.")
 											: LOCTEXT("ModelTextTooltip", "Type a model id and press Enter, or leave the field to save it.");
 									})
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SAssignNew(ModelComboButton, SComboButton)
+									.OnGetMenuContent(this, &SUnrealMcpChatPanel::MakeRecentModelsMenu)
+									.ToolTipText_Lambda([this]()
+									{
+										return bAssistantRequestInFlight
+											? LOCTEXT("ModelInFlightTooltip", "Changes apply to the next request - current run continues.")
+											: LOCTEXT("ModelSelectorTooltip", "Pick a recent model for the active provider.");
+									})
+									.ButtonContent()
+									[
+										SNew(STextBlock)
+										.Text(LOCTEXT("ModelRecentButton", "Recent"))
+									]
 								]
 							]
 						]
@@ -2081,6 +2095,89 @@ FReply SUnrealMcpChatPanel::HandleExportToolPackageClicked()
 	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.tools.export_package"), *Arguments);
 	AppendToolExecutionResult(TEXT("unreal.tools.export_package"), *Arguments, Result);
 	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tool Package"), BuildToolPackageSummary(TEXT("unreal.tools.export_package"), Result), Result.bIsError);
+	if (!Result.bIsError && !bDryRun && Result.StructuredContent.IsValid())
+	{
+		FString PackagePath;
+		Result.StructuredContent->TryGetStringField(TEXT("packagePath"), PackagePath);
+		if (PackagePath.IsEmpty())
+		{
+			const TSharedPtr<FJsonObject>* PackageFile = nullptr;
+			if (Result.StructuredContent->TryGetObjectField(TEXT("packageFile"), PackageFile) && PackageFile && (*PackageFile).IsValid())
+			{
+				(*PackageFile)->TryGetStringField(TEXT("path"), PackagePath);
+			}
+		}
+
+		if (PackagePath.IsEmpty())
+		{
+			AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tool Package"), TEXT("Package export succeeded, but the result did not include a package path to copy."), true);
+			return FReply::Handled();
+		}
+
+		const FString SourcePackagePath = FPaths::ConvertRelativePathToFull(PackagePath);
+		const FString SourcePackageDir = FPaths::GetPath(SourcePackagePath);
+		FString DefaultCopyDir = LastExportCopyDir;
+		if (DefaultCopyDir.IsEmpty())
+		{
+			const FString DocumentsDir = FPaths::Combine(FPlatformProcess::UserDir(), TEXT("Documents"));
+			const FString DesktopDir = FPaths::Combine(FPlatformProcess::UserDir(), TEXT("Desktop"));
+			DefaultCopyDir = IFileManager::Get().DirectoryExists(*DocumentsDir)
+				? DocumentsDir
+				: (IFileManager::Get().DirectoryExists(*DesktopDir) ? DesktopDir : FPaths::ProjectDir());
+		}
+		DefaultCopyDir = FPaths::ConvertRelativePathToFull(DefaultCopyDir);
+
+		FString ChosenDir;
+		IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+		const bool bPickedFolder = DesktopPlatform && DesktopPlatform->OpenDirectoryDialog(
+			FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr),
+			TEXT("Export tool package to..."),
+			DefaultCopyDir,
+			ChosenDir);
+
+		if (!bPickedFolder)
+		{
+			if (!SourcePackageDir.IsEmpty())
+			{
+				FPlatformProcess::ExploreFolder(*SourcePackageDir);
+			}
+			AppendMessage(
+				EUnrealMcpChatEntryType::System,
+				TEXT("UEAtelier Tool Package"),
+				FString::Printf(TEXT("Package exported at:\n%s\n\nDestination: kept in Saved/Packages."), *SourcePackagePath));
+			return FReply::Handled();
+		}
+
+		LastExportCopyDir = FPaths::ConvertRelativePathToFull(ChosenDir);
+		const FString DestinationPath = FPaths::Combine(LastExportCopyDir, FPaths::GetCleanFilename(SourcePackagePath));
+		if (IFileManager::Get().Copy(*DestinationPath, *SourcePackagePath, true, true) != COPY_OK)
+		{
+			AppendMessage(
+				EUnrealMcpChatEntryType::System,
+				TEXT("UEAtelier Tool Package"),
+				FString::Printf(TEXT("Package exported at:\n%s\n\nCould not copy package to:\n%s"), *SourcePackagePath, *DestinationPath),
+				true);
+			return FReply::Handled();
+		}
+
+		const FString SourceShaPath = SourcePackagePath + TEXT(".sha256");
+		const FString DestinationShaPath = DestinationPath + TEXT(".sha256");
+		bool bCopiedSha = false;
+		if (IFileManager::Get().FileExists(*SourceShaPath))
+		{
+			bCopiedSha = IFileManager::Get().Copy(*DestinationShaPath, *SourceShaPath, true, true) == COPY_OK;
+		}
+
+		FPlatformProcess::ExploreFolder(*LastExportCopyDir);
+		AppendMessage(
+			EUnrealMcpChatEntryType::System,
+			TEXT("UEAtelier Tool Package"),
+			FString::Printf(
+				TEXT("Package exported at:\n%s\n\nCopied to:\n%s%s"),
+				*SourcePackagePath,
+				*DestinationPath,
+				bCopiedSha ? *FString::Printf(TEXT("\nChecksum copied to:\n%s"), *DestinationShaPath) : TEXT("")));
+	}
 	return FReply::Handled();
 }
 
@@ -2283,7 +2380,6 @@ void SUnrealMcpChatPanel::RefreshModelOptionsForActiveProvider()
 	const FAiProviderConfig* Provider = Settings ? Settings->FindActiveProvider() : nullptr;
 	if (!Provider)
 	{
-		if (ModelComboBox.IsValid()) { ModelComboBox->RefreshOptions(); ModelComboBox->ClearSelection(); }
 		if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(FText::GetEmpty()); }
 		return;
 	}
@@ -2307,8 +2403,6 @@ void SUnrealMcpChatPanel::RefreshModelOptionsForActiveProvider()
 	}
 
 	if (!SelectedModel.IsValid()) { SelectedModel = MakeShared<FString>(FString()); }
-	if (ModelComboBox.IsValid())
-	{ ModelComboBox->RefreshOptions(); ModelComboBox->SetSelectedItem(ModelOptions.Num() > 0 ? SelectedModel : TSharedPtr<FString>()); }
 	if (ModelEditableTextBox.IsValid()) { ModelEditableTextBox->SetText(GetCurrentModelDisplayText()); }
 }
 
@@ -2665,6 +2759,39 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::MakeExportableToolComboOption(TSharedPt
 			.Font(FAppStyle::GetFontStyle("SmallFont"))
 			.Text(FText::FromString(ToolOption->ScaffoldDir))
 		];
+}
+
+TSharedRef<SWidget> SUnrealMcpChatPanel::MakeRecentModelsMenu()
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	bool bAddedEntry = false;
+	for (const TSharedPtr<FString>& ModelOption : ModelOptions)
+	{
+		if (!ModelOption.IsValid() || ModelOption->TrimStartAndEnd().IsEmpty())
+		{
+			continue;
+		}
+
+		bAddedEntry = true;
+		MenuBuilder.AddMenuEntry(
+			FText::FromString(*ModelOption),
+			LOCTEXT("RecentModelMenuTooltip", "Use this model for the active provider."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([this, ModelOption]()
+			{
+				HandleModelSelectionChanged(ModelOption, ESelectInfo::OnMouseClick);
+			})));
+	}
+
+	if (!bAddedEntry)
+	{
+		MenuBuilder.AddWidget(
+			SNew(STextBlock).Text(LOCTEXT("RecentModelsEmpty", "No recent models")),
+			FText::GetEmpty(),
+			true);
+	}
+
+	return MenuBuilder.MakeWidget();
 }
 
 TSharedRef<SWidget> SUnrealMcpChatPanel::MakeSkillApplyModeComboOption(TSharedPtr<FString> ApplyMode) const
