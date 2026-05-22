@@ -18,6 +18,7 @@ namespace UnrealMcp
 		Rules.Add(TEXT("4. If a tool result includes `approval_required` or `requiresApproval=true`, stop and wait for explicit user approval before any retry. Do not paraphrase the approval ask; surface the original message and tool name."));
 		Rules.Add(TEXT("5. Never turn a `dryRun` result into a success claim. `dryRun=true` results describe what WOULD happen; they are not evidence the action ran."));
 		Rules.Add(TEXT("6. Write-capable user Python tools must default to `dryRun=true` and return `wouldWrite` before any mutation. If the user explicitly requests a write, set `dryRun=false` AND tell the user what is about to change before the call."));
+		Rules.Add(TEXT("7. Before scaffolding a new tool or productizing a completed workflow, FIRST consult project skills with `unreal.skill_list` / `unreal.skill_read` (start with `mcp-capability-routing`). Most goals are met by composing existing tools; a direct request to make a tool uses the Python user-extension track (scaffold -> reload -> smoke), never a handler hand-merged into core."));
 		return FString::Join(Rules, TEXT("\n"));
 	}
 

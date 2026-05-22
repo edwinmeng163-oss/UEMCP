@@ -13,13 +13,17 @@ bool FUnrealMcpAssistantSystemPromptBuilderSafetyRulesAlwaysPresentTest::RunTest
 	const FString Output = UnrealMcp::BuildAssistantSystemPrompt(Input);
 
 	TestTrue(TEXT("Safety header is present"), Output.Contains(TEXT("Reform C safety rules (must never be violated):")));
-	for (int32 RuleIndex = 1; RuleIndex <= 6; ++RuleIndex)
+	for (int32 RuleIndex = 1; RuleIndex <= 7; ++RuleIndex)
 	{
 		const FString RulePrefix = FString::Printf(TEXT("%d. "), RuleIndex);
 		TestTrue(
 			FString::Printf(TEXT("Rule %d is present"), RuleIndex),
 			Output.Contains(*RulePrefix));
 	}
+
+	TestTrue(
+		TEXT("Rule 7 directs the model to consult skills first"),
+		Output.Contains(TEXT("mcp-capability-routing")) && Output.Contains(TEXT("unreal.skill_list")));
 
 	return true;
 }

@@ -1080,6 +1080,22 @@ v0.26.0 では Reform C を完了しました。3 つの server-message provider
 
 ---
 
+## v0.26.1 — 2026-05-22 — 技能发现接线 / skills discovery wiring
+
+### 中文
+
+v0.26.1 给中央 system prompt 增加第 7 条安全规则：造新工具或把已完成的工作流产品化之前，必须先用 `unreal.skill_list` / `unreal.skill_read` 查项目技能（从 `mcp-capability-routing` 开始）。配套新增插件技能 `mcp-capability-routing`——一个"前门"路由器：先用 `tool_recommend` / `tool_gap_analyze` 找并组合现有的 162 个工具；当用户直接要求"做成工具"时，走安全的 Python user-extension 轨（scaffold → reload → smoke），绝不把 handler 手动合进 core C++。这样修正了 v0.26 事故的真实成因——用户直接要求造工具是合理的，错在构建路径，而非"该不该造"。无工具面变化（仍 162），仅新增提示规则与一个 skill。
+
+### EN
+
+v0.26.1 adds a seventh safety rule to the central system prompt: before scaffolding a new tool or productizing a completed workflow, the model must FIRST consult project skills via `unreal.skill_list` / `unreal.skill_read` (starting with `mcp-capability-routing`). It ships the companion `mcp-capability-routing` skill — a front-door router that finds and composes the existing 162 tools via `tool_recommend` / `tool_gap_analyze`, and, when the user directly asks to "make a tool", routes to the safe Python user-extension track (scaffold → reload → smoke) instead of hand-merging a handler into core C++. This corrects the real root cause of the v0.26 incident: a direct request to make a tool was legitimate; the fault was the build path, not the decision to build. No tool-surface change (still 162) — only the new prompt rule plus one skill.
+
+### 日本語
+
+v0.26.1 では中央 system prompt に 7 番目の safety rule を追加しました。新しい tool を scaffold したり完了済みワークフローを productize する前に、まず `unreal.skill_list` / `unreal.skill_read` でプロジェクトの skills を参照する必要があります（`mcp-capability-routing` から開始）。付随する `mcp-capability-routing` skill を同梱します。これは front-door router で、`tool_recommend` / `tool_gap_analyze` で既存の 162 tools を見つけて compose し、ユーザーが直接「tool を作って」と要求した場合は安全な Python user-extension track（scaffold → reload → smoke）に誘導し、handler を core C++ に手動マージしません。これにより v0.26 incident の真の根本原因を修正します。tool を作る直接要求は正当であり、誤りは build path であって作る判断ではありませんでした。tool-surface の変更なし（162 のまま）、新しい prompt rule と 1 つの skill のみです。
+
+---
+
 ## トラブルシューティング / Troubleshooting / 故障排查
 
 | 症状 / Symptom | 原因 / Cause | 対処 / Fix |
