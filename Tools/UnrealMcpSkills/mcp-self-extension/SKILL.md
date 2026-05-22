@@ -2,6 +2,8 @@
 
 Use this skill when extending the Unreal MCP plugin itself from Editor Chat or the external supervisor. The goal is to preserve the reviewable, reversible path from capability gap to compiled, tested MCP tool.
 
+**Before you build anything, read `mcp-capability-routing` first.** It decides whether you should build at all (most goals are met by composing existing tools) and, when you do build, which safe path to take. Open this skill for the build mechanics once the router says build — a Python user-tool (the default for a "make a tool" request or a genuinely missing primitive) or, only with explicit approval, a core C++ tool. Never hand-merge a handler into core.
+
 Reviewer/agent-side rules are in `Tools/codex-prompt-header.md` § Self-extension workflow.
 
 ## v0.26 tool tracks
