@@ -2,15 +2,20 @@
 
 ## Purpose
 
-The self-extension pipeline lets Unreal MCP add new MCP tools from inside Editor Chat while preserving reviewability and rollback safety.
+The self-extension system lets Editor Chat create usable project-local Python
+user tools while preserving lifecycle, smoke, and rollback safeguards. Core C++
+apply/pipeline remains available only for manual developer workflows and is
+hidden from the AI-facing tool surface.
 
 ## Main Tools
 
-- `unreal.scaffold_mcp_tool`: create descriptor-first patch files, ToolRegistry patch metadata, an extension report, and optional legacy compatibility fragments.
+- `unreal.scaffold_mcp_tool`: create project-local Python user tools for the AI path. The advertised `implementationTrack` is `python`.
 - `unreal.mcp_validate_tool_schema`: check OpenAI function calling compatibility.
 - `unreal.mcp_validate_cpp_patch`: static-check generated C++ patch fragments.
 - `unreal.mcp_patch_scaffold_patch`: edit scaffold patch fragments with dry run and backup.
-- `unreal.mcp_apply_scaffold`: apply `ToolRegistryPatch.json`, registrar descriptor, category handler, and dispatcher patches with dry run, backup, and idempotence checks.
+- `unreal.mcp_user_registry_reload`: reload project-local Python user tools.
+- `unreal.mcp_user_tool_smoke`: smoke a user tool and confirm lifecycle.
+- `unreal.mcp_apply_scaffold`: developer-only hidden core integration for applying `ToolRegistryPatch.json`, registrar descriptor, category handler, and dispatcher patches with dry run, backup, and idempotence checks.
 - `unreal.mcp_build_editor`: run UBT for the editor target and parse build logs.
 - `unreal.mcp_build_game`, `unreal.mcp_build_server`, `unreal.mcp_build_client`: run UBT for non-editor target coverage and parse build logs.
 - `unreal.mcp_build_packaged`: run RunUAT BuildCookRun for cooked packaged output and parse UAT logs.
@@ -18,7 +23,7 @@ The self-extension pipeline lets Unreal MCP add new MCP tools from inside Editor
 - `unreal.mcp_run_test_suite`: run a generated test directory.
 - `unreal.mcp_rollback_last_extension`: restore the latest apply backup.
 - `unreal.mcp_rollback_to_manifest`: restore a selected historical manifest.
-- `unreal.mcp_extension_pipeline`: orchestrate the flow.
+- `unreal.mcp_extension_pipeline`: developer-only hidden orchestration for the manual core flow.
 - `unreal.mcp_workbench_status`: summarize health and next steps.
 - `unreal.knowledge_eval_run`: run local RAG regression cases after changing
   docs, ToolRegistry metadata, search scoring, or tool recommendation logic.
@@ -39,46 +44,47 @@ Scaffold writers are project-local by design. `unreal.scaffold_mcp_tool` and
 other draft/Saved creators write under the active `<ProjectDir>` so multiple
 host projects can keep isolated drafts.
 
-Reader-side tools use project-first fallback. `unreal.mcp_apply_scaffold`,
-`unreal.mcp_inspect_scaffold`, `unreal.mcp_validate_*`, Python bridge handler
-resolution, and ToolRegistry reads check active-project `Tools/` content first,
-then walk up to the shared repo-root `Tools/` tree. This lets example projects
-loaded through `AdditionalPluginDirectories` use canonical repo-root handlers,
-registry metadata, and pre-staged scaffolds while still allowing per-project
-overrides.
+Reader-side tools use project-first fallback. `unreal.mcp_inspect_scaffold`,
+`unreal.mcp_validate_*`, Python bridge handler resolution, ToolRegistry reads,
+and the manual developer `unreal.mcp_apply_scaffold` check active-project
+`Tools/` content first, then walk up to the shared repo-root `Tools/` tree. This
+lets example projects loaded through `AdditionalPluginDirectories` use
+canonical repo-root handlers, registry metadata, and pre-staged scaffolds while
+still allowing per-project overrides.
 
-Applier source writes use the loaded plugin location from `IPluginManager`,
-not `<ProjectDir>/Plugins/UnrealMcp`. Example projects can therefore apply
-patches to the real plugin source even when the plugin is imported through
-`AdditionalPluginDirectories`.
+Manual core applier source writes use the loaded plugin location from
+`IPluginManager`, not `<ProjectDir>/Plugins/UnrealMcp`. Example projects can
+therefore apply patches to the real plugin source even when the plugin is
+imported through `AdditionalPluginDirectories`.
 
-## Normal Flow
+## Normal AI Flow
 
 1. Search or recommend tools with `unreal.knowledge_search`,
    `unreal.tool_recommend`, or `unreal.tool_gap_analyze`.
 2. Preview the change plan with `unreal.preview_change_plan`.
-3. Validate schema.
-4. Generate tests.
-5. Dry-run apply.
-6. Capture a before snapshot when real work will run.
-7. Apply with backup.
-8. Write project memory.
-9. Build editor.
-10. Restart if new plugin code must be loaded.
-11. Run test suite.
-12. Run `unreal.knowledge_eval_run` when RAG, docs, recommendation, or
+3. Compose existing tools when the gap analyzer says `use_existing_tool` or
+   `compose_existing_tools`.
+4. Scaffold a Python user tool only when the verdict is `scaffold_new_tool` or
+   the user explicitly asks for a callable tool.
+5. Run `unreal.mcp_user_registry_reload`.
+6. Run `unreal.mcp_user_tool_smoke`.
+7. Call the new tool only when `structuredContent.lifecycle.callableNow=true`.
+8. Run `unreal.knowledge_eval_run` when RAG, docs, recommendation, or
     ToolRegistry metadata changed.
-13. Capture an after snapshot, diff it, and run `unreal.verify_task_outcome`
+9. Capture an after snapshot, diff it, and run `unreal.verify_task_outcome`
     when no restart deferral is needed.
-14. Audit and inspect workbench status.
+10. Audit and inspect workbench status.
 
-`unreal.mcp_extension_pipeline` now treats this as the default gate:
+## Manual Developer Core Flow
+
+Core C++ apply/pipeline is hidden from AI-facing `tools/list`. A developer may
+still run it manually when intentionally integrating plugin source:
 
 ```text
 preview_change_plan -> validate_schema -> generate_tests -> apply_dry_run -> capture_before_snapshot -> apply -> build -> test_suite -> capture_after_snapshot -> diff_project_snapshot -> verify_task_outcome
 ```
 
-The gate can be relaxed with `enforceGate=false`, `captureSnapshots=false`, or `verifyOutcome=false`, but normal self-extension work should keep all three enabled.
+The gate can be relaxed with `enforceGate=false`, `captureSnapshots=false`, or `verifyOutcome=false`, but manual core integration should keep all three enabled.
 
 Run the versioned core suite when validating baseline health:
 
@@ -175,9 +181,10 @@ If tests fail:
 3. Patch handler or tests.
 4. Rebuild/restart only if C++ changed.
 
-## Descriptor-First Scaffold Output
+## Developer-Only Descriptor-First Scaffold Output
 
-New MCP scaffolds now produce the files Chat needs for the registry-derived handler path:
+Manual core C++ scaffolds produce the files developers need for the
+registry-derived handler path:
 
 - `ToolRegistrar.patch.cpp`: descriptor and fixed schema helper.
 - `ToolRegistrarCall.patch.cpp`: call site for `RegisterAllMcpToolDescriptors`.
@@ -187,7 +194,10 @@ New MCP scaffolds now produce the files Chat needs for the registry-derived hand
 - `ScaffoldMetadata.json`: machine-readable category, risk, source-file, and side-effect metadata.
 - `ExtensionReport.md`: human-reviewable summary of gates, files, and risks.
 
-Legacy ToolDefinition and ExecuteToolHandler fragments are only generated when `includeLegacyCompatibility=true`; new self-extension work must use the descriptor-first patch path and should not add tool logic to `UnrealMcpModule.cpp`.
+Legacy ToolDefinition and ExecuteToolHandler fragments are only generated when
+`includeLegacyCompatibility=true`; manual core self-extension work must use the
+descriptor-first patch path and should not add tool logic to
+`UnrealMcpModule.cpp`.
 
 If source state is inconsistent:
 

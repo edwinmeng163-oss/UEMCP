@@ -3,8 +3,9 @@
 **Category**: self-extension
 **Title**: Apply MCP Scaffold
 **Risk level**: high
+**Exposure**: developer/manual only; hidden from AI-facing `tools/list`
 
-Validates and applies a generated MCP scaffold to plugin source and registry files, with dry-run and backup manifest support.
+Validates and applies a generated MCP scaffold to plugin source and registry files, with dry-run and backup manifest support. This is a manual developer core-integration tool; AI self-extension uses project-local Python user tools instead.
 
 ## Capabilities
 

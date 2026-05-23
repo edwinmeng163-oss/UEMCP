@@ -1159,6 +1159,55 @@ v0.26.3 では ChatPanel の UX 問題を 2 点修正しました。model field 
 
 ---
 
+## v0.27.0 — 2026-05-23 — wall off core from the AI
+
+### 中文
+
+v0.27.0 将 core source apply/pipeline 从 AI 工具面隐藏：`unreal.mcp_apply_scaffold`
+与 `unreal.mcp_extension_pipeline` 变为 developer/manual-only，工具总数仍为
+162，但 visible 从 152 降到 150。`unreal.scaffold_mcp_tool` 的 AI-facing
+schema 现在只广告 Python track（`implementationTrack=["python"]`），AI
+自扩展流程固定为 project-local Python user tool：scaffold -> reload -> smoke
+-> `lifecycle.callableNow=true` 后可用。`unreal.workflow_run` 新增 hidden-tool
+guard，不能作为 relay 调用 hidden core tools。中央 prompt 改写 core-flow 规则：
+AI 不得调用/路由到 apply/pipeline，也不得用 `execute_python` /
+`execute_python_file` 修改 `Plugins/UnrealMcp/Source` 或 ToolRegistry JSON；
+硬 runtime sandbox 延后。三个 skills 合并为一个 `mcp-self-extension`，core
+promotion 继续 deferred。
+
+### EN
+
+v0.27.0 hides core source apply/pipeline from the AI surface:
+`unreal.mcp_apply_scaffold` and `unreal.mcp_extension_pipeline` are now
+developer/manual-only. The registry still has 162 tools, while visible tools
+drop from 152 to 150. `unreal.scaffold_mcp_tool` now advertises only the Python
+track to AI callers (`implementationTrack=["python"]`), so AI self-extension is
+the project-local Python user-tool flow: scaffold -> reload -> smoke -> usable
+only after `lifecycle.callableNow=true`. `unreal.workflow_run` now rejects hidden
+tool steps, preventing relay access to hidden core tools. The central prompt
+rule now forbids calling/routing to apply/pipeline and forbids using
+`execute_python` / `execute_python_file` to modify `Plugins/UnrealMcp/Source` or
+ToolRegistry JSON; a hard runtime sandbox is deferred. The three project skills
+are merged into `mcp-self-extension`, and core promotion remains deferred.
+
+### 日本語
+
+v0.27.0 では core source apply/pipeline を AI surface から隠しました。
+`unreal.mcp_apply_scaffold` と `unreal.mcp_extension_pipeline` は
+developer/manual-only です。registry は 162 tools のままですが、visible tools
+は 152 から 150 に減ります。`unreal.scaffold_mcp_tool` の AI-facing schema は
+Python track のみ（`implementationTrack=["python"]`）を広告し、AI
+self-extension は project-local Python user-tool flow（scaffold -> reload ->
+smoke -> `lifecycle.callableNow=true` 後に使用可）に固定されます。
+`unreal.workflow_run` は hidden tool step を拒否し、hidden core tools への
+relay access を防ぎます。central prompt rule は apply/pipeline の call/routing
+を禁止し、`execute_python` / `execute_python_file` で
+`Plugins/UnrealMcp/Source` や ToolRegistry JSON を変更することも禁止します
+（hard runtime sandbox は deferred）。3 つの project skills は
+`mcp-self-extension` に統合され、core promotion は引き続き deferred です。
+
+---
+
 ## トラブルシューティング / Troubleshooting / 故障排查
 
 | 症状 / Symptom | 原因 / Cause | 対処 / Fix |

@@ -34,7 +34,7 @@ Hermes carries permanent project memory at `~/.hermes/memories/MEMORY.md`. Every
 
 ## Coding Discipline (Karpathy guidelines)
 
-Apply these to every review and bake them into every Codex prompt. Full text + attribution: [`Tools/UnrealMcpSkills/karpathy-guidelines/SKILL.md`](Tools/UnrealMcpSkills/karpathy-guidelines/SKILL.md) (MIT, from Andrej Karpathy's observations on LLM coding pitfalls). They are the behavioral counter to the v0.26 incident class (a 291-line embedded-Python handler = "Simplicity First" violation; hand-merging into core = "Surgical Changes" violation).
+Apply these to every review and bake them into every Codex prompt. Full text + attribution now lives in the merged [`Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md`](Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md) playbook (MIT, from Andrej Karpathy's observations on LLM coding pitfalls). They are the behavioral counter to the v0.26 incident class (a 291-line embedded-Python handler = "Simplicity First" violation; hand-merging into core = "Surgical Changes" violation).
 
 1. **Think Before Coding** — don't assume; state assumptions; surface tradeoffs and multiple interpretations; push back when a simpler path exists; stop and ask when confused. (As PM: do this in R1/R2 with Hermes before any dispatch.)
 2. **Simplicity First** — minimum code that solves the problem; no speculative features/abstractions/flexibility; if 200 lines could be 50, rewrite. (As PM: reject over-scoped Codex prompts and bloated diffs at review.)

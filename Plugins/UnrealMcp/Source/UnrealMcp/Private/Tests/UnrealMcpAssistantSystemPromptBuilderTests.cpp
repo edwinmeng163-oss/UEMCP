@@ -23,7 +23,7 @@ bool FUnrealMcpAssistantSystemPromptBuilderSafetyRulesAlwaysPresentTest::RunTest
 
 	TestTrue(
 		TEXT("Rule 7 directs the model to consult skills first"),
-		Output.Contains(TEXT("mcp-capability-routing")) && Output.Contains(TEXT("unreal.skill_list")));
+		Output.Contains(TEXT("mcp-self-extension")) && Output.Contains(TEXT("unreal.skill_list")));
 
 	return true;
 }

@@ -16,7 +16,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: UEAtelier
-VersionName: 0.26.3
+VersionName: 0.27.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -167,13 +167,16 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.26 completes Reform C with centralized server-message
-provider system prompt assembly, six baked safety rules, the AssistantRun
-approval gate, Python user-extension default scaffolds, lifecycle-aware
-reload/smoke controls, and the 11-code audit taxonomy; v0.25 rewrites Codex CLI
-exec; v0.24 adds AI provider presets, Kimi `reasoning_content` compatibility,
-enriched input schemas, generated per-tool docs under
-`Tools/UnrealMcpToolDocs/`, and progressive-disclosure agent docs;
+Current project status: v0.27 walls core apply/pipeline off from the AI,
+makes AI self-extension the Python user-tool track only, keeps core promotion
+manual/developer-only and deferred, adds a `workflow_run` hidden-tool guard, and
+merges the three project skills into `mcp-self-extension`; v0.26 completes
+Reform C with centralized server-message provider system prompt assembly, six
+baked safety rules, the AssistantRun approval gate, Python user-extension
+default scaffolds, lifecycle-aware reload/smoke controls, and the 11-code audit
+taxonomy; v0.25 rewrites Codex CLI exec; v0.24 adds AI provider presets, Kimi
+`reasoning_content` compatibility, enriched input schemas, generated per-tool
+docs under `Tools/UnrealMcpToolDocs/`, and progressive-disclosure agent docs;
 v0.23 adds `cli-anything-ueatelier`; v0.22 adds `unreal.pie_smoke`; v0.21 adds
 `unreal.editor_diagnostics`; v0.20 hardens async automation runs and watchdog
 stale recovery; v0.19 completes Task Atlas Make Tool, To RAG ingestion, and
@@ -186,8 +189,10 @@ Reform C v0.26 resolves the v0.25 self-extension incident by centralizing
 server-message provider prompts in
 `UnrealMcpAssistantSystemPromptBuilder`, baking in the six lifecycle/dry-run/
 approval safety rules, enforcing the approval gate at the AssistantRun provider
-seam, and making project-local Python user extensions the default path before
-core C++ tool promotion.
+seam, and making project-local Python user extensions the default path. v0.27
+finishes the wall-off: AI self-extension is Python user tools only, while core
+C++ apply/pipeline and promotion are hidden, manual, developer-only, and
+deferred.
 
 Visible tool counts can differ because hidden entries and aliases are filtered.
 Trust `/tool unreal.mcp_workbench_status {}` and
@@ -263,11 +268,12 @@ treating ChatHistory as canonical product docs.
 
 ### Coding discipline (Karpathy guidelines)
 
-Full text + attribution: `Tools/UnrealMcpSkills/karpathy-guidelines/SKILL.md` (MIT,
-from Andrej Karpathy's observations on LLM coding pitfalls). These are the
-behavioral counter to the v0.26 incident class (a 291-line embedded-Python
-handler = "Simplicity First" violation; hand-merging into core = "Surgical
-Changes" violation):
+Full text + attribution now lives in the merged
+`Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md` playbook (MIT, from Andrej
+Karpathy's observations on LLM coding pitfalls). These are the behavioral
+counter to the v0.26 incident class (a 291-line embedded-Python handler =
+"Simplicity First" violation; hand-merging into core = "Surgical Changes"
+violation):
 
 1. **Think Before Coding** — state assumptions; surface tradeoffs and multiple
    interpretations; push back when a simpler path exists; stop and ask when confused.

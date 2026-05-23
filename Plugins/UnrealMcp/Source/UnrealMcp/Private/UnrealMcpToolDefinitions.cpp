@@ -1018,6 +1018,13 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 			PropertiesObject->SetObjectField(TEXT("implementationNotes"), UnrealMcp::MakeStringProperty(TEXT("Optional implementation notes to include in the generated README.")));
 			PropertiesObject->SetObjectField(TEXT("category"), UnrealMcp::MakeStringProperty(TEXT("Tool category/dispatcher owner: actors, blueprint, editor, memory, scaffold, self-extension, skills, or widget."), TEXT("self-extension")));
 			PropertiesObject->SetObjectField(TEXT("riskLevel"), UnrealMcp::MakeStringProperty(TEXT("Tool risk level: read_only, low, medium, high, or critical."), TEXT("low")));
+			TSharedPtr<FJsonObject> ImplTrackProperty = UnrealMcp::MakeStringProperty(
+				TEXT("AI self-extension creates project-local Python user tools only; core C++ scaffolds are manual/developer-only and hidden from the AI."),
+				TEXT("python"));
+			TArray<TSharedPtr<FJsonValue>> ImplTrackEnum;
+			ImplTrackEnum.Add(MakeShared<FJsonValueString>(TEXT("python")));
+			ImplTrackProperty->SetArrayField(TEXT("enum"), ImplTrackEnum);
+			PropertiesObject->SetObjectField(TEXT("implementationTrack"), ImplTrackProperty);
 			PropertiesObject->SetObjectField(TEXT("requiresWrite"), UnrealMcp::MakeBoolProperty(TEXT("Whether the tool mutates project/editor state."), false));
 			PropertiesObject->SetObjectField(TEXT("requiresBuild"), UnrealMcp::MakeBoolProperty(TEXT("Whether the tool requires a build step."), false));
 			PropertiesObject->SetObjectField(TEXT("requiresExternalProcess"), UnrealMcp::MakeBoolProperty(TEXT("Whether the tool starts or depends on an external process."), false));
@@ -1036,7 +1043,7 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 				ToolsArray,
 				TEXT("unreal.scaffold_mcp_tool"),
 				TEXT("Scaffold MCP Tool"),
-				TEXT("Generates descriptor-first C++ patch files, ToolRegistry patch metadata, docs, an extension report, and a test request for adding a new Unreal MCP tool after review and rebuild."),
+				TEXT("Generates a project-local Python user-tool scaffold for AI self-extension; core C++ scaffolds are manual/developer-only."),
 				InputSchema);
 		}
 

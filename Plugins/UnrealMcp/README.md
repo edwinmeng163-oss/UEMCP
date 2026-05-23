@@ -2,7 +2,7 @@
 
 This plugin runs a local Model Context Protocol server inside Unreal Editor and adds an in-editor command and AI chat window.
 
-Current plugin `VersionName: 0.26.0`.
+Current plugin `VersionName: 0.27.0`.
 
 ## What It Exposes
 
@@ -98,7 +98,6 @@ Editor action tools:
 - `unreal.mcp_validate_cpp_patch`
 - `unreal.mcp_patch_scaffold_patch`
 - `unreal.mcp_validate_tool_schema`
-- `unreal.mcp_apply_scaffold`
 - `unreal.mcp_rollback_last_extension`
 - `unreal.mcp_lock_extension_session`
 - `unreal.mcp_backup_project_state`
@@ -113,7 +112,6 @@ Editor action tools:
 - `unreal.mcp_build_packaged`
 - `unreal.mcp_run_tool_test`
 - `unreal.mcp_run_test_suite`
-- `unreal.mcp_extension_pipeline`
 - `unreal.mcp_pipeline_status`
 - `unreal.mcp_workbench_status`
 - `unreal.mcp_diff_last_apply`
@@ -149,6 +147,10 @@ Editor action tools:
 - `unreal.task_rate`
 - `unreal.task_pin`
 - `unreal.save_dirty_packages`
+
+Developer-only core integration tools are retained for manual workflows but are
+hidden from AI-facing `tools/list`: `unreal.mcp_apply_scaffold` and
+`unreal.mcp_extension_pipeline`.
 
 Legacy compatibility handlers:
 
@@ -298,9 +300,9 @@ v0.19 `Make Tool` scaffold draft creation.
 The plugin registry currently contains 162 registered MCP tools across actors,
 blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget categories.
-Reform C centralizes the assistant safety prompt, adds the AssistantRun approval
-gate, and makes project-local Python user extensions the default self-extension
-path before core C++ promotion.
+v0.27 makes AI self-extension the project-local Python user-tool path only.
+Core apply/pipeline and promotion are hidden, manual, developer-only, and
+deferred.
 
 The chat panel supports both direct slash commands and AI-assisted requests, and uses the same tool execution layer as the HTTP MCP server.
 
@@ -494,10 +496,14 @@ Legacy direct gameplay scaffold examples:
 MCP tool extension scaffold example:
 
 ```text
-/tool unreal.scaffold_mcp_tool {"toolName":"unreal.my_custom_tool","title":"My Custom Tool","description":"Creates scaffold files for a custom MCP tool.","argumentSchemaJson":"{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}}","exampleArgumentsJson":"{\"message\":\"hello\"}","overwrite":false}
+/tool unreal.scaffold_mcp_tool {"toolName":"unreal.my_custom_tool","title":"My Custom Tool","description":"Creates a project-local Python user tool.","implementationTrack":"python","argumentSchemaJson":"{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}}","exampleArgumentsJson":"{\"message\":\"hello\"}","overwrite":false}
+/tool unreal.mcp_user_registry_reload {}
+/tool unreal.mcp_user_tool_smoke {"toolName":"unreal.my_custom_tool"}
 ```
 
-This generates reviewable descriptor-first C++ patch fragments, `ToolRegistryPatch.json`, a test request, and an integration checklist under `Tools/UnrealMcpToolScaffolds`. It does not hot-load C++ into the running editor; apply the patches, rebuild the current `<ProjectName>Editor` target, and reopen the editor if needed.
+This generates a project-local Python user tool under
+`Tools/UnrealMcpPyTools/<tool_id>/main.py`. It is callable only after reload and
+smoke report `structuredContent.lifecycle.callableNow=true`.
 
 MCP extension safety checks:
 
@@ -515,25 +521,20 @@ MCP extension safety checks:
 /tool unreal.mcp_validate_tool_schema {"toolName":"unreal.scaffold_mcp_tool"}
 ```
 
+For AI-created tools, reload and smoke the user registry:
+
 ```text
-/tool unreal.mcp_apply_scaffold {"toolName":"unreal.my_custom_tool","dryRun":true}
+/tool unreal.mcp_user_registry_reload {}
 ```
 
 ```text
-/tool unreal.mcp_apply_scaffold {"toolName":"unreal.my_custom_tool","dryRun":false}
+/tool unreal.mcp_user_tool_smoke {"toolName":"unreal.my_custom_tool"}
 ```
 
-Validate or patch generated descriptor-first fragments before applying them:
-
-```text
-/tool unreal.mcp_validate_cpp_patch {"toolName":"unreal.my_custom_tool","patchName":"CategoryHandlerFunction.patch.cpp"}
-```
-
-```text
-/tool unreal.mcp_patch_scaffold_patch {"toolName":"unreal.my_custom_tool","patchName":"CategoryHandlerFunction.patch.cpp","findText":"TODO","replaceText":"Reviewed by the patch safety layer.","dryRun":true}
-```
-
-`unreal.mcp_validate_cpp_patch` checks generated C++ patch fragments for risky patterns such as process execution, destructive file operations, external path literals, recursive pipeline calls, obvious infinite loops, missing handler returns, and flexible schema warnings. `unreal.mcp_patch_scaffold_patch` can edit descriptor-first patches (`ToolRegistrar.patch.cpp`, `ToolRegistrarCall.patch.cpp`, `CategoryHandlerFunction.patch.cpp`, `CategoryDispatcherBranch.patch.cpp`) or optional `ChatCommand.patch.cpp` with dry-run diff previews, idempotence checks, backups, and the same static validation gate. Legacy ToolDefinition/ExecuteToolHandler fragments are no longer generated by default; legacy snippet-named aliases are hidden from default AI tool exposure.
+Core C++ patch validation and patch editing remain available for manual
+developer review. Core source apply/pipeline tools are hidden from the AI
+surface; do not route AI workflows through `unreal.mcp_apply_scaffold` or
+`unreal.mcp_extension_pipeline`.
 
 Protect a risky MCP extension session:
 
@@ -591,20 +592,6 @@ Run the full generated suite:
 
 The suite runner executes all `Tests/*.json` files, reports pass rate, failed cases, failure text, and failed `structuredContent`.
 
-Run the high-level extension pipeline:
-
-```text
-/tool unreal.mcp_extension_pipeline {"toolName":"unreal.my_custom_tool","memoryKey":"mcp.extension.pipeline"}
-```
-
-The pipeline resolves the scaffold, validates the requested schema when available, generates or refreshes `Tests/*.json`, runs `mcp_apply_scaffold` in dry-run mode, applies descriptor-first patches with backup support, writes project memory, builds the editor, and either runs the test suite immediately or returns `requiresRestart=true` with a resume command.
-
-After an editor restart:
-
-```text
-/tool unreal.mcp_extension_pipeline {"mode":"resume_test","memoryKey":"mcp.extension.pipeline"}
-```
-
 Inspect pipeline state and last source apply:
 
 ```text
@@ -621,7 +608,7 @@ Inspect pipeline state and last source apply:
 
 `unreal.mcp_pipeline_status` collects project memory, the latest apply manifest, the newest build log tail, test scaffolds, test requests, and extension backups into one status report. `unreal.mcp_workbench_status` adds tool audit health, ToolRegistry legacy-hidden tools, handler aliases, supervisor logs, and aggregate test counts for a higher-level self-extension dashboard. `unreal.mcp_diff_last_apply` reads the backup snapshots written by `mcp_apply_scaffold`, so it can explain exactly what the last automatic source integration changed.
 
-`unreal.workflow_run` is the generic composition executor for bounded high-level tool combinations. It accepts inline `steps`, a `workflowJson` string, or a project-local `workflowPath`, defaults to `dryRun:true`, blocks nested workflows plus high/critical step tools unless explicitly allowed, executes every step through the normal MCP handler path, and can write `chat.active_task` for continuation after planned, paused, or completed workflows.
+`unreal.workflow_run` is the generic composition executor for bounded high-level tool combinations. It accepts inline `steps`, a `workflowJson` string, or a project-local `workflowPath`, defaults to `dryRun:true`, blocks nested workflows, rejects hidden tools, blocks high/critical step tools unless explicitly allowed, executes every remaining step through the normal MCP handler path, and can write `chat.active_task` for continuation after planned, paused, or completed workflows.
 
 `unreal.knowledge_search`, `unreal.tool_recommend`, `unreal.tool_gap_analyze`, `unreal.workflow_recommend`, and `unreal.knowledge_eval_run` are the local RAG-facing planning tools. Chat builds a compact RAG/tool-planning capsule before AI turns; if the local KnowledgeCard index is missing, it can run `unreal.knowledge_index_refresh` and retry. The index is written under `Saved/UnrealMcp/KnowledgeIndex`, while fetched official documentation caches stay under `Saved/UnrealMcp/KnowledgeSources`.
 

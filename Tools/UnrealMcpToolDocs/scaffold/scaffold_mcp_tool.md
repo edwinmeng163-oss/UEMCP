@@ -4,7 +4,7 @@
 **Title**: Scaffold MCP Tool
 **Risk level**: medium
 
-Generates a project-local MCP tool scaffold with metadata, registry patch, C++ patch fragments, tests, and docs.
+Generates a project-local Python user-tool scaffold for AI self-extension. Core C++ scaffolds remain a manual/developer-only path hidden from the AI.
 
 ## Capabilities
 
@@ -53,6 +53,14 @@ Generates a project-local MCP tool scaffold with metadata, registry patch, C++ p
     "implementationNotes": {
       "type": "string",
       "description": "Optional implementation notes to include in the generated README."
+    },
+    "implementationTrack": {
+      "type": "string",
+      "enum": [
+        "python"
+      ],
+      "description": "AI self-extension creates project-local Python user tools only; core C++ scaffolds are manual/developer-only and hidden from the AI.",
+      "default": "python"
     },
     "category": {
       "type": "string",

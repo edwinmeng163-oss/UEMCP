@@ -368,6 +368,22 @@ FUnrealMcpExecutionResult FUnrealMcpModule::RunWorkflow(const FJsonObject& Argum
 			continue;
 		}
 
+		if (!ShouldExposeToolToAi(StepTool))
+		{
+			StepResult->SetStringField(TEXT("status"), TEXT("failed"));
+			StepResult->SetStringField(
+				TEXT("error"),
+				FString::Printf(TEXT("Tool '%s' is hidden from the AI surface (exposure != visible) and cannot be called via workflow_run."), *StepTool));
+			StepResults.Add(MakeShared<FJsonValueObject>(StepResult));
+			bHadFailure = true;
+			FailedStepIndex = StepIndex;
+			if (bStopOnFailure && !bContinueOnError)
+			{
+				break;
+			}
+			continue;
+		}
+
 		const FString HandlerName = ResolveToolHandlerName(StepTool);
 		const FToolHandlerRegistryEntry* HandlerEntry = FindToolHandlerRegistryEntry(HandlerName);
 		const FToolPolicy StepPolicy = GetToolPolicy(StepTool);

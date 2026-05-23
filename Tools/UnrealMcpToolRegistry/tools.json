@@ -2239,7 +2239,7 @@
       "handlerName": "unreal.mcp_apply_scaffold",
       "title": "Apply MCP Scaffold",
       "description": "Validates and applies a generated MCP scaffold to plugin source and registry files, with dry-run and backup manifest support.",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "high",
       "requiresWrite": true,
       "requiresBuild": false,
@@ -2964,7 +2964,7 @@
       "handlerName": "unreal.mcp_extension_pipeline",
       "title": "Run Extension Pipeline",
       "description": "Orchestrates scaffold validation, apply, build, restart handoff, and test execution for a new MCP tool.",
-      "exposure": "visible",
+      "exposure": "legacy_hidden",
       "riskLevel": "critical",
       "requiresWrite": true,
       "requiresBuild": true,
@@ -5021,7 +5021,7 @@
       "category": "scaffold",
       "handlerName": "unreal.scaffold_mcp_tool",
       "title": "Scaffold MCP Tool",
-      "description": "Generates a project-local MCP tool scaffold with metadata, registry patch, C++ patch fragments, tests, and docs.",
+      "description": "Generates a project-local Python user-tool scaffold for AI self-extension; core C++ scaffolds are manual/developer-only.",
       "exposure": "visible",
       "riskLevel": "medium",
       "requiresWrite": true,
@@ -5074,10 +5074,9 @@
           "implementationTrack": {
             "type": "string",
             "enum": [
-              "cpp",
               "python"
             ],
-            "description": "Default 'python' (project-local user track at Tools/UnrealMcpPyTools/<tool_id>/main.py). 'cpp' requires user approval via v0.26 Job A approval gate.",
+            "description": "AI self-extension creates project-local Python user tools only; core C++ scaffolds are manual/developer-only and hidden from the AI.",
             "default": "python"
           },
           "category": {

@@ -46,7 +46,18 @@ Use fixed-schema wrappers instead.
 
 ## Source Mutation Safety
 
-Self-extension tools should preserve these rules:
+AI self-extension is limited to project-local Python user tools:
+
+- `unreal.scaffold_mcp_tool` advertises `implementationTrack=python`.
+- `unreal.mcp_user_registry_reload` and `unreal.mcp_user_tool_smoke` are the
+  required gates before a new user tool is callable.
+- `unreal.mcp_apply_scaffold` and `unreal.mcp_extension_pipeline` are hidden
+  from AI-facing `tools/list` and are manual/developer-only core integration
+  paths.
+- `unreal.workflow_run` rejects steps targeting hidden tools, so the AI cannot
+  relay through workflow composition to reach hidden core apply/pipeline tools.
+
+Manual developer source-mutation tools should preserve these rules:
 
 - Dry run before apply.
 - Static patch-fragment validation before source insertion.
@@ -57,6 +68,11 @@ Self-extension tools should preserve these rules:
 - Build log capture after compile.
 - Test suite after restart.
 - Rollback path if build or test fails.
+
+`unreal.execute_python` and `unreal.execute_python_file` remain visible for
+editor automation, but the central assistant prompt forbids using them to modify
+plugin source under `Plugins/UnrealMcp/Source` or ToolRegistry JSON. A hard
+runtime sandbox for that Python path is deferred hardening work.
 
 ## Tool Outcome Verification
 
@@ -72,3 +88,5 @@ Task Atlas v0.17 does not promote tasks into skills, RAG, or new tools. The
 - Add an audit log for all write-capable tool calls.
 - Add CI checks for schema compatibility and missing documentation.
 - Add a Workbench UI warning surface for risky actions.
+- Add a hard sandbox preventing Python execution tools from modifying plugin
+  source or ToolRegistry JSON.
