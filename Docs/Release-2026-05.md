@@ -1206,6 +1206,20 @@ relay access を防ぎます。central prompt rule は apply/pipeline の call/r
 （hard runtime sandbox は deferred）。3 つの project skills は
 `mcp-self-extension` に統合され、core promotion は引き続き deferred です。
 
+## v0.27.1 — 2026-05-24 — self-extension toolchain Python-track-aware + playable gameplay tools
+
+### 中文
+
+v0.27.1 让自拓展工具链对 Python 轨道友好，并新增可玩游戏工具。工具链修复：用户注册表容忍 `__pycache__`（Python 执行会生成它）；`mcp_inspect_scaffold` 改为 track-aware（不再对 Python 工具误报缺少 `.patch.cpp`）；`mcp_rollback_last_extension` 改为 track-aware（用户工具只删除项目本地目录并拒绝路径越界，默认拒绝陈旧的核心 manifest）；`save_dirty_packages` 新增 OFPA 诊断（`dirtyPackagesBefore/After`、`isPlayInEditor`、`savedPackages==0` 时给 reason），让 `savedPackages:0` 不再误导。Tool Log 现在为每个工具显示描述（核心从注册表、Python 从 tool.json），并展开 `workflow_run` 的子步骤。新增 2 个核心工具：`unreal.configure_player_input`（配置 Legacy/Enhanced Input 映射）与 `unreal.verify_player_controls`（在 PIE 中检查 possession / 角色类 / Camera·SpringArm / Jump 与移动绑定是否存在——只验证不注入输入；移动注入留待 v0.28 `pie_input_smoke`），工具总数 162→164、visible 150→152。Python 示例套件入库 `Tools/UnrealMcpPyToolSamples/`：修好的 `create_third_person_ground_character`（真第三人称类、不再与 AutoPossess 抢 Player0、改用 EditorActorSubsystem 等而非弃用的 EditorLevelLibrary、补 location/label/class schema、OFPA-aware 保存）与新的 `create_playable_test_level`（带地面 + 光照 + PlayerStart 的可玩测试关卡）。双引擎 UE 5.6 + 5.7。
+
+### EN
+
+v0.27.1 makes the self-extension toolchain Python-track-aware and adds playable gameplay tools. Toolchain fixes: the user registry tolerates `__pycache__` (created by Python execution); `mcp_inspect_scaffold` is track-aware (no false "missing .patch.cpp" for Python tools); `mcp_rollback_last_extension` is track-aware (user tools delete only the project-local dir and reject path escapes; stale core manifests are refused by default); `save_dirty_packages` gains OFPA diagnostics (`dirtyPackagesBefore/After`, `isPlayInEditor`, a reason when `savedPackages==0`) so `savedPackages:0` is no longer misleading. The Tool Log now shows a description for every tool (core from the registry, Python from tool.json) and expands `workflow_run` child steps. Two new core tools: `unreal.configure_player_input` (Legacy/Enhanced Input mapping setup) and `unreal.verify_player_controls` (in PIE, checks possession / pawn class / Camera·SpringArm / Jump and movement binding existence — verify only, no input injection; injection stays v0.28 `pie_input_smoke`), bringing the count 162→164, visible 150→152. The Python sample suite is committed under `Tools/UnrealMcpPyToolSamples/`: the fixed `create_third_person_ground_character` (real third-person class, no longer fights AutoPossess Player0, moved off deprecated EditorLevelLibrary to EditorActorSubsystem etc., added location/label/class schema, OFPA-aware save) plus the new `create_playable_test_level` (ground + lighting + PlayerStart playable test map). Dual-engine UE 5.6 + 5.7.
+
+### 日本語
+
+v0.27.1 では self-extension toolchain を Python track 対応にし、playable gameplay tools を追加しました。Toolchain 修正：user registry が `__pycache__`（Python 実行で生成される）を許容；`mcp_inspect_scaffold` が track-aware（Python tool で `.patch.cpp` 不足を誤報しない）；`mcp_rollback_last_extension` が track-aware（user tool は project-local ディレクトリのみ削除し path escape を拒否、古い core manifest は既定で拒否）；`save_dirty_packages` に OFPA 診断（`dirtyPackagesBefore/After`、`isPlayInEditor`、`savedPackages==0` の reason）を追加し、`savedPackages:0` が誤解を招かないようにしました。Tool Log は各 tool の description を表示し（core は registry、Python は tool.json）、`workflow_run` の子ステップを展開します。新しい core tool を 2 つ追加：`unreal.configure_player_input`（Legacy/Enhanced Input マッピング設定）と `unreal.verify_player_controls`（PIE で possession / pawn class / Camera·SpringArm / Jump と移動 binding の存在を確認 — 検証のみ、入力注入なし；注入は v0.28 `pie_input_smoke`）。tool 総数は 162→164、visible は 150→152。Python サンプル suite を `Tools/UnrealMcpPyToolSamples/` に追加：修正した `create_third_person_ground_character`（本物の third-person class、AutoPossess Player0 と競合しない、非推奨の EditorLevelLibrary から EditorActorSubsystem などへ移行、location/label/class schema を追加、OFPA-aware 保存）と新しい `create_playable_test_level`（地面 + 照明 + PlayerStart の playable test map）。dual-engine UE 5.6 + 5.7。
+
 ---
 
 ## トラブルシューティング / Troubleshooting / 故障排查

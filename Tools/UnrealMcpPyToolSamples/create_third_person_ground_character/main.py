@@ -4,7 +4,7 @@
 TOOL_NAME = "user.create_third_person_ground_character"
 DEFAULT_LABEL = "UEAtelier_ThirdPersonCharacter"
 DEFAULT_LOCATION = {"x": 0.0, "y": 0.0, "z": 110.0}
-DEFAULT_CHARACTER_POLICY = "preferThirdPerson"
+DEFAULT_CHARACTER_POLICY = "auto"
 
 THIRD_PERSON_CLASS_CANDIDATES = [
     "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter.BP_ThirdPersonCharacter_C",
@@ -12,9 +12,12 @@ THIRD_PERSON_CLASS_CANDIDATES = [
 ]
 BASIC_CHARACTER_CLASS = "/Script/Engine.Character"
 VALID_CHARACTER_POLICIES = {
-    "preferThirdPerson",
+    "auto",
     "requireThirdPerson",
-    "basicCharacterFallback",
+}
+CHARACTER_POLICY_ALIASES = {
+    "preferThirdPerson": "auto",
+    "basicCharacterFallback": "auto",
 }
 
 
@@ -47,6 +50,7 @@ def _location(args):
 
 def _character_policy(args):
     policy = _string(args.get("characterClassPolicy"), DEFAULT_CHARACTER_POLICY)
+    policy = CHARACTER_POLICY_ALIASES.get(policy, policy)
     if policy not in VALID_CHARACTER_POLICIES:
         return DEFAULT_CHARACTER_POLICY
     return policy
@@ -142,21 +146,31 @@ def _actor_subsystem(unreal):
 
 def _load_class(unreal, class_path):
     try:
-        return unreal.load_class(None, class_path)
+        cls = unreal.load_class(None, class_path)
+        if cls:
+            return cls
     except Exception:
-        return None
+        pass
+    if class_path == BASIC_CHARACTER_CLASS:
+        return getattr(unreal, "Character", None)
+    return None
 
 
 def _load_character_class(unreal, args):
     policy = _character_policy(args)
     user_class_path = _string(args.get("classPath"))
 
-    candidates = []
     if user_class_path:
-        candidates.append({"path": user_class_path, "kind": "user_supplied"})
+        cls = _load_class(unreal, user_class_path)
+        checked = [{"path": user_class_path, "kind": "user_supplied", "found": bool(cls)}]
+        if cls:
+            return cls, user_class_path, "user_supplied", checked, policy
+        return None, "", "", checked, policy
+
+    candidates = []
     for path in THIRD_PERSON_CLASS_CANDIDATES:
         candidates.append({"path": path, "kind": "third_person_candidate"})
-    if policy != "requireThirdPerson":
+    if policy == "auto":
         candidates.append({"path": BASIC_CHARACTER_CLASS, "kind": "basic_character_fallback"})
 
     checked = []
@@ -166,6 +180,14 @@ def _load_character_class(unreal, args):
         if cls:
             return cls, candidate["path"], candidate["kind"], checked, policy
     return None, "", "", checked, policy
+
+
+def _missing_class_message(policy, requested_class_path):
+    if requested_class_path:
+        return "Explicit classPath '%s' could not be loaded." % requested_class_path
+    if policy == "requireThirdPerson":
+        return "No third-person Blueprint found; pass classPath or use auto policy."
+    return "No third-person Blueprint or basic Character fallback class could be loaded."
 
 
 def _find_actor_by_label(actor_subsystem, label):
@@ -275,6 +297,19 @@ def _try_add_component(unreal, actor, component_class_name, component_label):
     return None, last_error
 
 
+def _try_setup_attachment(child, parent):
+    if not child or not parent:
+        return False, "attachment endpoints are unavailable"
+    method = getattr(child, "setup_attachment", None)
+    if callable(method):
+        try:
+            method(parent)
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
+    return False, "setup_attachment is unavailable"
+
+
 def _try_set_relative(component, unreal, location=None, rotation=None):
     if location:
         method = getattr(component, "set_relative_location", None)
@@ -338,12 +373,31 @@ def _configure_actor(unreal, actor, class_kind):
         _try_set_relative(spring, unreal, location=(0.0, 0.0, 70.0), rotation=(-10.0, 0.0, 0.0))
 
     for camera in camera_components:
+        if spring_components:
+            ok, error = _try_setup_attachment(camera, spring_components[0])
+            if ok:
+                changed.append({"target": _object_path(camera), "operation": "attached_to_spring_arm", "parent": _object_path(spring_components[0])})
+            elif class_kind == "basic_character_fallback":
+                warnings.append({"target": _object_path(camera), "operation": "attach_to_spring_arm", "warning": error})
         ok, error = _try_set_property(camera, "use_pawn_control_rotation", False)
         if ok:
             changed.append({"target": _object_path(camera), "property": "use_pawn_control_rotation", "value": False})
         else:
             warnings.append({"target": _object_path(camera), "property": "use_pawn_control_rotation", "warning": error})
         _try_set_relative(camera, unreal, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0))
+
+    camera_added = bool(spring_components and camera_components)
+    camera_note = ""
+    if class_kind == "basic_character_fallback":
+        if camera_added:
+            camera_note = "SpringArmComponent and CameraComponent are present after fallback configuration."
+        else:
+            missing = []
+            if not spring_components:
+                missing.append("SpringArmComponent")
+            if not camera_components:
+                missing.append("CameraComponent")
+            camera_note = "Could not add %s with the available Unreal Python component APIs; see warnings." % " and ".join(missing)
 
     evidence = {
         "characterMovementComponents": _component_names(movement_components),
@@ -352,6 +406,8 @@ def _configure_actor(unreal, actor, class_kind):
         "hasCharacterMovement": bool(movement_components),
         "hasSpringArm": bool(spring_components),
         "hasCamera": bool(camera_components),
+        "cameraAdded": camera_added,
+        "cameraNote": camera_note,
     }
     return changed, warnings, evidence
 
@@ -453,6 +509,17 @@ def _plan(args):
     return label, location, class_path, policy, auto_possess, would_write
 
 
+def _would_write_with_class(would_write, class_path, class_kind):
+    planned = []
+    for item in would_write:
+        entry = dict(item)
+        if entry.get("target") == "current_editor_level":
+            entry["class"] = class_path
+            entry["classKind"] = class_kind
+        planned.append(entry)
+    return planned
+
+
 def execute(args):
     args = args or {}
     dry_run = _bool(args.get("dryRun"), True)
@@ -499,19 +566,35 @@ def execute(args):
         structured["fallback"] = {"used": False, "type": "", "reason": ""}
 
     if dry_run:
-        structured["wouldWrite"] = would_write
+        if not character_class:
+            structured["wouldWrite"] = []
+            structured["blockingReason"] = _missing_class_message(policy, requested_class_path)
+            structured["notes"] = [
+                structured["blockingReason"],
+                "Dry run only; no level actors, world settings, or packages were modified.",
+                "BP_TwinStickCharacter is not treated as a third-person success by this tool.",
+            ]
+            return {
+                "text": structured["blockingReason"],
+                "structuredContent": structured,
+            }
+        structured["wouldWrite"] = _would_write_with_class(would_write, class_path, class_kind)
         structured["notes"] = [
             "Dry run only; no level actors, world settings, or packages were modified.",
             "BP_TwinStickCharacter is not treated as a third-person success by this tool.",
         ]
+        if class_kind == "basic_character_fallback":
+            structured["cameraAdded"] = False
+            structured["cameraNote"] = "Dry run only; a real run will attempt to add SpringArmComponent and CameraComponent with available Unreal Python APIs."
         return {
             "text": "Dry run: would place or update a PIE-controllable ground character in the current level.",
             "structuredContent": structured,
         }
 
     if not character_class:
-        structured["wouldWrite"] = would_write
-        return {"isError": True, "text": "No usable character class could be loaded.", "structuredContent": structured}
+        structured["wouldWrite"] = []
+        structured["blockingReason"] = _missing_class_message(policy, requested_class_path)
+        return {"isError": True, "text": structured["blockingReason"], "structuredContent": structured}
 
     changed = []
     warnings = []
@@ -564,6 +647,8 @@ def execute(args):
         structured["mapPackageAfter"] = _package_info(world)
         structured["save"] = save_result
         structured["componentEvidence"] = evidence
+        structured["cameraAdded"] = evidence["cameraAdded"]
+        structured["cameraNote"] = evidence["cameraNote"]
         structured["thirdPersonReadiness"] = {
             "hasMovement": evidence["hasCharacterMovement"],
             "hasCamera": evidence["hasCamera"],
