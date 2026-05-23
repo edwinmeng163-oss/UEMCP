@@ -28,6 +28,16 @@ namespace
 		return Value;
 	}
 
+	bool GetPieSmokeStructuredBool(const FUnrealMcpExecutionResult& Result, const FString& FieldName)
+	{
+		bool bValue = false;
+		if (Result.StructuredContent.IsValid())
+		{
+			Result.StructuredContent->TryGetBoolField(FieldName, bValue);
+		}
+		return bValue;
+	}
+
 	UObject* CreateNonWorldAssetForPieSmokeValidation()
 	{
 		const FString PackageName = TEXT("/Game/__UEvolvePieSmokeTests/PieSmokeNotWorld");
@@ -128,6 +138,38 @@ bool FUnrealMcpPieSmokeMapValidationTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("non-UWorld error kind"), ErrorKind, TEXT("InvalidMapPath"));
 	}
 	DestroyNonWorldAssetForPieSmokeValidation(NonWorldAsset);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpVerifyPlayerControlsNoPieDiagnosticsTest,
+	"UnrealMcp.PlayerControls.NoPieDiagnostics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpVerifyPlayerControlsNoPieDiagnosticsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	UnrealMcp::ResetAutomationToolStateForTests();
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetBoolField(TEXT("startIfNeeded"), false);
+
+	FUnrealMcpExecutionResult Result;
+	TestTrue(TEXT("verify_player_controls handled"), UnrealMcp::TryExecutePieSmokeTool(TEXT("unreal.verify_player_controls"), *Arguments, Result));
+	TestFalse(TEXT("no-PIE diagnostic is not an error"), Result.bIsError);
+	TestTrue(TEXT("structured content is present"), Result.StructuredContent.IsValid());
+	if (!Result.StructuredContent.IsValid())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("needsPie reported"), GetPieSmokeStructuredBool(Result, TEXT("needsPie")));
+	TestFalse(TEXT("runtime verification not possible"), GetPieSmokeStructuredBool(Result, TEXT("canVerifyRuntime")));
+	TestFalse(TEXT("BeginPIE not observed"), GetPieSmokeStructuredBool(Result, TEXT("beginPieObserved")));
+	TestFalse(TEXT("input injection not performed"), GetPieSmokeStructuredBool(Result, TEXT("inputInjectionPerformed")));
+	TestFalse(TEXT("movement delta not measured"), GetPieSmokeStructuredBool(Result, TEXT("movementDeltaMeasured")));
+
+	UnrealMcp::ResetAutomationToolStateForTests();
 	return true;
 }
 

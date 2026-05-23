@@ -51,6 +51,7 @@ namespace UnrealMcp
 	FString NormalizeEndpointPath(const FString& EndpointPath);
 	FUnrealMcpExecutionResult MakeExecutionResult(const FString& Text, const TSharedPtr<FJsonObject>& StructuredContent, bool bIsError);
 	FUnrealMcpExecutionResult ExecuteEditorEngineVersion();
+	bool TryExecutePlayerInputTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
 	int32 GetPositiveIntArgument(const FJsonObject& Arguments, const FString& FieldName, int32 DefaultValue);
 	TArray<FAssetData> GetSelectedAssets();
 	TSharedPtr<FJsonObject> MakeAssetObject(const FAssetData& Asset);
@@ -2563,6 +2564,11 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.project_settings_get"))
 		{
 			OutResult = ExecuteProjectSettingsGet(Arguments);
+			return true;
+		}
+
+		if (UnrealMcp::TryExecutePlayerInputTool(ToolName, Arguments, OutResult))
+		{
 			return true;
 		}
 

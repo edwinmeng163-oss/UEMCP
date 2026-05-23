@@ -129,6 +129,72 @@ namespace UnrealMcp
 			return EnumValues;
 		}
 
+		TSharedPtr<FJsonObject> MakePlayerInputKeySpecSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("key"), MakeStringProperty(TEXT("Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."), FString()));
+			Properties->SetObjectField(TEXT("scale"), MakeNumberProperty(TEXT("Axis scale for this key. Ignored for action mappings."), 1.0));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("key") });
+		}
+
+		TSharedPtr<FJsonObject> MakePlayerInputMappingSlotSchema()
+		{
+			TSharedPtr<FJsonObject> KeysProperty = MakeShared<FJsonObject>();
+			KeysProperty->SetStringField(TEXT("type"), TEXT("array"));
+			KeysProperty->SetStringField(TEXT("description"), TEXT("Keys to bind for this named mapping."));
+			KeysProperty->SetObjectField(TEXT("items"), MakePlayerInputKeySpecSchema());
+
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("keys"), KeysProperty);
+			Properties->SetObjectField(TEXT("inputActionPath"), MakeStringProperty(TEXT("Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."), FString()));
+
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetObjectField(TEXT("properties"), Properties);
+			return Schema;
+		}
+
+		TSharedPtr<FJsonObject> MakePlayerInputMappingsSchema()
+		{
+			TSharedPtr<FJsonObject> SlotSchema = MakePlayerInputMappingSlotSchema();
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("MoveForward"), SlotSchema);
+			Properties->SetObjectField(TEXT("MoveRight"), SlotSchema);
+			Properties->SetObjectField(TEXT("LookYaw"), SlotSchema);
+			Properties->SetObjectField(TEXT("LookPitch"), SlotSchema);
+			Properties->SetObjectField(TEXT("Jump"), SlotSchema);
+
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetStringField(TEXT("description"), TEXT("Optional overrides for the five standard player-control mappings."));
+			Schema->SetObjectField(TEXT("properties"), Properties);
+			return Schema;
+		}
+
+		TSharedPtr<FJsonObject> MakeConfigurePlayerInputSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("inputSystem"), MakeEnumStringProperty(TEXT("Input stack to configure."), TEXT("auto"), TArray<FString>{ TEXT("auto"), TEXT("legacy"), TEXT("enhanced") }));
+			Properties->SetObjectField(TEXT("profile"), MakeEnumStringProperty(TEXT("Mapping profile to use before applying mappings overrides."), TEXT("third_person_basic"), TArray<FString>{ TEXT("third_person_basic"), TEXT("custom") }));
+			Properties->SetObjectField(TEXT("mappings"), MakePlayerInputMappingsSchema());
+			Properties->SetObjectField(TEXT("enhancedInputMappingContextPath"), MakeStringProperty(TEXT("Optional Enhanced Input UInputMappingContext asset path."), FString()));
+			Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview intended input config writes without mutating settings or mapping assets."), true));
+
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetObjectField(TEXT("properties"), Properties);
+			return Schema;
+		}
+
+		TSharedPtr<FJsonObject> MakeVerifyPlayerControlsSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("expectedPawnClass"), MakeStringProperty(TEXT("Optional expected pawn class path, for example /Game/Player/BP_Player.BP_Player_C or /Script/Engine.Character."), FString()));
+			Properties->SetObjectField(TEXT("startIfNeeded"), MakeBoolProperty(TEXT("Start PIE when no PIE session is active; the tool waits privately for BeginPIE before inspecting."), false));
+			Properties->SetObjectField(TEXT("stopAfter"), MakeBoolProperty(TEXT("Stop PIE after verification. If omitted at runtime, auto-started PIE is stopped and pre-existing PIE is left running."), false));
+
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetObjectField(TEXT("properties"), Properties);
+			return Schema;
+		}
+
 		void RegisterEditorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			Registrar.Add(
@@ -171,6 +237,24 @@ namespace UnrealMcp
 				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
 				Descriptor.Reason = TEXT("Descriptor: read-only project settings inspector for v0.15 C++ readback coverage.");
 				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.configure_player_input"),
+					TEXT("Configure Player Input"),
+					TEXT("Configures standard player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics."),
+					TEXT("editor"),
+					TEXT("UnrealMcpPlayerInputTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Tools/UnrealMcpToolDocs/editor/configure_player_input.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.27.1 core gameplay setup primitive for reusable Legacy/Enhanced Input configuration under dry-run and postcheck evidence.");
+				Registrar.Add(Descriptor, MakeConfigurePlayerInputSchema());
 			}
 
 			{
@@ -1108,6 +1192,23 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 				Schema->SetObjectField(TEXT("properties"), Properties);
 				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.verify_player_controls"),
+					TEXT("Verify Player Controls"),
+					TEXT("Verifies PIE possession, pawn class, camera/spring arm components, and Jump/move/look binding existence without injecting input or checking movement deltas."),
+					TEXT("verification"),
+					TEXT("UnrealMcpPieSmokeTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresLock = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Tools/UnrealMcpToolDocs/verification/verify_player_controls.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.27.1 core runtime setup verifier that waits privately for BeginPIE and performs existence-only control checks.");
+				Registrar.Add(Descriptor, MakeVerifyPlayerControlsSchema());
 			}
 
 			{

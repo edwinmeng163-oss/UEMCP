@@ -1,0 +1,85 @@
+{
+	"name": "user.create_third_person_ground_character",
+	"category": "actors",
+	"title": "Create Third Person Ground Character",
+	"description": "Project-local Python user tool that dry-runs or places a controllable ground character in the current level for PIE, preferring real third-person template characters and explicitly reporting non-third-person fallbacks.",
+	"exposure": "visible",
+	"riskLevel": "medium",
+	"implementationTrack": "python",
+	"pythonHandlerSha256": "7498b9520301cdd43ae6ab778216327dc1d4f5c3429cb169388aaf2b0b18a09b",
+	"importAllowlist": [],
+	"requiresWrite": true,
+	"requiresBuild": false,
+	"requiresExternalProcess": false,
+	"requiresRestart": false,
+	"requiresProjectMemory": false,
+	"requiresLock": false,
+	"dryRunSupport": true,
+	"preflightSupport": false,
+	"postcheckSupport": false,
+	"wouldWrite":
+	[
+		"Spawn or update the labeled character actor in the current editor level.",
+		"Set the placed actor auto_possess_player value.",
+		"Clear an existing bare /Script/Engine.GameModeBase world override if present.",
+		"Best-effort configure CharacterMovement, SpringArm, and Camera components.",
+		"Mark the actor/map dirty and save dirty map packages."
+	],
+	"inputSchema":
+	{
+		"type": "object",
+		"additionalProperties": false,
+		"properties":
+		{
+			"dryRun":
+			{
+				"type": "boolean",
+				"default": true,
+				"description": "If true, return wouldWrite preview without mutation."
+			},
+			"location":
+			{
+				"type": "object",
+				"additionalProperties": false,
+				"description": "World location for the placed or updated character.",
+				"properties":
+				{
+					"x": { "type": "number", "default": 0.0 },
+					"y": { "type": "number", "default": 0.0 },
+					"z": { "type": "number", "default": 110.0 }
+				},
+				"required": []
+			},
+			"label":
+			{
+				"type": "string",
+				"default": "UEAtelier_ThirdPersonCharacter",
+				"description": "Actor label to create or update."
+			},
+			"classPath":
+			{
+				"type": "string",
+				"default": "",
+				"description": "Optional explicit Character-derived class path. User-supplied classes are reported as unverified fallbacks unless they are known third-person template classes."
+			},
+			"characterClassPolicy":
+			{
+				"type": "string",
+				"default": "preferThirdPerson",
+				"enum": [ "preferThirdPerson", "requireThirdPerson", "basicCharacterFallback" ],
+				"description": "Class selection policy. preferThirdPerson tries known third-person classes, then a basic Character fallback; requireThirdPerson disables the basic fallback."
+			},
+			"autoPossessPlayer":
+			{
+				"type": "boolean",
+				"default": true,
+				"description": "If true, set the placed actor to Auto Possess Player 0 for PIE."
+			}
+		},
+		"required": []
+	},
+	"owner": "user",
+	"docsPath": "Tools/UnrealMcpPyTools/create_third_person_ground_character/README.md",
+	"reason": "User-generated Python tool; not part of canonical core registry.",
+	"notes": "Scaffolded by unreal.scaffold_mcp_tool implementationTrack=python. sha256 must match main.py after edits (re-run mcp_user_registry_reload with acceptChangedHashes=true). BP_TwinStickCharacter is not treated as a third-person success."
+}

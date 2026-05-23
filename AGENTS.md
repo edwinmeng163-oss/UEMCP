@@ -129,9 +129,10 @@ drafts unless explicitly asked.
 
 ## Current High-Level Feature Set
 
-- Editor/inspection: status, engine version, settings, logs, maps, assets,
-  selection, PIE, console, Python, Content Browser sync, save dirty packages,
-  asset move, redirector fixup, dependency remap, and migration helpers.
+- Editor/inspection: status, engine version, settings, player input
+  configuration, logs, maps, assets, selection, PIE, console, Python,
+  Content Browser sync, save dirty packages, asset move, redirector fixup,
+  dependency remap, and migration helpers.
 - Actor, Blueprint, Widget, and Material tools: readback, guarded edits,
   creation, layout, graph/pin inspection, parameter inspection, and strict
   schema writes.
@@ -144,8 +145,8 @@ drafts unless explicitly asked.
   knowledge index/search/eval, tool/workflow recommend, project memory CRUD,
   skill activity/drafts/promote, task extract/list/describe/rate/pin/promote,
   `unreal.automation_list`, `unreal.automation_run`,
-  `unreal.automation_report`, `unreal.pie_smoke`, and
-  `unreal.editor_diagnostics`.
+  `unreal.automation_report`, `unreal.pie_smoke`,
+  `unreal.verify_player_controls`, and `unreal.editor_diagnostics`.
 
 ## Tool Registry Status
 
@@ -155,7 +156,7 @@ The explicit ToolRegistry is central. Do not bypass it:
 `Tools/UnrealMcpToolRegistry/schema.json`, and
 `Schemas/UnrealMcpToolRegistry.schema.json`.
 
-At the time this file was written, the registry contained 162 entries across:
+At the time this file was written, the registry contained 164 entries across:
 actors, blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget.
 
@@ -167,7 +168,8 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.27 walls core apply/pipeline off from the AI,
+Current project status: v0.27.1 adds core player input configuration and
+existence-only player control verification; v0.27 walls core apply/pipeline off from the AI,
 makes AI self-extension the Python user-tool track only, keeps core promotion
 manual/developer-only and deferred, adds a `workflow_run` hidden-tool guard, and
 merges the three project skills into `mcp-self-extension`; v0.26 completes

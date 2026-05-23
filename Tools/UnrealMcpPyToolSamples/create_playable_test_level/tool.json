@@ -1,0 +1,70 @@
+{
+  "name": "user.create_playable_test_level",
+  "category": "editor",
+  "title": "Create Playable Test Level",
+  "description": "Sample Python user tool that dry-runs or creates a new /Game/levels/<name> map with ground, basic lighting, PlayerStart, and an optional playable character.",
+  "exposure": "visible",
+  "riskLevel": "medium",
+  "implementationTrack": "python",
+  "sample": true,
+  "pythonHandlerSha256": "a45810b7f1bedc091d2ddea691a955f24e895da35753c186cef8b422fda08005",
+  "importAllowlist": [],
+  "requiresWrite": true,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": true,
+  "preflightSupport": false,
+  "postcheckSupport": true,
+  "wouldWrite": [
+    "Create a new blank level under /Game/levels/<levelName> after refusing an existing asset when detection is available.",
+    "Spawn a static mesh ground surface.",
+    "Spawn directional and sky lighting.",
+    "Spawn a PlayerStart.",
+    "Optionally spawn and auto-possess a character.",
+    "Save the new level and verify expected actor labels."
+  ],
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dryRun": {
+        "type": "boolean",
+        "default": true,
+        "description": "If true, return wouldWrite preview without creating a level."
+      },
+      "levelName": {
+        "type": "string",
+        "default": "UEAtelier_PlayableTestLevel",
+        "description": "Asset name for the new map. The tool creates /Game/levels/<levelName> and rejects Lvl_TopDown."
+      },
+      "includeCharacter": {
+        "type": "boolean",
+        "default": true,
+        "description": "If true, spawn a character in the test level and set it to Auto Possess Player 0."
+      },
+      "characterClassPath": {
+        "type": "string",
+        "default": "",
+        "description": "Optional explicit Character-derived class path. If empty, the sample tries known ThirdPerson template classes, then /Script/Engine.Character."
+      },
+      "characterLabel": {
+        "type": "string",
+        "default": "UEAtelier_TestCharacter",
+        "description": "Label for the optional spawned character."
+      },
+      "groundSize": {
+        "type": "number",
+        "default": 4000.0,
+        "description": "Ground square size in centimeters. Values below 500 are clamped to 500."
+      }
+    },
+    "required": []
+  },
+  "owner": "UEAtelier Sample",
+  "docsPath": "Tools/UnrealMcpPyToolSamples/create_playable_test_level/README.md",
+  "reason": "Committed sample for the project-local Python user-tool track; not part of the canonical core registry.",
+  "notes": "Sample only. Copy this directory to <ProjectDir>/Tools/UnrealMcpPyTools/create_playable_test_level/ before reload/smoke if you want it callable in an editor project."
+}

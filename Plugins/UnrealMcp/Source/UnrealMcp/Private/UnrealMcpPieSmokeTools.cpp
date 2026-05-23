@@ -9,11 +9,19 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Async/Async.h"
 #include "Containers/Ticker.h"
+#include "Camera/CameraComponent.h"
+#include "Components/InputComponent.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "FileHelpers.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerInput.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/InputSettings.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/PackageName.h"
 #include "Misc/ScopeLock.h"
 #include "PlayInEditorDataTypes.h"
@@ -607,6 +615,482 @@ namespace UnrealMcp
 			}
 		}
 
+		TSharedPtr<FJsonObject> MakePlayerControlsErrorObject(const FString& ErrorKind, const FString& Message)
+		{
+			TSharedPtr<FJsonObject> ErrorObject = MakeShared<FJsonObject>();
+			ErrorObject->SetStringField(TEXT("errorKind"), ErrorKind);
+			ErrorObject->SetStringField(TEXT("message"), Message);
+			return ErrorObject;
+		}
+
+		FUnrealMcpExecutionResult MakePlayerControlsErrorResult(const FString& ErrorKind, const FString& Message, TSharedPtr<FJsonObject> Content)
+		{
+			if (!Content.IsValid())
+			{
+				Content = MakeShared<FJsonObject>();
+			}
+			Content->SetObjectField(TEXT("error"), MakePlayerControlsErrorObject(ErrorKind, Message));
+			return MakeExecutionResult(Message, Content, true);
+		}
+
+		FString NormalizeExpectedPawnClassPath(const FString& RawPath)
+		{
+			FString Path = RawPath.TrimStartAndEnd();
+			if (Path.IsEmpty()
+				|| Path.StartsWith(TEXT("/Script/"), ESearchCase::CaseSensitive)
+				|| Path.EndsWith(TEXT("_C"), ESearchCase::CaseSensitive))
+			{
+				return Path;
+			}
+
+			if (Path.StartsWith(TEXT("/Game/"), ESearchCase::CaseSensitive)
+				|| Path.StartsWith(TEXT("/Engine/"), ESearchCase::CaseSensitive))
+			{
+				if (Path.Contains(TEXT("."), ESearchCase::CaseSensitive))
+				{
+					return Path + TEXT("_C");
+				}
+				return FString::Printf(TEXT("%s.%s_C"), *Path, *FPackageName::GetLongPackageAssetName(Path));
+			}
+			return Path;
+		}
+
+		UClass* ResolveExpectedPawnClass(const FString& RawPath, FString& OutResolvedPath)
+		{
+			OutResolvedPath.Reset();
+			const FString Trimmed = RawPath.TrimStartAndEnd();
+			if (Trimmed.IsEmpty())
+			{
+				return nullptr;
+			}
+
+			if (UClass* DirectClass = LoadObject<UClass>(nullptr, *Trimmed))
+			{
+				OutResolvedPath = DirectClass->GetPathName();
+				return DirectClass;
+			}
+
+			const FString NormalizedPath = NormalizeExpectedPawnClassPath(Trimmed);
+			if (!NormalizedPath.Equals(Trimmed, ESearchCase::CaseSensitive))
+			{
+				if (UClass* NormalizedClass = LoadObject<UClass>(nullptr, *NormalizedPath))
+				{
+					OutResolvedPath = NormalizedClass->GetPathName();
+					return NormalizedClass;
+				}
+			}
+			return nullptr;
+		}
+
+		bool PlayerControlsHasLegacyAxisMapping(const FName AxisName)
+		{
+			UInputSettings* InputSettings = GetMutableDefault<UInputSettings>();
+			if (!InputSettings)
+			{
+				return false;
+			}
+
+			TArray<FInputAxisKeyMapping> Mappings;
+			InputSettings->GetAxisMappingByName(AxisName, Mappings);
+			return Mappings.Num() > 0;
+		}
+
+		bool PlayerControlsHasLegacyActionMapping(const FName ActionName)
+		{
+			UInputSettings* InputSettings = GetMutableDefault<UInputSettings>();
+			if (!InputSettings)
+			{
+				return false;
+			}
+
+			TArray<FInputActionKeyMapping> Mappings;
+			InputSettings->GetActionMappingByName(ActionName, Mappings);
+			return Mappings.Num() > 0;
+		}
+
+		bool PlayerControlsInputComponentHasAxis(UInputComponent* InputComponent, const FName AxisName)
+		{
+			if (!InputComponent)
+			{
+				return false;
+			}
+			for (const FInputAxisBinding& AxisBinding : InputComponent->AxisBindings)
+			{
+				if (AxisBinding.AxisName == AxisName)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		bool PlayerControlsInputComponentHasAction(UInputComponent* InputComponent, const FName ActionName)
+		{
+			if (!InputComponent)
+			{
+				return false;
+			}
+			for (int32 Index = 0; Index < InputComponent->GetNumActionBindings(); ++Index)
+			{
+				if (InputComponent->GetActionBinding(Index).GetActionName() == ActionName)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		bool PlayerControlsRuntimeHasAxis(const TArray<UInputComponent*>& InputComponents, const FName AxisName)
+		{
+			for (UInputComponent* InputComponent : InputComponents)
+			{
+				if (PlayerControlsInputComponentHasAxis(InputComponent, AxisName))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		bool PlayerControlsRuntimeHasAction(const TArray<UInputComponent*>& InputComponents, const FName ActionName)
+		{
+			for (UInputComponent* InputComponent : InputComponents)
+			{
+				if (PlayerControlsInputComponentHasAction(InputComponent, ActionName))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> MakePlayerControlsBindingObject(bool bLegacy, bool bRuntime)
+		{
+			TSharedPtr<FJsonObject> BindingObject = MakeShared<FJsonObject>();
+			BindingObject->SetBoolField(TEXT("legacyMappingExists"), bLegacy);
+			BindingObject->SetBoolField(TEXT("runtimeBindingExists"), bRuntime);
+			BindingObject->SetBoolField(TEXT("exists"), bLegacy || bRuntime);
+			return BindingObject;
+		}
+
+		struct FPlayerControlsBeginPieWaitResult
+		{
+			bool bBeginPieObserved = false;
+			bool bTimedOut = false;
+			bool bPlayWorldAvailable = false;
+			FString Message;
+		};
+
+		FPlayerControlsBeginPieWaitResult WaitForBeginPieForPlayerControls(double TimeoutSeconds)
+		{
+			FPlayerControlsBeginPieWaitResult Result;
+			if (!GEditor)
+			{
+				Result.Message = TEXT("GEditor is unavailable.");
+				return Result;
+			}
+
+			bool bObservedBeginPie = false;
+			FDelegateHandle BeginPieHandle = FEditorDelegates::BeginPIE.AddLambda([&bObservedBeginPie](const bool bIsSimulating)
+			{
+				(void)bIsSimulating;
+				bObservedBeginPie = true;
+			});
+
+			const double ClampedTimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1.0, 60.0);
+			const double StartedAtSeconds = FPlatformTime::Seconds();
+			while ((FPlatformTime::Seconds() - StartedAtSeconds) < ClampedTimeoutSeconds)
+			{
+				UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
+				if (PlayWorld && (bObservedBeginPie || PlayWorld->HasBegunPlay()))
+				{
+					Result.bBeginPieObserved = bObservedBeginPie || PlayWorld->HasBegunPlay();
+					Result.bPlayWorldAvailable = true;
+					break;
+				}
+
+				if (GEditor)
+				{
+					GEditor->Tick(0.05f, false);
+				}
+				FPlatformProcess::Sleep(0.01f);
+			}
+
+			if (BeginPieHandle.IsValid())
+			{
+				FEditorDelegates::BeginPIE.Remove(BeginPieHandle);
+			}
+
+			if (!Result.bPlayWorldAvailable)
+			{
+				Result.bTimedOut = true;
+				Result.Message = TEXT("Timed out waiting for BeginPIE and PlayWorld.");
+			}
+			return Result;
+		}
+
+		bool RequestStopPieAndWaitForPlayerControls(double TimeoutSeconds)
+		{
+			RequestEndPieOnGameThread();
+			const double StartedAtSeconds = FPlatformTime::Seconds();
+			while ((FPlatformTime::Seconds() - StartedAtSeconds) < FMath::Clamp(TimeoutSeconds, 1.0, 30.0))
+			{
+				if (!GEditor || (GEditor->PlayWorld == nullptr && !GEditor->GetPlaySessionRequest().IsSet()))
+				{
+					return true;
+				}
+				if (GEditor)
+				{
+					GEditor->Tick(0.05f, false);
+				}
+				FPlatformProcess::Sleep(0.01f);
+			}
+			return !GEditor || GEditor->PlayWorld == nullptr;
+		}
+
+		class FScopedPlayerControlsVerificationLock
+		{
+		public:
+			bool TryAcquire(TSharedPtr<FJsonObject>& OutFailure)
+			{
+				FUnrealMcpAutomationRunState ActiveRun;
+				if (TryGetActiveAutomationRunState(ActiveRun))
+				{
+					const FString Message = FString::Printf(TEXT("Run '%s' (%s) is still %s."), *ActiveRun.RunId, *LexToString(ActiveRun.RunType), *ActiveRun.Status);
+					OutFailure = MakePlayerControlsErrorObject(TEXT("RunAlreadyActive"), Message);
+					OutFailure->SetStringField(TEXT("activeRunId"), ActiveRun.RunId);
+					OutFailure->SetStringField(TEXT("activeRunType"), LexToString(ActiveRun.RunType));
+					return false;
+				}
+
+				RunId = MakeAutomationRunId();
+				FUnrealMcpAutomationRunState State;
+				State.RunId = RunId;
+				State.RunType = EUnrealMcpAutomationRunType::PieSmoke;
+				State.Status = TEXT("running");
+				State.AcceptedAtUtc = FDateTime::UtcNow();
+				State.StartedAtUtc = State.AcceptedAtUtc;
+				State.LastHeartbeatUtc = State.AcceptedAtUtc;
+				State.TimeoutSeconds = 60;
+				SetActiveAutomationRunState(State);
+				bAcquired = true;
+				return true;
+			}
+
+			~FScopedPlayerControlsVerificationLock()
+			{
+				if (bAcquired && !RunId.IsEmpty())
+				{
+					ClearActiveAutomationRunIfMatching(RunId);
+				}
+			}
+
+			FString GetRunId() const
+			{
+				return RunId;
+			}
+
+		private:
+			bool bAcquired = false;
+			FString RunId;
+		};
+
+		TSharedPtr<FJsonObject> InspectPlayerControlsRuntime(const FString& ExpectedPawnClassText, bool bBeginPieObserved, bool bPieAlreadyActive)
+		{
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetBoolField(TEXT("needsPie"), false);
+			Content->SetBoolField(TEXT("canVerifyRuntime"), GEditor && GEditor->PlayWorld != nullptr);
+			Content->SetBoolField(TEXT("beginPieObserved"), bBeginPieObserved);
+			Content->SetBoolField(TEXT("pieAlreadyActive"), bPieAlreadyActive);
+
+			UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
+			APlayerController* PlayerController = PlayWorld ? PlayWorld->GetFirstPlayerController() : nullptr;
+			APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+
+			Content->SetBoolField(TEXT("playerControllerExists"), PlayerController != nullptr);
+			Content->SetBoolField(TEXT("possessedPawnExists"), Pawn != nullptr);
+			Content->SetStringField(TEXT("playerController"), PlayerController ? PlayerController->GetPathName() : FString());
+			Content->SetStringField(TEXT("possessedPawn"), Pawn ? Pawn->GetPathName() : FString());
+
+			UClass* PawnClass = Pawn ? Pawn->GetClass() : nullptr;
+			Content->SetStringField(TEXT("pawnClass"), PawnClass ? PawnClass->GetPathName() : FString());
+
+			if (!ExpectedPawnClassText.TrimStartAndEnd().IsEmpty())
+			{
+				FString ResolvedExpectedClassPath;
+				UClass* ExpectedPawnClass = ResolveExpectedPawnClass(ExpectedPawnClassText, ResolvedExpectedClassPath);
+				Content->SetStringField(TEXT("expectedPawnClass"), ExpectedPawnClassText.TrimStartAndEnd());
+				Content->SetStringField(TEXT("resolvedExpectedPawnClass"), ResolvedExpectedClassPath);
+				Content->SetBoolField(TEXT("expectedPawnClassResolved"), ExpectedPawnClass != nullptr);
+				Content->SetBoolField(TEXT("pawnClassMatchesExpected"), ExpectedPawnClass && PawnClass && PawnClass->IsChildOf(ExpectedPawnClass));
+			}
+
+			const bool bHasCamera = Pawn && Pawn->FindComponentByClass<UCameraComponent>() != nullptr;
+			const bool bHasSpringArm = Pawn && Pawn->FindComponentByClass<USpringArmComponent>() != nullptr;
+			Content->SetBoolField(TEXT("hasCamera"), bHasCamera);
+			Content->SetBoolField(TEXT("hasSpringArm"), bHasSpringArm);
+
+			TArray<UInputComponent*> InputComponents;
+			if (Pawn && Pawn->InputComponent)
+			{
+				InputComponents.Add(Pawn->InputComponent);
+			}
+			if (PlayerController && PlayerController->InputComponent && !InputComponents.Contains(PlayerController->InputComponent))
+			{
+				InputComponents.Add(PlayerController->InputComponent);
+			}
+			Content->SetNumberField(TEXT("inputComponentCount"), InputComponents.Num());
+
+			const FName JumpName(TEXT("Jump"));
+			const FName MoveForwardName(TEXT("MoveForward"));
+			const FName MoveRightName(TEXT("MoveRight"));
+			const FName LookYawName(TEXT("LookYaw"));
+			const FName LookPitchName(TEXT("LookPitch"));
+
+			const bool bJumpLegacy = PlayerControlsHasLegacyActionMapping(JumpName);
+			const bool bJumpRuntime = PlayerControlsRuntimeHasAction(InputComponents, JumpName);
+			const bool bMoveForwardLegacy = PlayerControlsHasLegacyAxisMapping(MoveForwardName);
+			const bool bMoveForwardRuntime = PlayerControlsRuntimeHasAxis(InputComponents, MoveForwardName);
+			const bool bMoveRightLegacy = PlayerControlsHasLegacyAxisMapping(MoveRightName);
+			const bool bMoveRightRuntime = PlayerControlsRuntimeHasAxis(InputComponents, MoveRightName);
+			const bool bLookYawLegacy = PlayerControlsHasLegacyAxisMapping(LookYawName);
+			const bool bLookYawRuntime = PlayerControlsRuntimeHasAxis(InputComponents, LookYawName);
+			const bool bLookPitchLegacy = PlayerControlsHasLegacyAxisMapping(LookPitchName);
+			const bool bLookPitchRuntime = PlayerControlsRuntimeHasAxis(InputComponents, LookPitchName);
+
+			TSharedPtr<FJsonObject> Bindings = MakeShared<FJsonObject>();
+			Bindings->SetObjectField(TEXT("Jump"), MakePlayerControlsBindingObject(bJumpLegacy, bJumpRuntime));
+			Bindings->SetObjectField(TEXT("MoveForward"), MakePlayerControlsBindingObject(bMoveForwardLegacy, bMoveForwardRuntime));
+			Bindings->SetObjectField(TEXT("MoveRight"), MakePlayerControlsBindingObject(bMoveRightLegacy, bMoveRightRuntime));
+			Bindings->SetObjectField(TEXT("LookYaw"), MakePlayerControlsBindingObject(bLookYawLegacy, bLookYawRuntime));
+			Bindings->SetObjectField(TEXT("LookPitch"), MakePlayerControlsBindingObject(bLookPitchLegacy, bLookPitchRuntime));
+			Content->SetObjectField(TEXT("bindings"), Bindings);
+
+			const bool bJumpExists = bJumpLegacy || bJumpRuntime;
+			const bool bMoveForwardExists = bMoveForwardLegacy || bMoveForwardRuntime;
+			const bool bMoveRightExists = bMoveRightLegacy || bMoveRightRuntime;
+			const bool bLookYawExists = bLookYawLegacy || bLookYawRuntime;
+			const bool bLookPitchExists = bLookPitchLegacy || bLookPitchRuntime;
+			Content->SetBoolField(TEXT("jumpBindingExists"), bJumpExists);
+			Content->SetBoolField(TEXT("moveForwardBindingExists"), bMoveForwardExists);
+			Content->SetBoolField(TEXT("moveRightBindingExists"), bMoveRightExists);
+			Content->SetBoolField(TEXT("lookYawBindingExists"), bLookYawExists);
+			Content->SetBoolField(TEXT("lookPitchBindingExists"), bLookPitchExists);
+			Content->SetBoolField(TEXT("moveBindingsExist"), bMoveForwardExists && bMoveRightExists);
+			Content->SetBoolField(TEXT("lookBindingsExist"), bLookYawExists && bLookPitchExists);
+			Content->SetBoolField(
+				TEXT("controlsSetupExists"),
+				PlayerController != nullptr
+					&& Pawn != nullptr
+					&& bHasCamera
+					&& bJumpExists
+					&& bMoveForwardExists
+					&& bMoveRightExists
+					&& bLookYawExists
+					&& bLookPitchExists);
+			return Content;
+		}
+
+		FUnrealMcpExecutionResult VerifyPlayerControlsTool(const FJsonObject& Arguments)
+		{
+			FString ExpectedPawnClassText;
+			Arguments.TryGetStringField(TEXT("expectedPawnClass"), ExpectedPawnClassText);
+
+			bool bStartIfNeeded = false;
+			Arguments.TryGetBoolField(TEXT("startIfNeeded"), bStartIfNeeded);
+
+			bool bStopAfter = bStartIfNeeded;
+			Arguments.TryGetBoolField(TEXT("stopAfter"), bStopAfter);
+
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("verify_player_controls"));
+			Content->SetBoolField(TEXT("startIfNeeded"), bStartIfNeeded);
+			Content->SetBoolField(TEXT("stopAfter"), bStopAfter);
+			Content->SetStringField(TEXT("expectedPawnClass"), ExpectedPawnClassText.TrimStartAndEnd());
+			Content->SetBoolField(TEXT("inputInjectionPerformed"), false);
+			Content->SetBoolField(TEXT("movementDeltaChecked"), false);
+			Content->SetBoolField(TEXT("movementDeltaMeasured"), false);
+
+			if (!GEditor)
+			{
+				Content->SetBoolField(TEXT("needsPie"), true);
+				Content->SetBoolField(TEXT("canVerifyRuntime"), false);
+				Content->SetBoolField(TEXT("beginPieObserved"), false);
+				return MakePlayerControlsErrorResult(TEXT("EditorUnavailable"), TEXT("GEditor is unavailable."), Content);
+			}
+
+			const bool bPieAlreadyActive = GEditor->PlayWorld != nullptr;
+			if (!bPieAlreadyActive && !bStartIfNeeded)
+			{
+				Content->SetBoolField(TEXT("needsPie"), true);
+				Content->SetBoolField(TEXT("canVerifyRuntime"), false);
+				Content->SetBoolField(TEXT("beginPieObserved"), false);
+				return MakeExecutionResult(TEXT("PIE is required to verify player controls."), Content, false);
+			}
+
+			bool bBeginPieObserved = bPieAlreadyActive;
+			bool bStartedPie = false;
+			if (!bPieAlreadyActive)
+			{
+				FScopedPlayerControlsVerificationLock VerificationLock;
+				TSharedPtr<FJsonObject> LockFailure;
+				if (!VerificationLock.TryAcquire(LockFailure))
+				{
+					Content->SetBoolField(TEXT("needsPie"), true);
+					Content->SetBoolField(TEXT("canVerifyRuntime"), false);
+					Content->SetBoolField(TEXT("beginPieObserved"), false);
+					if (LockFailure.IsValid())
+					{
+						Content->SetObjectField(TEXT("error"), LockFailure);
+					}
+					return MakeExecutionResult(TEXT("Another verification run is already active."), Content, true);
+				}
+				Content->SetStringField(TEXT("verificationRunId"), VerificationLock.GetRunId());
+
+				FRequestPlaySessionParams SessionParams;
+				GEditor->RequestPlaySession(SessionParams);
+				bStartedPie = true;
+
+				const FPlayerControlsBeginPieWaitResult BeginPieWait = WaitForBeginPieForPlayerControls(15.0);
+				bBeginPieObserved = BeginPieWait.bBeginPieObserved;
+				Content->SetBoolField(TEXT("beginPieObserved"), BeginPieWait.bBeginPieObserved);
+				Content->SetBoolField(TEXT("beginPieTimedOut"), BeginPieWait.bTimedOut);
+				Content->SetStringField(TEXT("beginPieWaitMessage"), BeginPieWait.Message);
+				if (!BeginPieWait.bPlayWorldAvailable)
+				{
+					Content->SetBoolField(TEXT("stopRequested"), true);
+					Content->SetBoolField(TEXT("stopObserved"), RequestStopPieAndWaitForPlayerControls(10.0));
+					return MakePlayerControlsErrorResult(TEXT("BeginPieTimeout"), BeginPieWait.Message, Content);
+				}
+
+				TSharedPtr<FJsonObject> RuntimeContent = InspectPlayerControlsRuntime(ExpectedPawnClassText, bBeginPieObserved, false);
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : RuntimeContent->Values)
+				{
+					Content->SetField(Pair.Key, Pair.Value);
+				}
+
+				if (bStopAfter)
+				{
+					Content->SetBoolField(TEXT("stopRequested"), true);
+					Content->SetBoolField(TEXT("stopObserved"), RequestStopPieAndWaitForPlayerControls(10.0));
+				}
+				return MakeExecutionResult(TEXT("Player controls verification completed."), Content, false);
+			}
+
+			TSharedPtr<FJsonObject> RuntimeContent = InspectPlayerControlsRuntime(ExpectedPawnClassText, bBeginPieObserved, true);
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : RuntimeContent->Values)
+			{
+				Content->SetField(Pair.Key, Pair.Value);
+			}
+			Content->SetBoolField(TEXT("beginPieObserved"), bBeginPieObserved);
+			if (bStopAfter && (bStartedPie || bPieAlreadyActive))
+			{
+				Content->SetBoolField(TEXT("stopRequested"), true);
+				Content->SetBoolField(TEXT("stopObserved"), RequestStopPieAndWaitForPlayerControls(10.0));
+			}
+			return MakeExecutionResult(TEXT("Player controls verification completed."), Content, false);
+		}
+
 		FUnrealMcpExecutionResult PieSmokeTool(const FJsonObject& Arguments)
 		{
 			int32 TimeoutSeconds = DefaultPieSmokeTimeoutSeconds;
@@ -696,6 +1180,11 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.pie_smoke"))
 		{
 			OutResult = PieSmokeTool(Arguments);
+			return true;
+		}
+		if (ToolName == TEXT("unreal.verify_player_controls"))
+		{
+			OutResult = VerifyPlayerControlsTool(Arguments);
 			return true;
 		}
 		return false;

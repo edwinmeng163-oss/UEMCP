@@ -27,6 +27,101 @@ namespace UnrealMcp
 	FString GetHostBuildPlatformName();
 }
 
+namespace
+{
+	TSharedPtr<FJsonObject> MakeToolDefinitionsEnumStringProperty(const FString& Description, const FString& DefaultValue, const TArray<FString>& Values)
+	{
+		TSharedPtr<FJsonObject> Property = UnrealMcp::MakeStringProperty(Description, DefaultValue);
+		TArray<TSharedPtr<FJsonValue>> EnumValues;
+		for (const FString& Value : Values)
+		{
+			EnumValues.Add(MakeShared<FJsonValueString>(Value));
+		}
+		Property->SetArrayField(TEXT("enum"), EnumValues);
+		return Property;
+	}
+
+	TSharedPtr<FJsonObject> MakeToolDefinitionsSchemaWithRequired(const TSharedPtr<FJsonObject>& Properties, const TArray<FString>& RequiredFields)
+	{
+		TArray<TSharedPtr<FJsonValue>> Required;
+		for (const FString& RequiredField : RequiredFields)
+		{
+			Required.Add(MakeShared<FJsonValueString>(RequiredField));
+		}
+
+		TSharedPtr<FJsonObject> Schema = UnrealMcp::MakeObjectSchema();
+		Schema->SetObjectField(TEXT("properties"), Properties);
+		Schema->SetArrayField(TEXT("required"), Required);
+		return Schema;
+	}
+
+	TSharedPtr<FJsonObject> MakeToolDefinitionsPlayerInputKeySpecSchema()
+	{
+		TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+		Properties->SetObjectField(TEXT("key"), UnrealMcp::MakeStringProperty(TEXT("Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar.")));
+		Properties->SetObjectField(TEXT("scale"), UnrealMcp::MakeNumberProperty(TEXT("Axis scale for this key. Ignored for action mappings."), 1.0));
+		return MakeToolDefinitionsSchemaWithRequired(Properties, TArray<FString>{ TEXT("key") });
+	}
+
+	TSharedPtr<FJsonObject> MakeToolDefinitionsPlayerInputMappingSlotSchema()
+	{
+		TSharedPtr<FJsonObject> KeysProperty = MakeShared<FJsonObject>();
+		KeysProperty->SetStringField(TEXT("type"), TEXT("array"));
+		KeysProperty->SetStringField(TEXT("description"), TEXT("Keys to bind for this named mapping."));
+		KeysProperty->SetObjectField(TEXT("items"), MakeToolDefinitionsPlayerInputKeySpecSchema());
+
+		TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+		Properties->SetObjectField(TEXT("keys"), KeysProperty);
+		Properties->SetObjectField(TEXT("inputActionPath"), UnrealMcp::MakeStringProperty(TEXT("Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced.")));
+
+		TSharedPtr<FJsonObject> Schema = UnrealMcp::MakeObjectSchema();
+		Schema->SetObjectField(TEXT("properties"), Properties);
+		return Schema;
+	}
+
+	TSharedPtr<FJsonObject> MakeToolDefinitionsPlayerInputMappingsSchema()
+	{
+		TSharedPtr<FJsonObject> SlotSchema = MakeToolDefinitionsPlayerInputMappingSlotSchema();
+		TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+		Properties->SetObjectField(TEXT("MoveForward"), SlotSchema);
+		Properties->SetObjectField(TEXT("MoveRight"), SlotSchema);
+		Properties->SetObjectField(TEXT("LookYaw"), SlotSchema);
+		Properties->SetObjectField(TEXT("LookPitch"), SlotSchema);
+		Properties->SetObjectField(TEXT("Jump"), SlotSchema);
+
+		TSharedPtr<FJsonObject> Schema = UnrealMcp::MakeObjectSchema();
+		Schema->SetStringField(TEXT("description"), TEXT("Optional overrides for the five standard player-control mappings."));
+		Schema->SetObjectField(TEXT("properties"), Properties);
+		return Schema;
+	}
+
+	TSharedPtr<FJsonObject> MakeToolDefinitionsConfigurePlayerInputSchema()
+	{
+		TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+		Properties->SetObjectField(TEXT("inputSystem"), MakeToolDefinitionsEnumStringProperty(TEXT("Input stack to configure."), TEXT("auto"), TArray<FString>{ TEXT("auto"), TEXT("legacy"), TEXT("enhanced") }));
+		Properties->SetObjectField(TEXT("profile"), MakeToolDefinitionsEnumStringProperty(TEXT("Mapping profile to use before applying mappings overrides."), TEXT("third_person_basic"), TArray<FString>{ TEXT("third_person_basic"), TEXT("custom") }));
+		Properties->SetObjectField(TEXT("mappings"), MakeToolDefinitionsPlayerInputMappingsSchema());
+		Properties->SetObjectField(TEXT("enhancedInputMappingContextPath"), UnrealMcp::MakeStringProperty(TEXT("Optional Enhanced Input UInputMappingContext asset path.")));
+		Properties->SetObjectField(TEXT("dryRun"), UnrealMcp::MakeBoolProperty(TEXT("Preview intended input config writes without mutating settings or mapping assets."), true));
+
+		TSharedPtr<FJsonObject> Schema = UnrealMcp::MakeObjectSchema();
+		Schema->SetObjectField(TEXT("properties"), Properties);
+		return Schema;
+	}
+
+	TSharedPtr<FJsonObject> MakeToolDefinitionsVerifyPlayerControlsSchema()
+	{
+		TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+		Properties->SetObjectField(TEXT("expectedPawnClass"), UnrealMcp::MakeStringProperty(TEXT("Optional expected pawn class path, for example /Game/Player/BP_Player.BP_Player_C or /Script/Engine.Character.")));
+		Properties->SetObjectField(TEXT("startIfNeeded"), UnrealMcp::MakeBoolProperty(TEXT("Start PIE when no PIE session is active; the tool waits privately for BeginPIE before inspecting."), false));
+		Properties->SetObjectField(TEXT("stopAfter"), UnrealMcp::MakeBoolProperty(TEXT("Stop PIE after verification. If omitted at runtime, auto-started PIE is stopped and pre-existing PIE is left running."), false));
+
+		TSharedPtr<FJsonObject> Schema = UnrealMcp::MakeObjectSchema();
+		Schema->SetObjectField(TEXT("properties"), Properties);
+		return Schema;
+	}
+}
+
 void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& ToolsArray) const
 {
 	UnrealMcp::AppendRegisteredToolDefinitions(ToolsArray);
@@ -64,6 +159,24 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 			TEXT("Stop PIE"),
 			TEXT("Stops or cancels the current Play In Editor session."),
 			InputSchema);
+	}
+
+	{
+		UnrealMcp::AddToolDefinition(
+			ToolsArray,
+			TEXT("unreal.configure_player_input"),
+			TEXT("Configure Player Input"),
+			TEXT("Configures standard player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics."),
+			MakeToolDefinitionsConfigurePlayerInputSchema());
+	}
+
+	{
+		UnrealMcp::AddToolDefinition(
+			ToolsArray,
+			TEXT("unreal.verify_player_controls"),
+			TEXT("Verify Player Controls"),
+			TEXT("Verifies PIE possession, pawn class, camera/spring arm components, and Jump/move/look binding existence without injecting input or checking movement deltas."),
+			MakeToolDefinitionsVerifyPlayerControlsSchema());
 	}
 
 	{

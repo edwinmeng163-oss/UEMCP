@@ -8615,6 +8615,51 @@
       "notes": "Shares the AutomationRuns state-file namespace and active-run lock with automation_run; poll with unreal.automation_report."
     },
     {
+      "name": "unreal.verify_player_controls",
+      "category": "verification",
+      "handlerName": "unreal.verify_player_controls",
+      "title": "Verify Player Controls",
+      "description": "Verifies PIE possession, pawn class, camera/spring arm components, and Jump/move/look binding existence without injecting input or checking movement deltas.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Tools/UnrealMcpToolDocs/verification/verify_player_controls.md",
+      "reason": "v0.27.1 core runtime setup verifier that waits privately for BeginPIE and performs existence-only control checks.",
+      "summaryTemplate": "Verify player controls setup",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedPawnClass": {
+            "type": "string",
+            "description": "Optional expected pawn class path, for example /Game/Player/BP_Player.BP_Player_C or /Script/Engine.Character."
+          },
+          "startIfNeeded": {
+            "type": "boolean",
+            "description": "Start PIE when no PIE session is active; the tool waits privately for BeginPIE before inspecting.",
+            "default": false
+          },
+          "stopAfter": {
+            "type": "boolean",
+            "description": "Stop PIE after verification. If omitted at runtime, auto-started PIE is stopped and pre-existing PIE is left running.",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "notes": "Existence and possession verifier only: no input injection and no movement-delta assertion. A private BeginPIE wait helper is used when startIfNeeded=true."
+    },
+    {
       "name": "unreal.editor_diagnostics",
       "category": "verification",
       "handlerName": "unreal.editor_diagnostics",
@@ -8863,6 +8908,237 @@
         }
       },
       "notes": "C++ only. MVP maps common categories to UInputSettings, URendererSettings, and hardcoded config sections, returning KEY_NOT_FOUND for unsupported edge cases."
+    },
+    {
+      "name": "unreal.configure_player_input",
+      "category": "editor",
+      "handlerName": "unreal.configure_player_input",
+      "title": "Configure Player Input",
+      "description": "Configures standard player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Tools/UnrealMcpToolDocs/editor/configure_player_input.md",
+      "reason": "v0.27.1 core gameplay setup primitive for reusable Legacy/Enhanced Input configuration under dry-run and postcheck evidence.",
+      "summaryTemplate": "Configure player input mappings",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "inputSystem": {
+            "type": "string",
+            "description": "Input stack to configure.",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "legacy",
+              "enhanced"
+            ]
+          },
+          "profile": {
+            "type": "string",
+            "description": "Mapping profile to use before applying mappings overrides.",
+            "default": "third_person_basic",
+            "enum": [
+              "third_person_basic",
+              "custom"
+            ]
+          },
+          "mappings": {
+            "type": "object",
+            "description": "Optional overrides for the five standard player-control mappings.",
+            "additionalProperties": false,
+            "properties": {
+              "MoveForward": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "keys": {
+                    "type": "array",
+                    "description": "Keys to bind for this named mapping.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."
+                        },
+                        "scale": {
+                          "type": "number",
+                          "description": "Axis scale for this key. Ignored for action mappings.",
+                          "default": 1
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "inputActionPath": {
+                    "type": "string",
+                    "description": "Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."
+                  }
+                },
+                "required": []
+              },
+              "MoveRight": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "keys": {
+                    "type": "array",
+                    "description": "Keys to bind for this named mapping.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."
+                        },
+                        "scale": {
+                          "type": "number",
+                          "description": "Axis scale for this key. Ignored for action mappings.",
+                          "default": 1
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "inputActionPath": {
+                    "type": "string",
+                    "description": "Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."
+                  }
+                },
+                "required": []
+              },
+              "LookYaw": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "keys": {
+                    "type": "array",
+                    "description": "Keys to bind for this named mapping.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."
+                        },
+                        "scale": {
+                          "type": "number",
+                          "description": "Axis scale for this key. Ignored for action mappings.",
+                          "default": 1
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "inputActionPath": {
+                    "type": "string",
+                    "description": "Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."
+                  }
+                },
+                "required": []
+              },
+              "LookPitch": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "keys": {
+                    "type": "array",
+                    "description": "Keys to bind for this named mapping.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."
+                        },
+                        "scale": {
+                          "type": "number",
+                          "description": "Axis scale for this key. Ignored for action mappings.",
+                          "default": 1
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "inputActionPath": {
+                    "type": "string",
+                    "description": "Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."
+                  }
+                },
+                "required": []
+              },
+              "Jump": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "keys": {
+                    "type": "array",
+                    "description": "Keys to bind for this named mapping.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."
+                        },
+                        "scale": {
+                          "type": "number",
+                          "description": "Axis scale for this key. Ignored for action mappings.",
+                          "default": 1
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "inputActionPath": {
+                    "type": "string",
+                    "description": "Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."
+                  }
+                },
+                "required": []
+              }
+            }
+          },
+          "enhancedInputMappingContextPath": {
+            "type": "string",
+            "description": "Optional Enhanced Input UInputMappingContext asset path."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview intended input config writes without mutating settings or mapping assets.",
+            "default": true
+          }
+        },
+        "required": []
+      },
+      "notes": "inputSystem=auto configures Enhanced Input only when enhancedInputMappingContextPath is supplied and Enhanced Input classes are available; otherwise it uses legacy UInputSettings."
     },
     {
       "name": "unreal.bp_delete_node",
