@@ -12,6 +12,7 @@
 #include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpScaffoldGenerator.h"
+#include "UnrealMcpSelfExtensionInternal.h"
 
 namespace UnrealMcp
 {
@@ -69,6 +70,29 @@ namespace UnrealMcpScaffoldGeneratorTests
 			}
 		}
 		return true;
+	}
+
+	bool HasReadinessIssueCode(const TSharedPtr<FJsonObject>& Object, const FString& Code)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Issues = nullptr;
+		if (!Object.IsValid() || !Object->TryGetArrayField(TEXT("readinessIssues"), Issues) || !Issues)
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& IssueValue : *Issues)
+		{
+			if (IssueValue.IsValid() && IssueValue->Type == EJson::Object && IssueValue->AsObject().IsValid())
+			{
+				FString IssueCode;
+				IssueValue->AsObject()->TryGetStringField(TEXT("code"), IssueCode);
+				if (IssueCode == Code)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 }
 
@@ -242,6 +266,47 @@ bool FUnrealMcpScaffoldGenerator_NoOverwriteTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("first generation succeeds"), First.bSuccess);
 	TestFalse(TEXT("second generation fails"), Second.bSuccess);
 	TestTrue(TEXT("second error mentions exists"), Second.Error.Contains(TEXT("exists")));
+
+	CleanupScaffoldDir(ToolId);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpScaffoldGenerator_PythonInspectReadinessTest,
+	"UnrealMcp.ScaffoldGenerator.PythonInspectReadiness",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpScaffoldGenerator_PythonInspectReadinessTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpScaffoldGeneratorTests;
+
+	const FString ToolId = TEXT("test_python_inspect");
+	CleanupScaffoldDir(ToolId);
+
+	FJsonObject ScaffoldArgs;
+	ScaffoldArgs.SetStringField(TEXT("description"), TEXT("Inspect readiness test tool."));
+	const UnrealMcp::Scaffold::FPythonScaffoldResult Scaffold =
+		UnrealMcp::Scaffold::GeneratePythonScaffoldFiles(ToolId, ScaffoldArgs);
+	TestTrue(TEXT("python scaffold generation succeeds"), Scaffold.bSuccess);
+
+	FJsonObject InspectArgs;
+	InspectArgs.SetStringField(TEXT("scaffoldDir"), FPaths::Combine(::UnrealMcp::Extension::UserPyToolsRelativeRoot, ToolId));
+	const FUnrealMcpExecutionResult InspectResult = UnrealMcp::InspectMcpScaffold(InspectArgs, TArray<TSharedPtr<FJsonValue>>());
+	TestFalse(TEXT("inspect succeeds"), InspectResult.bIsError);
+	TestTrue(TEXT("inspect structured content valid"), InspectResult.StructuredContent.IsValid());
+	if (InspectResult.StructuredContent.IsValid())
+	{
+		TestEqual(TEXT("implementationTrack"), InspectResult.StructuredContent->GetStringField(TEXT("implementationTrack")), TEXT("python"));
+		TestEqual(TEXT("toolName from tool.json"), InspectResult.StructuredContent->GetStringField(TEXT("toolName")), TEXT("user.test_python_inspect"));
+		TestTrue(TEXT("readyForReload true"), InspectResult.StructuredContent->GetBoolField(TEXT("readyForReload")));
+		TestFalse(TEXT("readyForApply false"), InspectResult.StructuredContent->GetBoolField(TEXT("readyForApply")));
+		TestTrue(TEXT("next action reload"), InspectResult.StructuredContent->GetStringField(TEXT("nextAction")).Contains(TEXT("unreal.mcp_user_registry_reload")));
+		TestTrue(TEXT("next action smoke"), InspectResult.StructuredContent->GetStringField(TEXT("nextAction")).Contains(TEXT("unreal.mcp_user_tool_smoke")));
+		TestFalse(TEXT("missing patch not reported"), HasReadinessIssueCode(InspectResult.StructuredContent, TEXT("missing_patch_file")));
+		const TSharedPtr<FJsonObject>* GroupedIssues = nullptr;
+		TestTrue(TEXT("grouped readiness issues present"), InspectResult.StructuredContent->TryGetObjectField(TEXT("readinessIssuesByTrack"), GroupedIssues) && GroupedIssues && (*GroupedIssues).IsValid());
+	}
 
 	CleanupScaffoldDir(ToolId);
 	return true;

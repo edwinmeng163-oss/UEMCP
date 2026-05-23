@@ -9,6 +9,7 @@
 #include "Dom/JsonValue.h"
 #include "Editor.h"
 #include "EditorScriptingHelpers.h"
+#include "Engine/Level.h"
 #include "Engine/RendererSettings.h"
 #include "Engine/World.h"
 #include "FileHelpers.h"
@@ -481,27 +482,52 @@ namespace UnrealMcp
 			return Records;
 		}
 
-		TArray<TSharedPtr<FJsonValue>> MakeDirtyPackageBeforeArray(const TArray<FEditorDirtyPackageRecord>& Records)
+		TArray<TSharedPtr<FJsonValue>> MakeDirtyPackageNameArray(const TArray<FEditorDirtyPackageRecord>& Records)
 		{
 			TArray<TSharedPtr<FJsonValue>> Values;
 			for (const FEditorDirtyPackageRecord& Record : Records)
 			{
-				TSharedPtr<FJsonObject> PackageObject = MakeShared<FJsonObject>();
-				PackageObject->SetStringField(TEXT("path"), Record.Path);
-				PackageObject->SetField(TEXT("reason"), MakeShared<FJsonValueNull>());
-				Values.Add(MakeShared<FJsonValueObject>(PackageObject));
+				Values.Add(MakeShared<FJsonValueString>(Record.Path));
 			}
 			return Values;
 		}
 
-		TArray<TSharedPtr<FJsonValue>> MakeSkippedPackageArray(const TArray<FEditorDirtyPackageRecord>& Records, FString& OutMostCommonReason)
+		FString ClassifySaveDirtyPackageSkipReason(const FEditorDirtyPackageRecord& Record, bool bSaveMaps, bool bSaveAssets)
+		{
+			if (!bSaveMaps && !bSaveAssets)
+			{
+				return TEXT("save_not_requested");
+			}
+
+			const bool bIsMapPackage = Record.Package && Record.Package->ContainsMap();
+			if (bIsMapPackage && !bSaveMaps)
+			{
+				return TEXT("save_maps_false");
+			}
+			if (!bIsMapPackage && !bSaveAssets)
+			{
+				return TEXT("save_assets_false");
+			}
+
+			return ClassifyDirtyPackageSkipReason(Record);
+		}
+
+		TArray<TSharedPtr<FJsonValue>> MakeSkippedPackageArray(
+			const TArray<FEditorDirtyPackageRecord>& Records,
+			bool bSaveMaps,
+			bool bSaveAssets,
+			FString& OutMostCommonReason,
+			const FString& ForcedReason = FString())
 		{
 			TArray<TSharedPtr<FJsonValue>> Values;
 			TMap<FString, int32> ReasonCounts;
 			for (const FEditorDirtyPackageRecord& Record : Records)
 			{
-				const FString Reason = ClassifyDirtyPackageSkipReason(Record);
+				const FString Reason = ForcedReason.IsEmpty()
+					? ClassifySaveDirtyPackageSkipReason(Record, bSaveMaps, bSaveAssets)
+					: ForcedReason;
 				TSharedPtr<FJsonObject> PackageObject = MakeShared<FJsonObject>();
+				PackageObject->SetStringField(TEXT("name"), Record.Path);
 				PackageObject->SetStringField(TEXT("path"), Record.Path);
 				PackageObject->SetStringField(TEXT("reason"), Reason);
 				Values.Add(MakeShared<FJsonValueObject>(PackageObject));
@@ -520,6 +546,53 @@ namespace UnrealMcp
 			}
 
 			return Values;
+		}
+
+		FString GetSaveDirtyPackagesZeroSaveReason(
+			bool bIsPlayInEditor,
+			bool bSaveMaps,
+			bool bSaveAssets,
+			int32 DirtyPackagesBeforeCount,
+			int32 DirtyPackagesAfterCount)
+		{
+			if (bIsPlayInEditor)
+			{
+				return TEXT("pie_active");
+			}
+			if (DirtyPackagesBeforeCount == 0)
+			{
+				return TEXT("no_dirty_packages");
+			}
+			if (!bSaveMaps && !bSaveAssets)
+			{
+				return TEXT("save_not_requested");
+			}
+			if (DirtyPackagesAfterCount >= DirtyPackagesBeforeCount)
+			{
+				return TEXT("all_skipped");
+			}
+
+			return TEXT("save_attempted");
+		}
+
+		void AddCurrentMapExternalActorsHint(TSharedPtr<FJsonObject> StructuredContent)
+		{
+			if (!StructuredContent.IsValid() || !GEditor)
+			{
+				return;
+			}
+
+			UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+			if (!EditorWorld)
+			{
+				return;
+			}
+
+			const bool bIsWorldPartition = EditorWorld->IsPartitionedWorld();
+			const bool bUsesExternalActors = EditorWorld->PersistentLevel
+				? EditorWorld->PersistentLevel->IsUsingExternalActors()
+				: false;
+			StructuredContent->SetBoolField(TEXT("usesWorldPartitionExternalActors"), bIsWorldPartition && bUsesExternalActors);
 		}
 
 		UObjectRedirector* EditorToolLoadRedirectorAtPath(IAssetRegistry& AssetRegistry, const FString& ObjectPath)
@@ -2221,17 +2294,46 @@ namespace UnrealMcp
 
 		FUnrealMcpExecutionResult ExecuteSaveDirtyPackages(const FString& ToolName, const FJsonObject& Arguments)
 		{
-			if (IsEditorPlaying())
-			{
-				return MakePieBlockedResult(ToolName);
-			}
-
 			bool bSaveMaps = true;
 			bool bSaveAssets = true;
 			Arguments.TryGetBoolField(TEXT("saveMaps"), bSaveMaps);
 			Arguments.TryGetBoolField(TEXT("saveAssets"), bSaveAssets);
 
+			const bool bIsPlayInEditor = IsEditorPlaying();
 			const TArray<FEditorDirtyPackageRecord> DirtyPackagesBefore = GetDirtyPackageRecords();
+			if (bIsPlayInEditor)
+			{
+				FString MostCommonSkipReason;
+				TArray<TSharedPtr<FJsonValue>> SkippedPackages = MakeSkippedPackageArray(
+					DirtyPackagesBefore,
+					bSaveMaps,
+					bSaveAssets,
+					MostCommonSkipReason,
+					TEXT("pie_active"));
+
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetBoolField(TEXT("saved"), false);
+				StructuredContent->SetBoolField(TEXT("saveMaps"), bSaveMaps);
+				StructuredContent->SetBoolField(TEXT("saveAssets"), bSaveAssets);
+				StructuredContent->SetBoolField(TEXT("isPlayInEditor"), true);
+				StructuredContent->SetArrayField(TEXT("dirtyPackagesBefore"), MakeDirtyPackageNameArray(DirtyPackagesBefore));
+				StructuredContent->SetArrayField(TEXT("dirtyPackagesAfter"), MakeDirtyPackageNameArray(DirtyPackagesBefore));
+				StructuredContent->SetArrayField(TEXT("skippedPackages"), SkippedPackages);
+				StructuredContent->SetNumberField(TEXT("savedPackages"), 0);
+				StructuredContent->SetStringField(TEXT("reason"), GetSaveDirtyPackagesZeroSaveReason(
+					bIsPlayInEditor,
+					bSaveMaps,
+					bSaveAssets,
+					DirtyPackagesBefore.Num(),
+					DirtyPackagesBefore.Num()));
+				AddCurrentMapExternalActorsHint(StructuredContent);
+
+				return MakeExecutionResult(
+					FString::Printf(TEXT("Tool '%s' is blocked while Play In Editor is active or starting."), *ToolName),
+					StructuredContent,
+					true);
+			}
+
 			const bool bSaved = UEditorLoadingAndSavingUtils::SaveDirtyPackages(bSaveMaps, bSaveAssets);
 			const TArray<FEditorDirtyPackageRecord> DirtyPackagesAfter = GetDirtyPackageRecords();
 
@@ -2251,15 +2353,31 @@ namespace UnrealMcp
 			}
 
 			FString MostCommonSkipReason;
-			TArray<TSharedPtr<FJsonValue>> SkippedPackages = MakeSkippedPackageArray(DirtyPackagesAfter, MostCommonSkipReason);
+			TArray<TSharedPtr<FJsonValue>> SkippedPackages = MakeSkippedPackageArray(
+				DirtyPackagesAfter,
+				bSaveMaps,
+				bSaveAssets,
+				MostCommonSkipReason);
 
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 			StructuredContent->SetBoolField(TEXT("saved"), bSaved);
 			StructuredContent->SetBoolField(TEXT("saveMaps"), bSaveMaps);
 			StructuredContent->SetBoolField(TEXT("saveAssets"), bSaveAssets);
-			StructuredContent->SetArrayField(TEXT("dirtyPackagesBefore"), MakeDirtyPackageBeforeArray(DirtyPackagesBefore));
+			StructuredContent->SetBoolField(TEXT("isPlayInEditor"), false);
+			StructuredContent->SetArrayField(TEXT("dirtyPackagesBefore"), MakeDirtyPackageNameArray(DirtyPackagesBefore));
+			StructuredContent->SetArrayField(TEXT("dirtyPackagesAfter"), MakeDirtyPackageNameArray(DirtyPackagesAfter));
 			StructuredContent->SetArrayField(TEXT("skippedPackages"), SkippedPackages);
 			StructuredContent->SetNumberField(TEXT("savedPackages"), SavedPackageCount);
+			if (SavedPackageCount == 0)
+			{
+				StructuredContent->SetStringField(TEXT("reason"), GetSaveDirtyPackagesZeroSaveReason(
+					bIsPlayInEditor,
+					bSaveMaps,
+					bSaveAssets,
+					DirtyPackagesBefore.Num(),
+					DirtyPackagesAfter.Num()));
+			}
+			AddCurrentMapExternalActorsHint(StructuredContent);
 
 			const FString Text = (!bSaved && DirtyPackagesAfter.Num() > 0 && !MostCommonSkipReason.IsEmpty())
 				? FString::Printf(

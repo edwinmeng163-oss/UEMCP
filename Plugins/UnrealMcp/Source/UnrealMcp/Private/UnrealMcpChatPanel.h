@@ -39,7 +39,9 @@ struct FUnrealMcpChatEntry
 	bool bToolRequiresWrite = false;
 	FString ToolRiskLevel;
 	FString ToolCategory;
+	FString ToolDescription;
 	FString ToolSummary;
+	FString WorkflowStepSummary;
 	bool bCanRateTask = false;
 	FString TaskAtlasTaskId;
 	FString TaskAtlasRating;

@@ -189,6 +189,13 @@ namespace UnrealMcp::UserRegistry
 			return true;
 		}
 
+		bool UserRegistryIsIgnoredGeneratedCacheDirectory(const FString& DirectoryName)
+		{
+			return DirectoryName.Equals(TEXT("__pycache__"), ESearchCase::CaseSensitive)
+				|| DirectoryName.Equals(TEXT(".pytest_cache"), ESearchCase::CaseSensitive)
+				|| DirectoryName.Equals(TEXT(".mypy_cache"), ESearchCase::CaseSensitive);
+		}
+
 		TArray<FString> UserRegistryReadStringArrayField(const TSharedPtr<FJsonObject>& Object, const FString& FieldName)
 		{
 			TArray<FString> Values;
@@ -222,10 +229,13 @@ namespace UnrealMcp::UserRegistry
 		{
 			TArray<FString> Subdirectories;
 			IFileManager::Get().FindFiles(Subdirectories, *FPaths::Combine(ToolDirectory, TEXT("*")), false, true);
-			if (Subdirectories.Num() > 0)
+			for (const FString& Subdirectory : Subdirectories)
 			{
-				OutReason = TEXT("user_registry_invalid: subdirectories are not allowed in v0.26 user Python tools.");
-				return false;
+				if (!UserRegistryIsIgnoredGeneratedCacheDirectory(Subdirectory))
+				{
+					OutReason = TEXT("user_registry_invalid: subdirectories are not allowed in v0.26 user Python tools.");
+					return false;
+				}
 			}
 
 			TArray<FString> PythonFiles;

@@ -122,9 +122,28 @@ namespace
 		return UnrealMcp::UserRegistry::FindUserTool(ToolName) != nullptr;
 	}
 
+	FString UserRegistryLoadedToolSha(const FString& ToolName)
+	{
+		UnrealMcp::UserToolLock::FSharedGuard Guard;
+		const UnrealMcp::UserRegistry::FUserToolEntry* Entry = UnrealMcp::UserRegistry::FindUserTool(ToolName);
+		return Entry ? Entry->PythonHandlerSha256 : FString();
+	}
+
 	FString UserRegistryFirstRejectionReason(const UnrealMcp::UserRegistry::FReloadResult& Result)
 	{
 		return Result.RejectedTools.Num() > 0 ? Result.RejectedTools[0].Reason : FString();
+	}
+
+	bool UserRegistryHasRejection(const UnrealMcp::UserRegistry::FReloadResult& Result, const FString& ToolName, const FString& ReasonPart)
+	{
+		for (const UnrealMcp::UserRegistry::FReloadResult::FRejection& Rejection : Result.RejectedTools)
+		{
+			if (Rejection.ToolName == ToolName && Rejection.Reason.Contains(ReasonPart))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	FString UserRegistryStructuredString(const FUnrealMcpExecutionResult& Result, const FString& FieldName)
@@ -150,6 +169,10 @@ bool FUnrealMcpUserRegistry_SubdirPathRejectionTest::RunTest(const FString& Para
 	UserRegistryReloadClean();
 
 	TestTrue(TEXT("valid user tool writes"), UserRegistryWriteTool(UserRegistryTestPrefix + TEXT("valid_plain"), UserRegistryPassPy, UserRegistryPassSha, FString(), TEXT("  \"pythonHandlerPath\": \"valid/relative/main.py\"")));
+	TestTrue(TEXT("cache dir tool writes"), UserRegistryWriteTool(UserRegistryTestPrefix + TEXT("cache_ok"), UserRegistryPassPy, UserRegistryPassSha));
+	TestTrue(TEXT("__pycache__ file writes"), UserRegistryWriteFile(FPaths::Combine(UserRegistryToolDir(UserRegistryTestPrefix + TEXT("cache_ok")), TEXT("__pycache__/main.cpython-311.pyc")), TEXT("cache\n")));
+	TestTrue(TEXT(".pytest_cache file writes"), UserRegistryWriteFile(FPaths::Combine(UserRegistryToolDir(UserRegistryTestPrefix + TEXT("cache_ok")), TEXT(".pytest_cache/CACHEDIR.TAG")), TEXT("cache\n")));
+	TestTrue(TEXT(".mypy_cache file writes"), UserRegistryWriteFile(FPaths::Combine(UserRegistryToolDir(UserRegistryTestPrefix + TEXT("cache_ok")), TEXT(".mypy_cache/meta.json")), TEXT("{}\n")));
 	TestTrue(TEXT("nested subpackage dir writes"), UserRegistryWriteTool(UserRegistryTestPrefix + TEXT("nested"), UserRegistryPassPy, UserRegistryPassSha));
 	TestTrue(TEXT("nested subpackage file writes"), UserRegistryWriteFile(FPaths::Combine(UserRegistryToolDir(UserRegistryTestPrefix + TEXT("nested")), TEXT("subpkg/__init__.py")), TEXT("VALUE = 1\n")));
 	TestTrue(TEXT("extra py tool writes"), UserRegistryWriteTool(UserRegistryTestPrefix + TEXT("extra_py"), UserRegistryPassPy, UserRegistryPassSha));
@@ -157,6 +180,9 @@ bool FUnrealMcpUserRegistry_SubdirPathRejectionTest::RunTest(const FString& Para
 
 	const UnrealMcp::UserRegistry::FReloadResult Result = UserRegistryReload();
 	TestTrue(TEXT("valid plain tool accepted"), UserRegistryHasLoadedTool(UserRegistryToolName(UserRegistryTestPrefix + TEXT("valid_plain"))));
+	TestTrue(TEXT("cache dir tool accepted"), UserRegistryHasLoadedTool(UserRegistryToolName(UserRegistryTestPrefix + TEXT("cache_ok"))));
+	TestEqual(TEXT("cache dirs do not affect handler sha"), UserRegistryLoadedToolSha(UserRegistryToolName(UserRegistryTestPrefix + TEXT("cache_ok"))), UserRegistryPassSha);
+	TestTrue(TEXT("arbitrary subdir still rejected"), UserRegistryHasRejection(Result, UserRegistryTestPrefix + TEXT("nested"), TEXT("subdirectories are not allowed")));
 	TestTrue(TEXT("invalid fixtures rejected"), Result.RejectedTools.Num() >= 2);
 
 	UserRegistryDeleteTestDirs();

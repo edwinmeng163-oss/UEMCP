@@ -81,6 +81,40 @@ namespace UnrealMcp
 			return FileObject;
 		}
 
+		bool InspectScaffoldIsLowerHexSha256(const FString& Value)
+		{
+			if (Value.Len() != 64)
+			{
+				return false;
+			}
+
+			for (const TCHAR Character : Value)
+			{
+				const bool bDigit = Character >= TEXT('0') && Character <= TEXT('9');
+				const bool bLowerHex = Character >= TEXT('a') && Character <= TEXT('f');
+				if (!bDigit && !bLowerHex)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool InspectScaffoldIsPythonToolPath(const FString& ScaffoldDirectory)
+		{
+			FString Normalized = ScaffoldDirectory;
+			FPaths::NormalizeFilename(Normalized);
+			return Normalized.Contains(TEXT("/Tools/UnrealMcpPyTools/"), ESearchCase::IgnoreCase);
+		}
+
+		void AddInspectScaffoldNextAction(TArray<TSharedPtr<FJsonValue>>& NextActions, const FString& ToolName, const FString& Description)
+		{
+			TSharedPtr<FJsonObject> ActionObject = MakeShared<FJsonObject>();
+			ActionObject->SetStringField(TEXT("toolName"), ToolName);
+			ActionObject->SetStringField(TEXT("description"), Description);
+			NextActions.Add(MakeShared<FJsonValueObject>(ActionObject));
+		}
+
 		bool TryReadToolNameFromTestRequest(
 			const FString& TestRequestPath,
 			FString& OutToolName,
@@ -220,43 +254,92 @@ namespace UnrealMcp
 			ResultObject->SetStringField(TEXT("toolId"), FPaths::GetCleanFilename(ResolvedScaffoldDirectory));
 			ResultObject->SetBoolField(TEXT("exists"), FPaths::DirectoryExists(ResolvedScaffoldDirectory));
 
-			static const TCHAR* RequiredFiles[] = {
-				TEXT("README.md"),
-				TEXT("ToolRegistrar.patch.cpp"),
-				TEXT("ToolRegistrarCall.patch.cpp"),
-				TEXT("CategoryHandlerFunction.patch.cpp"),
-				TEXT("CategoryDispatcherBranch.patch.cpp"),
-				TEXT("ToolRegistryPatch.json"),
-				TEXT("TestRequest.json"),
-				TEXT("IntegrationChecklist.md")
-			};
+			const FString ToolJsonPath = FPaths::Combine(ResolvedScaffoldDirectory, TEXT("tool.json"));
+			const FString MainPyPath = FPaths::Combine(ResolvedScaffoldDirectory, TEXT("main.py"));
+			TSharedPtr<FJsonObject> ToolJsonObject;
+			FString ToolJsonFailure;
+			const bool bToolJsonParses = LoadJsonObjectFromFile(ToolJsonPath, ToolJsonObject, ToolJsonFailure) && ToolJsonObject.IsValid();
+			FString DeclaredImplementationTrack;
+			if (bToolJsonParses)
+			{
+				ToolJsonObject->TryGetStringField(TEXT("implementationTrack"), DeclaredImplementationTrack);
+			}
+			const bool bPythonTrack =
+				DeclaredImplementationTrack.Equals(TEXT("python"), ESearchCase::IgnoreCase)
+				|| (FPaths::FileExists(ToolJsonPath) && FPaths::FileExists(MainPyPath))
+				|| InspectScaffoldIsPythonToolPath(ResolvedScaffoldDirectory);
+			const FString ImplementationTrack = bPythonTrack ? TEXT("python") : TEXT("cpp");
+			ResultObject->SetStringField(TEXT("implementationTrack"), ImplementationTrack);
 
 			TArray<TSharedPtr<FJsonValue>> Files;
 			TArray<TSharedPtr<FJsonValue>> MissingRequiredFiles;
-			for (const TCHAR* FileName : RequiredFiles)
+			if (bPythonTrack)
 			{
-				TSharedPtr<FJsonObject> FileObject = MakeScaffoldFileObject(ResolvedScaffoldDirectory, FileName, true, bIncludeFileText, MaxPreviewChars);
-				if (FileObject->GetBoolField(TEXT("missing")))
+				static const TCHAR* PythonRequiredFiles[] = {
+					TEXT("tool.json"),
+					TEXT("main.py")
+				};
+				for (const TCHAR* FileName : PythonRequiredFiles)
 				{
-					MissingRequiredFiles.Add(MakeShared<FJsonValueString>(FileName));
+					TSharedPtr<FJsonObject> FileObject = MakeScaffoldFileObject(ResolvedScaffoldDirectory, FileName, true, bIncludeFileText, MaxPreviewChars);
+					if (FileObject->GetBoolField(TEXT("missing")))
+					{
+						MissingRequiredFiles.Add(MakeShared<FJsonValueString>(FileName));
+					}
+					Files.Add(MakeShared<FJsonValueObject>(FileObject));
 				}
-				Files.Add(MakeShared<FJsonValueObject>(FileObject));
+				Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("README.md"), false, bIncludeFileText, MaxPreviewChars)));
 			}
-			Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("ChatCommand.patch.cpp"), false, bIncludeFileText, MaxPreviewChars)));
-			Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("LegacyToolDefinition.legacy.cpp"), false, bIncludeFileText, MaxPreviewChars)));
-			Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("LegacyExecuteToolHandler.legacy.cpp"), false, bIncludeFileText, MaxPreviewChars)));
+			else
+			{
+				static const TCHAR* RequiredFiles[] = {
+					TEXT("README.md"),
+					TEXT("ToolRegistrar.patch.cpp"),
+					TEXT("ToolRegistrarCall.patch.cpp"),
+					TEXT("CategoryHandlerFunction.patch.cpp"),
+					TEXT("CategoryDispatcherBranch.patch.cpp"),
+					TEXT("ToolRegistryPatch.json"),
+					TEXT("TestRequest.json"),
+					TEXT("IntegrationChecklist.md")
+				};
+				for (const TCHAR* FileName : RequiredFiles)
+				{
+					TSharedPtr<FJsonObject> FileObject = MakeScaffoldFileObject(ResolvedScaffoldDirectory, FileName, true, bIncludeFileText, MaxPreviewChars);
+					if (FileObject->GetBoolField(TEXT("missing")))
+					{
+						MissingRequiredFiles.Add(MakeShared<FJsonValueString>(FileName));
+					}
+					Files.Add(MakeShared<FJsonValueObject>(FileObject));
+				}
+				Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("ChatCommand.patch.cpp"), false, bIncludeFileText, MaxPreviewChars)));
+				Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("LegacyToolDefinition.legacy.cpp"), false, bIncludeFileText, MaxPreviewChars)));
+				Files.Add(MakeShared<FJsonValueObject>(MakeScaffoldFileObject(ResolvedScaffoldDirectory, TEXT("LegacyExecuteToolHandler.legacy.cpp"), false, bIncludeFileText, MaxPreviewChars)));
+			}
 
 			FString ToolName = RequestedToolName;
 			FString TestRequestFailure;
 			TSharedPtr<FJsonObject> TestRequestObject;
-			const bool bValidTestRequest = TryReadToolNameFromTestRequest(
-				FPaths::Combine(ResolvedScaffoldDirectory, TEXT("TestRequest.json")),
-				ToolName,
-				TestRequestObject,
-				TestRequestFailure);
+			bool bValidTestRequest = false;
+			if (bPythonTrack)
+			{
+				if (bToolJsonParses && ToolName.IsEmpty())
+				{
+					ToolJsonObject->TryGetStringField(TEXT("name"), ToolName);
+					ToolName = ToolName.TrimStartAndEnd();
+				}
+			}
+			else
+			{
+				bValidTestRequest = TryReadToolNameFromTestRequest(
+					FPaths::Combine(ResolvedScaffoldDirectory, TEXT("TestRequest.json")),
+					ToolName,
+					TestRequestObject,
+					TestRequestFailure);
+			}
 
 			ResultObject->SetStringField(TEXT("toolName"), ToolName);
 			ResultObject->SetBoolField(TEXT("validTestRequest"), bValidTestRequest);
+			ResultObject->SetBoolField(TEXT("testRequestRequired"), !bPythonTrack);
 			if (!TestRequestFailure.IsEmpty())
 			{
 				ResultObject->SetStringField(TEXT("testRequestIssue"), TestRequestFailure);
@@ -275,56 +358,80 @@ namespace UnrealMcp
 
 			TArray<TSharedPtr<FJsonValue>> PatchValidations;
 			TArray<TSharedPtr<FJsonValue>> ReadinessIssues;
+			TArray<TSharedPtr<FJsonValue>> PythonReadinessIssues;
+			TArray<TSharedPtr<FJsonValue>> CppReadinessIssues;
 			bool bPatchesSafe = true;
-			auto AddReadinessIssue = [&ReadinessIssues](const FString& Code, const FString& Message)
+			auto AddReadinessIssue = [
+				&ReadinessIssues,
+				&PythonReadinessIssues,
+				&CppReadinessIssues
+			](const FString& Track, const FString& Code, const FString& Message)
 			{
 				TSharedPtr<FJsonObject> IssueObject = MakeShared<FJsonObject>();
 				IssueObject->SetStringField(TEXT("severity"), TEXT("error"));
+				IssueObject->SetStringField(TEXT("implementationTrack"), Track);
 				IssueObject->SetStringField(TEXT("code"), Code);
 				IssueObject->SetStringField(TEXT("message"), Message);
-				ReadinessIssues.Add(MakeShared<FJsonValueObject>(IssueObject));
+				TSharedPtr<FJsonValue> IssueValue = MakeShared<FJsonValueObject>(IssueObject);
+				ReadinessIssues.Add(IssueValue);
+				if (Track == TEXT("python"))
+				{
+					PythonReadinessIssues.Add(IssueValue);
+				}
+				else
+				{
+					CppReadinessIssues.Add(IssueValue);
+				}
 			};
 
-			for (const TCHAR* PatchFileName : RequiredPatchFiles)
+			if (!bPythonTrack)
 			{
-				const FString PatchPath = FPaths::Combine(ResolvedScaffoldDirectory, PatchFileName);
-				FString PatchText;
-				if (!FFileHelper::LoadFileToString(PatchText, *PatchPath))
+				for (const TCHAR* PatchFileName : RequiredPatchFiles)
 				{
-					bPatchesSafe = false;
-					AddReadinessIssue(TEXT("missing_patch_file"), FString::Printf(TEXT("Required patch file is missing or unreadable: %s"), PatchFileName));
-					continue;
-				}
+					const FString PatchPath = FPaths::Combine(ResolvedScaffoldDirectory, PatchFileName);
+					FString PatchText;
+					if (!FFileHelper::LoadFileToString(PatchText, *PatchPath))
+					{
+						bPatchesSafe = false;
+						AddReadinessIssue(TEXT("cpp"), TEXT("missing_patch_file"), FString::Printf(TEXT("Required patch file is missing or unreadable: %s"), PatchFileName));
+						continue;
+					}
 
-				TSharedPtr<FJsonObject> ValidationObject = ValidateCppSnippetText(PatchText, PatchFileName, ToolName);
-				PatchValidations.Add(MakeShared<FJsonValueObject>(ValidationObject));
-				if (!ValidationObject->GetBoolField(TEXT("safe")))
-				{
-					bPatchesSafe = false;
-					AddReadinessIssue(TEXT("unsafe_patch_file"), FString::Printf(TEXT("Patch file failed static validation: %s"), PatchFileName));
+					TSharedPtr<FJsonObject> ValidationObject = ValidateCppSnippetText(PatchText, PatchFileName, ToolName);
+					PatchValidations.Add(MakeShared<FJsonValueObject>(ValidationObject));
+					if (!ValidationObject->GetBoolField(TEXT("safe")))
+					{
+						bPatchesSafe = false;
+						AddReadinessIssue(TEXT("cpp"), TEXT("unsafe_patch_file"), FString::Printf(TEXT("Patch file failed static validation: %s"), PatchFileName));
+					}
 				}
 			}
 
 			const FString RegistryPatchPath = FPaths::Combine(ResolvedScaffoldDirectory, TEXT("ToolRegistryPatch.json"));
 			TSharedPtr<FJsonObject> RegistryPatchObject;
 			FString RegistryPatchFailure;
-			bool bRegistryPatchValid = LoadJsonObjectFromFile(RegistryPatchPath, RegistryPatchObject, RegistryPatchFailure) && RegistryPatchObject.IsValid();
-			if (!bRegistryPatchValid)
+			bool bRegistryPatchValid = false;
+			if (!bPythonTrack)
 			{
-				AddReadinessIssue(TEXT("invalid_registry_patch"), RegistryPatchFailure.IsEmpty() ? TEXT("ToolRegistryPatch.json is missing or invalid JSON.") : RegistryPatchFailure);
-			}
-			else
-			{
-				FString RegistryPatchToolName;
-				RegistryPatchObject->TryGetStringField(TEXT("name"), RegistryPatchToolName);
-				if (!ToolName.IsEmpty() && RegistryPatchToolName != ToolName)
+				bRegistryPatchValid = LoadJsonObjectFromFile(RegistryPatchPath, RegistryPatchObject, RegistryPatchFailure) && RegistryPatchObject.IsValid();
+				if (!bRegistryPatchValid)
 				{
-					bRegistryPatchValid = false;
-					AddReadinessIssue(
-						TEXT("registry_tool_name_mismatch"),
-						FString::Printf(TEXT("ToolRegistryPatch.json name '%s' does not match scaffold toolName '%s'."), *RegistryPatchToolName, *ToolName));
+					AddReadinessIssue(TEXT("cpp"), TEXT("invalid_registry_patch"), RegistryPatchFailure.IsEmpty() ? TEXT("ToolRegistryPatch.json is missing or invalid JSON.") : RegistryPatchFailure);
 				}
-				ResultObject->SetObjectField(TEXT("toolRegistryPatch"), RegistryPatchObject);
+				else
+				{
+					FString RegistryPatchToolName;
+					RegistryPatchObject->TryGetStringField(TEXT("name"), RegistryPatchToolName);
+					if (!ToolName.IsEmpty() && RegistryPatchToolName != ToolName)
+					{
+						bRegistryPatchValid = false;
+						AddReadinessIssue(
+							TEXT("cpp"),
+							TEXT("registry_tool_name_mismatch"),
+							FString::Printf(TEXT("ToolRegistryPatch.json name '%s' does not match scaffold toolName '%s'."), *RegistryPatchToolName, *ToolName));
+					}
+					ResultObject->SetObjectField(TEXT("toolRegistryPatch"), RegistryPatchObject);
+				}
 			}
 
 			FString RequestedSchemaJson;
@@ -355,14 +462,109 @@ namespace UnrealMcp
 				}
 			}
 
+			bool bPythonToolJsonValid = true;
+			bool bPythonMainPyExists = true;
+			bool bPythonSchemaCompatible = true;
+			bool bPythonShaValid = true;
+			if (bPythonTrack)
+			{
+				bPythonToolJsonValid = bToolJsonParses;
+				bPythonMainPyExists = FPaths::FileExists(MainPyPath);
+				ResultObject->SetBoolField(TEXT("validToolJson"), bPythonToolJsonValid);
+				ResultObject->SetBoolField(TEXT("mainPyExists"), bPythonMainPyExists);
+				if (!bPythonToolJsonValid)
+				{
+					AddReadinessIssue(TEXT("python"), TEXT("invalid_tool_json"), ToolJsonFailure.IsEmpty() ? TEXT("tool.json is missing or invalid JSON.") : ToolJsonFailure);
+				}
+				else
+				{
+					ResultObject->SetObjectField(TEXT("toolJson"), ToolJsonObject);
+				}
+				if (!bPythonMainPyExists)
+				{
+					AddReadinessIssue(TEXT("python"), TEXT("missing_main_py"), TEXT("main.py is required for Python user tools."));
+				}
+
+				if (bPythonToolJsonValid)
+				{
+					const TSharedPtr<FJsonObject>* InputSchemaObject = nullptr;
+					if (!ToolJsonObject->TryGetObjectField(TEXT("inputSchema"), InputSchemaObject) || !InputSchemaObject || !(*InputSchemaObject).IsValid())
+					{
+						bPythonSchemaCompatible = false;
+						ResultObject->SetBoolField(TEXT("schemaCompatible"), false);
+						ResultObject->SetStringField(TEXT("schemaReason"), TEXT("tool.json inputSchema is missing or not an object."));
+						AddReadinessIssue(TEXT("python"), TEXT("invalid_input_schema"), TEXT("tool.json inputSchema is missing or not an object."));
+					}
+					else
+					{
+						TArray<TSharedPtr<FJsonValue>> SchemaIssues;
+						FString SchemaReason;
+						TSharedPtr<FJsonObject> NormalizedSchema;
+						bPythonSchemaCompatible = AnalyzeOpenAiSchemaCompatibility(*InputSchemaObject, SchemaIssues, SchemaReason, NormalizedSchema);
+						ResultObject->SetBoolField(TEXT("schemaCompatible"), bPythonSchemaCompatible);
+						ResultObject->SetStringField(TEXT("schemaReason"), SchemaReason);
+						ResultObject->SetStringField(TEXT("schemaSource"), TEXT("tool.json.inputSchema"));
+						ResultObject->SetArrayField(TEXT("schemaIssues"), SchemaIssues);
+						if (NormalizedSchema.IsValid())
+						{
+							ResultObject->SetObjectField(TEXT("normalizedSchema"), NormalizedSchema);
+						}
+						if (!bPythonSchemaCompatible)
+						{
+							AddReadinessIssue(TEXT("python"), TEXT("invalid_input_schema"), SchemaReason.IsEmpty() ? TEXT("tool.json inputSchema is not OpenAI-compatible.") : SchemaReason);
+						}
+					}
+
+					FString PythonHandlerSha256;
+					if (!ToolJsonObject->TryGetStringField(TEXT("pythonHandlerSha256"), PythonHandlerSha256))
+					{
+						bPythonShaValid = false;
+					}
+					PythonHandlerSha256 = PythonHandlerSha256.TrimStartAndEnd();
+					ResultObject->SetStringField(TEXT("pythonHandlerSha256"), PythonHandlerSha256);
+					if (!InspectScaffoldIsLowerHexSha256(PythonHandlerSha256))
+					{
+						bPythonShaValid = false;
+						AddReadinessIssue(TEXT("python"), TEXT("invalid_python_handler_sha256"), TEXT("tool.json requires lowercase 64-character pythonHandlerSha256."));
+					}
+				}
+				else
+				{
+					bPythonSchemaCompatible = false;
+					bPythonShaValid = false;
+				}
+			}
+
 			const bool bToolListed = !ToolName.IsEmpty() && FindToolDefinitionByName(ToolsArray, ToolName).IsValid();
+			const bool bReadyForReload = bPythonTrack && bPythonToolJsonValid && bPythonMainPyExists && bPythonSchemaCompatible && bPythonShaValid;
+			const bool bReadyForApply = !bPythonTrack && MissingRequiredFiles.Num() == 0 && bValidTestRequest && bPatchesSafe && bRegistryPatchValid;
+			TSharedPtr<FJsonObject> ReadinessIssuesByTrack = MakeShared<FJsonObject>();
+			ReadinessIssuesByTrack->SetArrayField(TEXT("python"), PythonReadinessIssues);
+			ReadinessIssuesByTrack->SetArrayField(TEXT("cpp"), CppReadinessIssues);
+			TArray<TSharedPtr<FJsonValue>> NextActions;
+			if (bPythonTrack)
+			{
+				AddInspectScaffoldNextAction(NextActions, TEXT("unreal.mcp_user_registry_reload"), TEXT("Reload project-local Python user tools."));
+				AddInspectScaffoldNextAction(NextActions, TEXT("unreal.mcp_user_tool_smoke"), TEXT("Smoke-test the loaded user Python tool."));
+				ResultObject->SetStringField(TEXT("nextAction"), TEXT("unreal.mcp_user_registry_reload -> unreal.mcp_user_tool_smoke"));
+			}
+			else
+			{
+				AddInspectScaffoldNextAction(NextActions, TEXT("unreal.mcp_apply_scaffold"), TEXT("Apply the core C++ scaffold as a developer-only operation."));
+				AddInspectScaffoldNextAction(NextActions, TEXT("unreal.mcp_build_editor"), TEXT("Build the editor after applying the scaffold."));
+				AddInspectScaffoldNextAction(NextActions, TEXT("editor_restart"), TEXT("Restart the editor so the compiled core tool is visible."));
+				ResultObject->SetStringField(TEXT("nextAction"), TEXT("unreal.mcp_apply_scaffold -> unreal.mcp_build_editor -> editor_restart"));
+			}
 			ResultObject->SetBoolField(TEXT("toolListed"), bToolListed);
 			ResultObject->SetBoolField(TEXT("patchesSafe"), bPatchesSafe);
 			ResultObject->SetBoolField(TEXT("registryPatchValid"), bRegistryPatchValid);
-			ResultObject->SetBoolField(TEXT("readyForApply"), MissingRequiredFiles.Num() == 0 && bValidTestRequest && bPatchesSafe && bRegistryPatchValid);
+			ResultObject->SetBoolField(TEXT("readyForReload"), bReadyForReload);
+			ResultObject->SetBoolField(TEXT("readyForApply"), bReadyForApply);
 			ResultObject->SetArrayField(TEXT("missingRequiredFiles"), MissingRequiredFiles);
 			ResultObject->SetArrayField(TEXT("patchValidations"), PatchValidations);
 			ResultObject->SetArrayField(TEXT("readinessIssues"), ReadinessIssues);
+			ResultObject->SetObjectField(TEXT("readinessIssuesByTrack"), ReadinessIssuesByTrack);
+			ResultObject->SetArrayField(TEXT("nextActions"), NextActions);
 			ResultObject->SetArrayField(TEXT("files"), Files);
 			return ResultObject;
 		}
@@ -405,7 +607,11 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> ScaffoldObject = InspectMcpScaffoldDirectory(CandidateDirectory, FString(), ToolsArray, bIncludeFileText, MaxPreviewChars);
 				FString ToolName;
 				ScaffoldObject->TryGetStringField(TEXT("toolName"), ToolName);
-				const bool bReadyForApply = ScaffoldObject->GetBoolField(TEXT("readyForApply"));
+				FString ImplementationTrack;
+				ScaffoldObject->TryGetStringField(TEXT("implementationTrack"), ImplementationTrack);
+				const bool bReadyForTrack = ImplementationTrack.Equals(TEXT("python"), ESearchCase::IgnoreCase)
+					? ScaffoldObject->GetBoolField(TEXT("readyForReload"))
+					: ScaffoldObject->GetBoolField(TEXT("readyForApply"));
 
 				if (!ToolNameFilter.TrimStartAndEnd().IsEmpty()
 					&& !ToolName.Contains(ToolNameFilter.TrimStartAndEnd(), ESearchCase::IgnoreCase)
@@ -416,9 +622,9 @@ namespace UnrealMcp
 					continue;
 				}
 
-				if (bReadyOnly && !bReadyForApply)
+				if (bReadyOnly && !bReadyForTrack)
 				{
-					ScaffoldObject->SetStringField(TEXT("skipReason"), TEXT("readyOnly=true and scaffold is not ready for apply."));
+					ScaffoldObject->SetStringField(TEXT("skipReason"), TEXT("readyOnly=true and scaffold is not ready for its implementation track."));
 					SkippedObjects.Add(MakeShared<FJsonValueObject>(ScaffoldObject));
 					continue;
 				}
@@ -470,14 +676,21 @@ namespace UnrealMcp
 			{
 				InspectionObject->SetStringField(TEXT("scaffoldResolutionWarning"), ScaffoldResolution.Warning);
 			}
-			const bool bReadyForApply = InspectionObject->GetBoolField(TEXT("readyForApply"));
+			FString ImplementationTrack;
+			InspectionObject->TryGetStringField(TEXT("implementationTrack"), ImplementationTrack);
+			const bool bPythonTrack = ImplementationTrack.Equals(TEXT("python"), ESearchCase::IgnoreCase);
+			const bool bReady = bPythonTrack
+				? InspectionObject->GetBoolField(TEXT("readyForReload"))
+				: InspectionObject->GetBoolField(TEXT("readyForApply"));
 			FString InspectedToolName;
 			InspectionObject->TryGetStringField(TEXT("toolName"), InspectedToolName);
 
 			return MakeExecutionResult(
-				FString::Printf(TEXT("Inspected MCP scaffold %s. readyForApply=%s."),
+				FString::Printf(TEXT("Inspected MCP scaffold %s. implementationTrack=%s %s=%s."),
 					InspectedToolName.IsEmpty() ? *InspectionObject->GetStringField(TEXT("toolId")) : *InspectedToolName,
-					bReadyForApply ? TEXT("true") : TEXT("false")),
+					ImplementationTrack.IsEmpty() ? TEXT("cpp") : *ImplementationTrack,
+					bPythonTrack ? TEXT("readyForReload") : TEXT("readyForApply"),
+					bReady ? TEXT("true") : TEXT("false")),
 					InspectionObject,
 					false);
 			}

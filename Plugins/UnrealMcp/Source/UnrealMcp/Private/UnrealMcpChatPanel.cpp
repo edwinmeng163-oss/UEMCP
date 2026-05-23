@@ -26,6 +26,8 @@
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpUserToolLock.h"
+#include "UnrealMcpUserToolRegistry.h"
 #include "Widgets/Images/SThrobber.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -45,6 +47,10 @@
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "UnrealMcpChatPanel"
 
@@ -241,6 +247,11 @@ namespace UnrealMcpChat
 
 		Lines.Add(Header);
 
+		if (Entry.Type == EUnrealMcpChatEntryType::Tool && !Entry.ToolDescription.IsEmpty())
+		{
+			Lines.Add(FString::Printf(TEXT("Description: %s"), *Entry.ToolDescription));
+		}
+
 		if (!Entry.ToolSummary.IsEmpty())
 		{
 			Lines.Add(Entry.ToolSummary);
@@ -249,6 +260,12 @@ namespace UnrealMcpChat
 		if (!Entry.Body.IsEmpty())
 		{
 			Lines.Add(Entry.Body);
+		}
+
+		if (!Entry.WorkflowStepSummary.IsEmpty())
+		{
+			Lines.Add(TEXT("Workflow steps:"));
+			Lines.Add(Entry.WorkflowStepSummary);
 		}
 
 		if (!Entry.Details.IsEmpty())
@@ -287,6 +304,235 @@ namespace UnrealMcpChat
 			return Object;
 		}
 		return nullptr;
+	}
+
+	struct FToolLogMetadata
+	{
+		FString ToolName;
+		FString Title;
+		FString Description;
+		FString Category;
+	};
+
+	FString NormalizeToolLogInlineText(FString Text)
+	{
+		Text.ReplaceInline(TEXT("\r"), TEXT(" "));
+		Text.ReplaceInline(TEXT("\n"), TEXT(" "));
+		Text = Text.TrimStartAndEnd();
+		while (Text.Contains(TEXT("  ")))
+		{
+			Text.ReplaceInline(TEXT("  "), TEXT(" "));
+		}
+		return Text;
+	}
+
+	FString ClampToolLogInlineText(const FString& Text, int32 MaxChars)
+	{
+		const FString Normalized = NormalizeToolLogInlineText(Text);
+		if (Normalized.Len() <= MaxChars)
+		{
+			return Normalized;
+		}
+		return Normalized.Left(FMath::Max(0, MaxChars - 3)) + TEXT("...");
+	}
+
+	FString PickToolDescription(const FString& ToolName, const FString& Title, const FString& Description)
+	{
+		const FString CleanDescription = NormalizeToolLogInlineText(Description);
+		if (!CleanDescription.IsEmpty())
+		{
+			return CleanDescription;
+		}
+
+		const FString CleanTitle = NormalizeToolLogInlineText(Title);
+		if (!CleanTitle.IsEmpty() && !CleanTitle.Equals(ToolName, ESearchCase::CaseSensitive))
+		{
+			return CleanTitle;
+		}
+
+		return FString();
+	}
+
+	FToolLogMetadata ResolveToolLogMetadata(const FString& ToolName)
+	{
+		FToolLogMetadata Metadata;
+		Metadata.ToolName = ToolName;
+
+		if (const UnrealMcp::FToolRegistryEntry* RegistryEntry = UnrealMcp::FindToolRegistryEntry(ToolName))
+		{
+			Metadata.Title = RegistryEntry->Title;
+			Metadata.Description = PickToolDescription(ToolName, RegistryEntry->Title, RegistryEntry->Description);
+			Metadata.Category = RegistryEntry->Category;
+			if (Metadata.Category.IsEmpty())
+			{
+				Metadata.Category = RegistryEntry->Policy.Category;
+			}
+			return Metadata;
+		}
+
+		if (ToolName.StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+		{
+			UnrealMcp::UserToolLock::FSharedGuard UserRegistryGuard;
+			if (const UnrealMcp::UserRegistry::FUserToolEntry* UserToolEntry = UnrealMcp::UserRegistry::FindUserTool(ToolName))
+			{
+				if (UserToolEntry->ToolJson.IsValid())
+				{
+					UserToolEntry->ToolJson->TryGetStringField(TEXT("title"), Metadata.Title);
+					FString ToolJsonDescription;
+					UserToolEntry->ToolJson->TryGetStringField(TEXT("description"), ToolJsonDescription);
+					UserToolEntry->ToolJson->TryGetStringField(TEXT("category"), Metadata.Category);
+					Metadata.Description = PickToolDescription(ToolName, Metadata.Title, ToolJsonDescription);
+				}
+				if (Metadata.Category.IsEmpty())
+				{
+					Metadata.Category = TEXT("user");
+				}
+			}
+		}
+
+		return Metadata;
+	}
+
+	FString ReadWorkflowStepStringField(const FJsonObject& StepObject, const FString& FieldName)
+	{
+		FString Value;
+		StepObject.TryGetStringField(FieldName, Value);
+		return NormalizeToolLogInlineText(Value);
+	}
+
+	FString MakeWorkflowStepSummaryLine(const FJsonObject& StepObject, int32 StepIndex)
+	{
+		FString StepName = ReadWorkflowStepStringField(StepObject, TEXT("name"));
+		if (StepName.IsEmpty())
+		{
+			StepName = FString::Printf(TEXT("step_%d"), StepIndex + 1);
+		}
+
+		const FString StepTool = ReadWorkflowStepStringField(StepObject, TEXT("tool"));
+		FString Status = ReadWorkflowStepStringField(StepObject, TEXT("status"));
+		if (Status.IsEmpty())
+		{
+			bool bSkipped = false;
+			StepObject.TryGetBoolField(TEXT("skip"), bSkipped);
+			Status = bSkipped ? TEXT("skipped") : TEXT("requested");
+		}
+
+		const FToolLogMetadata StepMetadata = ResolveToolLogMetadata(StepTool);
+		const FString RiskLevel = ReadWorkflowStepStringField(StepObject, TEXT("riskLevel"));
+		FString Preview = ReadWorkflowStepStringField(StepObject, TEXT("error"));
+		FString PreviewLabel = TEXT("error");
+		if (Preview.IsEmpty())
+		{
+			Preview = ReadWorkflowStepStringField(StepObject, TEXT("policyBlockReason"));
+			PreviewLabel = TEXT("error");
+		}
+		if (Preview.IsEmpty())
+		{
+			Preview = ReadWorkflowStepStringField(StepObject, TEXT("textPreview"));
+			PreviewLabel = TEXT("preview");
+		}
+
+		TArray<FString> Parts;
+		Parts.Add(FString::Printf(TEXT("%d. %s"), StepIndex + 1, *StepName));
+		if (!StepTool.IsEmpty())
+		{
+			Parts.Add(FString::Printf(TEXT("tool: %s"), *StepTool));
+		}
+		if (!StepMetadata.Description.IsEmpty())
+		{
+			Parts.Add(FString::Printf(TEXT("description: %s"), *ClampToolLogInlineText(StepMetadata.Description, 220)));
+		}
+		Parts.Add(FString::Printf(TEXT("status: %s"), *Status));
+		if (!RiskLevel.IsEmpty())
+		{
+			Parts.Add(FString::Printf(TEXT("risk: %s"), *RiskLevel));
+		}
+		if (!Preview.IsEmpty())
+		{
+			Parts.Add(FString::Printf(TEXT("%s: %s"), *PreviewLabel, *ClampToolLogInlineText(Preview, 260)));
+		}
+
+		return FString::Join(Parts, TEXT(" | "));
+	}
+
+	FString BuildWorkflowStepSummaryFromArray(const TArray<TSharedPtr<FJsonValue>>* StepsArray)
+	{
+		if (!StepsArray || StepsArray->Num() == 0)
+		{
+			return FString();
+		}
+
+		TArray<FString> Lines;
+		Lines.Reserve(StepsArray->Num());
+		for (int32 StepIndex = 0; StepIndex < StepsArray->Num(); ++StepIndex)
+		{
+			const TSharedPtr<FJsonValue>& StepValue = (*StepsArray)[StepIndex];
+			if (!StepValue.IsValid() || StepValue->Type != EJson::Object || !StepValue->AsObject().IsValid())
+			{
+				Lines.Add(FString::Printf(TEXT("%d. invalid step | status: failed | error: Step must be a JSON object."), StepIndex + 1));
+				continue;
+			}
+			Lines.Add(MakeWorkflowStepSummaryLine(*StepValue->AsObject(), StepIndex));
+		}
+
+		return FString::Join(Lines, TEXT("\n"));
+	}
+
+	FString BuildWorkflowStepSummaryFromArguments(const FString& ToolName, const FString& ArgumentsJson)
+	{
+		if (!ToolName.Equals(TEXT("unreal.workflow_run"), ESearchCase::CaseSensitive))
+		{
+			return FString();
+		}
+
+		TSharedPtr<FJsonObject> ArgumentsObject = ParseJsonObjectString(ArgumentsJson);
+		if (!ArgumentsObject.IsValid())
+		{
+			return FString();
+		}
+
+		FString WorkflowJson;
+		if (ArgumentsObject->TryGetStringField(TEXT("workflowJson"), WorkflowJson) && !WorkflowJson.TrimStartAndEnd().IsEmpty())
+		{
+			if (TSharedPtr<FJsonObject> WorkflowObject = ParseJsonObjectString(WorkflowJson))
+			{
+				ArgumentsObject = WorkflowObject;
+			}
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* StepsArray = nullptr;
+		if (!ArgumentsObject->TryGetArrayField(TEXT("steps"), StepsArray))
+		{
+			return FString();
+		}
+		return BuildWorkflowStepSummaryFromArray(StepsArray);
+	}
+
+	bool IsWorkflowRunStructuredContent(const TSharedPtr<FJsonObject>& StructuredContent)
+	{
+		if (!StructuredContent.IsValid())
+		{
+			return false;
+		}
+
+		FString Action;
+		return StructuredContent->TryGetStringField(TEXT("action"), Action)
+			&& Action.Equals(TEXT("workflow_run"), ESearchCase::CaseSensitive);
+	}
+
+	FString BuildWorkflowStepSummaryFromStructuredContent(const TSharedPtr<FJsonObject>& StructuredContent)
+	{
+		if (!IsWorkflowRunStructuredContent(StructuredContent))
+		{
+			return FString();
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* StepsArray = nullptr;
+		if (!StructuredContent->TryGetArrayField(TEXT("steps"), StepsArray))
+		{
+			return FString();
+		}
+		return BuildWorkflowStepSummaryFromArray(StepsArray);
 	}
 
 	FString JsonValueToSummaryString(const TSharedPtr<FJsonValue>& Value)
@@ -3196,6 +3442,15 @@ void SUnrealMcpChatPanel::UpdateToolEntryWithResult(
 			*UnrealMcpChat::JsonObjectToPrettyString(Result.StructuredContent));
 	}
 
+	if (UnrealMcpChat::IsWorkflowRunStructuredContent(Result.StructuredContent))
+	{
+		const FString WorkflowStepSummary = UnrealMcpChat::BuildWorkflowStepSummaryFromStructuredContent(Result.StructuredContent);
+		if (!WorkflowStepSummary.IsEmpty())
+		{
+			Entry->WorkflowStepSummary = WorkflowStepSummary;
+		}
+	}
+
 	UnrealMcpChat::UpdateToolSummaryFromTemplate(*Entry, ArgumentsJson, Result.StructuredContent);
 
 	InvalidateEntryWidgets();
@@ -3551,7 +3806,15 @@ TSharedPtr<FUnrealMcpChatEntry> SUnrealMcpChatPanel::AppendToolCard(const FStrin
 	Entry->ToolCallId = ToolCallId;
 	Entry->Body = TEXT("Running...");
 	Entry->bIsPending = true;
+	const UnrealMcpChat::FToolLogMetadata ToolMetadata = UnrealMcpChat::ResolveToolLogMetadata(ToolName);
+	Entry->ToolDescription = ToolMetadata.Description;
+	Entry->ToolCategory = ToolMetadata.Category;
 	UnrealMcpChat::ApplyToolPolicyMetadata(*Entry);
+	if (Entry->ToolCategory.IsEmpty() && !ToolMetadata.Category.IsEmpty())
+	{
+		Entry->ToolCategory = ToolMetadata.Category;
+	}
+	Entry->WorkflowStepSummary = UnrealMcpChat::BuildWorkflowStepSummaryFromArguments(ToolName, ArgumentsJson);
 
 	Entries.Add(Entry);
 	if (!ToolCallId.IsEmpty())
@@ -3798,6 +4061,23 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 								SNew(STextBlock)
 								.Visibility_Lambda([Entry]()
 								{
+									return Entry->ToolDescription.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+								})
+								.Font(FAppStyle::GetFontStyle("SmallFont"))
+								.ColorAndOpacity(FLinearColor(0.78f, 0.80f, 0.84f, 1.0f))
+								.AutoWrapText(true)
+								.Text_Lambda([Entry]()
+								{
+									return FText::FromString(Entry->ToolDescription);
+								})
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+							[
+								SNew(STextBlock)
+								.Visibility_Lambda([Entry]()
+								{
 									return Entry->ToolSummary.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
 								})
 								.Font(FAppStyle::GetFontStyle("NormalFontBold"))
@@ -3826,6 +4106,38 @@ TSharedRef<SWidget> SUnrealMcpChatPanel::BuildEntryWidget(const TSharedPtr<FUnre
 										return FText::FromString(Entry->Body);
 									})),
 									FAppStyle::GetFontStyle("NormalFont"))
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+							[
+								SNew(SBox)
+								.Visibility_Lambda([Entry]()
+								{
+									return Entry->WorkflowStepSummary.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+								})
+								[
+									SNew(SVerticalBox)
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									[
+										SNew(STextBlock)
+										.Font(FAppStyle::GetFontStyle("SmallFont"))
+										.ColorAndOpacity(FLinearColor(0.78f, 0.80f, 0.84f, 1.0f))
+										.Text(LOCTEXT("WorkflowStepsLabel", "Workflow steps"))
+									]
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									.Padding(0.0f, 3.0f, 0.0f, 0.0f)
+									[
+										UnrealMcpChat::MakeSelectableReadOnlyText(
+											TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([Entry]()
+											{
+												return FText::FromString(Entry->WorkflowStepSummary);
+											})),
+											FAppStyle::GetFontStyle("SmallFont"))
+									]
+								]
 							]
 							+ SVerticalBox::Slot()
 							.AutoHeight()
@@ -4678,7 +4990,9 @@ void SUnrealMcpChatPanel::LoadHistory()
 		const bool bLoadedToolRequiresWrite = EntryObject->TryGetBoolField(TEXT("tool_requires_write"), Entry->bToolRequiresWrite);
 		const bool bLoadedToolRiskLevel = EntryObject->TryGetStringField(TEXT("tool_risk_level"), Entry->ToolRiskLevel);
 		const bool bLoadedToolCategory = EntryObject->TryGetStringField(TEXT("tool_category"), Entry->ToolCategory);
+		const bool bLoadedToolDescription = EntryObject->TryGetStringField(TEXT("tool_description"), Entry->ToolDescription);
 		EntryObject->TryGetStringField(TEXT("tool_summary"), Entry->ToolSummary);
+		EntryObject->TryGetStringField(TEXT("workflow_step_summary"), Entry->WorkflowStepSummary);
 		EntryObject->TryGetBoolField(TEXT("task_atlas_can_rate"), Entry->bCanRateTask);
 		EntryObject->TryGetStringField(TEXT("task_atlas_task_id"), Entry->TaskAtlasTaskId);
 		EntryObject->TryGetStringField(TEXT("task_atlas_rating"), Entry->TaskAtlasRating);
@@ -4686,6 +5000,10 @@ void SUnrealMcpChatPanel::LoadHistory()
 			&& (!bLoadedToolRequiresWrite || !bLoadedToolRiskLevel || !bLoadedToolCategory))
 		{
 			UnrealMcpChat::ApplyToolPolicyMetadata(*Entry);
+		}
+		if (Entry->Type == EUnrealMcpChatEntryType::Tool && !bLoadedToolDescription)
+		{
+			Entry->ToolDescription = UnrealMcpChat::ResolveToolLogMetadata(Entry->Title).Description;
 		}
 
 		Entries.Add(Entry);
@@ -4722,7 +5040,9 @@ void SUnrealMcpChatPanel::SaveHistory() const
 		EntryObject->SetBoolField(TEXT("tool_requires_write"), Entry->bToolRequiresWrite);
 		EntryObject->SetStringField(TEXT("tool_risk_level"), Entry->ToolRiskLevel);
 		EntryObject->SetStringField(TEXT("tool_category"), Entry->ToolCategory);
+		EntryObject->SetStringField(TEXT("tool_description"), Entry->ToolDescription);
 		EntryObject->SetStringField(TEXT("tool_summary"), Entry->ToolSummary);
+		EntryObject->SetStringField(TEXT("workflow_step_summary"), Entry->WorkflowStepSummary);
 		EntryObject->SetBoolField(TEXT("task_atlas_can_rate"), Entry->bCanRateTask);
 		EntryObject->SetStringField(TEXT("task_atlas_task_id"), Entry->TaskAtlasTaskId);
 		EntryObject->SetStringField(TEXT("task_atlas_rating"), Entry->TaskAtlasRating);
@@ -4777,5 +5097,145 @@ void SUnrealMcpChatPanel::ResetHistory(bool bAddReadyMessage)
 			TEXT("Ready. Type plain text or /ask to use the AI assistant, /steer <guidance> to guide a running generation, press Stop to cancel, and use /help for direct commands. Tool calls will appear as cards and this transcript is persisted in Saved/UnrealMcp/ChatHistory.json."));
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+namespace
+{
+	const FString ChatPanelToolLogTestPrefix = TEXT("chat_panel_tool_log_");
+	const FString ChatPanelToolLogPassPy = TEXT("def execute(args):\n    return {\"ok\": True, \"dryRun\": args.get(\"dryRun\", False)}\n");
+	const FString ChatPanelToolLogPassSha = TEXT("c0b99179da60b01efa870ef4bfb9e391ae22a1234bf079fb9fc4e7f28c903de0");
+
+	FString ChatPanelToolLogUserToolRoot()
+	{
+		UnrealMcp::UserRegistry::InitializeUserToolRegistry();
+		return UnrealMcp::UserRegistry::GetUserToolsRootDir();
+	}
+
+	FString ChatPanelToolLogToolDir(const FString& ToolId)
+	{
+		return FPaths::Combine(ChatPanelToolLogUserToolRoot(), ToolId);
+	}
+
+	FString ChatPanelToolLogToolName(const FString& ToolId)
+	{
+		return FString::Printf(TEXT("user.%s"), *ToolId);
+	}
+
+	bool ChatPanelToolLogWriteFile(const FString& Path, const FString& Content)
+	{
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+		return FFileHelper::SaveStringToFile(Content, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+
+	bool ChatPanelToolLogWriteUserTool(const FString& ToolId)
+	{
+		const FString ToolName = ChatPanelToolLogToolName(ToolId);
+		const FString ToolDir = ChatPanelToolLogToolDir(ToolId);
+		const FString ToolJson = FString::Printf(
+			TEXT("{\n")
+			TEXT("  \"name\": \"%s\",\n")
+			TEXT("  \"title\": \"Chat Panel Test User Tool\",\n")
+			TEXT("  \"description\": \"Chat panel user description.\",\n")
+			TEXT("  \"pythonHandlerSha256\": \"%s\",\n")
+			TEXT("  \"importAllowlist\": [],\n")
+			TEXT("  \"inputSchema\": {\"type\":\"object\",\"additionalProperties\":true}\n")
+			TEXT("}\n"),
+			*ToolName,
+			*ChatPanelToolLogPassSha);
+
+		return ChatPanelToolLogWriteFile(FPaths::Combine(ToolDir, TEXT("main.py")), ChatPanelToolLogPassPy)
+			&& ChatPanelToolLogWriteFile(FPaths::Combine(ToolDir, TEXT("tool.json")), ToolJson);
+	}
+
+	void ChatPanelToolLogDeleteTestDirs()
+	{
+		const FString Root = ChatPanelToolLogUserToolRoot();
+		TArray<FString> DirectoryNames;
+		IFileManager::Get().FindFiles(DirectoryNames, *FPaths::Combine(Root, TEXT("*")), false, true);
+		for (const FString& DirectoryName : DirectoryNames)
+		{
+			if (DirectoryName.StartsWith(ChatPanelToolLogTestPrefix, ESearchCase::CaseSensitive))
+			{
+				IFileManager::Get().DeleteDirectory(*FPaths::Combine(Root, DirectoryName), false, true);
+			}
+		}
+	}
+
+	void ChatPanelToolLogReloadUserTools()
+	{
+		UnrealMcp::UserToolLock::FExclusiveGuard Guard;
+		UnrealMcp::UserRegistry::ReloadUserToolRegistry(true);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpChatPanelToolLogMetadataTest,
+	"UnrealMcp.ChatPanel.ToolLogMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpChatPanelToolLogMetadataTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	const UnrealMcpChat::FToolLogMetadata CoreMetadata = UnrealMcpChat::ResolveToolLogMetadata(TEXT("unreal.editor_status"));
+	TestEqual(TEXT("core description resolves"), CoreMetadata.Description, TEXT("Returns the current Unreal Editor status, map, selected counts, engine version, and PIE state."));
+	TestEqual(TEXT("core category resolves"), CoreMetadata.Category, TEXT("editor"));
+
+	const UnrealMcpChat::FToolLogMetadata FallbackMetadata = UnrealMcpChat::ResolveToolLogMetadata(TEXT("missing.chat_panel_tool"));
+	TestTrue(TEXT("fallback keeps only tool name"), FallbackMetadata.Description.IsEmpty() && FallbackMetadata.Category.IsEmpty());
+
+	ChatPanelToolLogDeleteTestDirs();
+	ChatPanelToolLogReloadUserTools();
+	const FString ToolId = ChatPanelToolLogTestPrefix + TEXT("metadata");
+	TestTrue(TEXT("user tool writes"), ChatPanelToolLogWriteUserTool(ToolId));
+	ChatPanelToolLogReloadUserTools();
+
+	const UnrealMcpChat::FToolLogMetadata UserMetadata = UnrealMcpChat::ResolveToolLogMetadata(ChatPanelToolLogToolName(ToolId));
+	TestEqual(TEXT("user title resolves"), UserMetadata.Title, TEXT("Chat Panel Test User Tool"));
+	TestEqual(TEXT("user description resolves"), UserMetadata.Description, TEXT("Chat panel user description."));
+	TestEqual(TEXT("user category fallback resolves"), UserMetadata.Category, TEXT("user"));
+
+	ChatPanelToolLogDeleteTestDirs();
+	ChatPanelToolLogReloadUserTools();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpChatPanelWorkflowStepSummaryTest,
+	"UnrealMcp.ChatPanel.WorkflowStepSummary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpChatPanelWorkflowStepSummaryTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+	StructuredContent->SetStringField(TEXT("action"), TEXT("workflow_run"));
+	TArray<TSharedPtr<FJsonValue>> Steps;
+	TSharedPtr<FJsonObject> Step = MakeShared<FJsonObject>();
+	Step->SetStringField(TEXT("name"), TEXT("Check editor"));
+	Step->SetStringField(TEXT("tool"), TEXT("unreal.editor_status"));
+	Step->SetStringField(TEXT("status"), TEXT("completed"));
+	Step->SetStringField(TEXT("riskLevel"), TEXT("read_only"));
+	Step->SetStringField(TEXT("textPreview"), TEXT("Editor is ready."));
+	Steps.Add(MakeShared<FJsonValueObject>(Step));
+	StructuredContent->SetArrayField(TEXT("steps"), Steps);
+
+	const FString StructuredSummary = UnrealMcpChat::BuildWorkflowStepSummaryFromStructuredContent(StructuredContent);
+	TestTrue(TEXT("row contains index and name"), StructuredSummary.Contains(TEXT("1. Check editor")));
+	TestTrue(TEXT("row contains tool"), StructuredSummary.Contains(TEXT("tool: unreal.editor_status")));
+	TestTrue(TEXT("row contains description"), StructuredSummary.Contains(TEXT("description: Returns the current Unreal Editor status")));
+	TestTrue(TEXT("row contains status"), StructuredSummary.Contains(TEXT("status: completed")));
+	TestTrue(TEXT("row contains risk"), StructuredSummary.Contains(TEXT("risk: read_only")));
+	TestTrue(TEXT("row contains preview"), StructuredSummary.Contains(TEXT("preview: Editor is ready.")));
+
+	const FString ArgumentsJson = TEXT("{\"steps\":[{\"name\":\"Run Python user step\",\"tool\":\"execute_python\"}]}");
+	const FString ArgumentSummary = UnrealMcpChat::BuildWorkflowStepSummaryFromArguments(TEXT("unreal.workflow_run"), ArgumentsJson);
+	TestTrue(TEXT("argument rows contain child tool"), ArgumentSummary.Contains(TEXT("tool: execute_python")));
+	TestTrue(TEXT("argument rows default to requested"), ArgumentSummary.Contains(TEXT("status: requested")));
+
+	return true;
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE

@@ -1485,7 +1485,7 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 		{
 			TSharedPtr<FJsonObject> PropertiesObject = MakeShared<FJsonObject>();
 			PropertiesObject->SetObjectField(TEXT("manifestPath"), UnrealMcp::MakeStringProperty(TEXT("Optional project-local manifest path. Defaults to Saved/UnrealMcp/LastExtensionApply.json.")));
-			PropertiesObject->SetObjectField(TEXT("dryRun"), UnrealMcp::MakeBoolProperty(TEXT("Preview rollback without restoring source."), false));
+			PropertiesObject->SetObjectField(TEXT("dryRun"), UnrealMcp::MakeBoolProperty(TEXT("Preview rollback without restoring source."), true));
 			PropertiesObject->SetObjectField(TEXT("force"), UnrealMcp::MakeBoolProperty(TEXT("Restore even if current source hash differs from the apply manifest."), false));
 
 			TSharedPtr<FJsonObject> InputSchema = UnrealMcp::MakeObjectSchema();
@@ -1547,7 +1547,7 @@ void FUnrealMcpModule::AppendToolDefinitions(TArray<TSharedPtr<FJsonValue>>& Too
 			PropertiesObject->SetObjectField(TEXT("toolName"), UnrealMcp::MakeStringProperty(TEXT("Optional toolName filter when manifestPath is empty.")));
 			PropertiesObject->SetObjectField(TEXT("selector"), UnrealMcp::MakeStringProperty(TEXT("Manifest selector when manifestPath is empty: latest or oldest."), TEXT("latest")));
 			PropertiesObject->SetObjectField(TEXT("manifestIndex"), UnrealMcp::MakeNumberProperty(TEXT("Optional zero-based candidate index after filtering/sorting; -1 uses selector."), -1.0));
-			PropertiesObject->SetObjectField(TEXT("dryRun"), UnrealMcp::MakeBoolProperty(TEXT("Preview rollback without restoring source."), false));
+			PropertiesObject->SetObjectField(TEXT("dryRun"), UnrealMcp::MakeBoolProperty(TEXT("Preview rollback without restoring source."), true));
 			PropertiesObject->SetObjectField(TEXT("force"), UnrealMcp::MakeBoolProperty(TEXT("Restore even if current source hash differs from the apply manifest."), false));
 			PropertiesObject->SetObjectField(TEXT("createPreRollbackBackup"), UnrealMcp::MakeBoolProperty(TEXT("Snapshot current project state before a real rollback."), true));
 

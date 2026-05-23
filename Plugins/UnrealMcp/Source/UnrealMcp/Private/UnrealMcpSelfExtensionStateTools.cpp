@@ -1,5 +1,6 @@
 #include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpSelfExtensionInternal.h"
+#include "UnrealMcpExtensionLifecycle.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -10,14 +11,445 @@
 
 namespace UnrealMcp
 {
+	namespace UnrealMcpUserRegistryReloadTool
+	{
+		FUnrealMcpExecutionResult Execute(const FJsonObject& Arguments);
+	}
+
+	namespace RollbackSafety
+	{
+		const TCHAR* CoreRollbackRefusalMessage()
+		{
+			return TEXT("Core rollback is legacy/developer-only. Pass `manifestPath` and `force` explicitly to act on a core manifest.");
+		}
+
+		FString NormalizeRollbackPath(const FString& Path)
+		{
+			FString NormalizedPath = FPaths::ConvertRelativePathToFull(Path);
+			FPaths::NormalizeFilename(NormalizedPath);
+			FPaths::CollapseRelativeDirectories(NormalizedPath);
+			NormalizedPath.RemoveFromEnd(TEXT("/"));
+			return NormalizedPath;
+		}
+
+		FString UserToolsRootForProject(const FString& ProjectDir)
+		{
+			return NormalizeRollbackPath(FPaths::Combine(ProjectDir, UnrealMcp::Extension::UserPyToolsRelativeRoot));
+		}
+
+		bool IsSafeUserToolId(const FString& ToolId, FString& OutFailureReason)
+		{
+			if (ToolId.IsEmpty())
+			{
+				OutFailureReason = TEXT("User tool id is required.");
+				return false;
+			}
+			if (ToolId.Len() > 64)
+			{
+				OutFailureReason = TEXT("User tool id must be 64 characters or fewer.");
+				return false;
+			}
+			if (ToolId.Contains(TEXT("/"), ESearchCase::CaseSensitive)
+				|| ToolId.Contains(TEXT("\\"), ESearchCase::CaseSensitive)
+				|| ToolId.Contains(TEXT(".."), ESearchCase::CaseSensitive)
+				|| ToolId.Contains(TEXT(":"), ESearchCase::CaseSensitive)
+				|| ToolId.StartsWith(TEXT("//"), ESearchCase::CaseSensitive)
+				|| ToolId.StartsWith(TEXT("\\\\"), ESearchCase::CaseSensitive)
+				|| FPaths::IsRelative(ToolId) == false)
+			{
+				OutFailureReason = TEXT("User tool id must be a safe single directory name without slashes, traversal, drives, or UNC paths.");
+				return false;
+			}
+			for (const TCHAR Character : ToolId)
+			{
+				const bool bLowerAlpha = Character >= TEXT('a') && Character <= TEXT('z');
+				const bool bUpperAlpha = Character >= TEXT('A') && Character <= TEXT('Z');
+				const bool bDigit = Character >= TEXT('0') && Character <= TEXT('9');
+				if (!bLowerAlpha && !bUpperAlpha && !bDigit && Character != TEXT('_'))
+				{
+					OutFailureReason = TEXT("User tool id may contain only alphanumeric characters and underscores.");
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool TryExtractUserToolIdFromToolName(const FString& ToolName, FString& OutToolId, FString& OutFailureReason)
+		{
+			OutToolId.Reset();
+			const FString TrimmedToolName = ToolName.TrimStartAndEnd();
+			if (!TrimmedToolName.StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+
+			OutToolId = TrimmedToolName.Mid(5);
+			if (!IsSafeUserToolId(OutToolId, OutFailureReason))
+			{
+				OutFailureReason = FString::Printf(TEXT("Invalid user tool rollback target '%s': %s"), *TrimmedToolName, *OutFailureReason);
+				return false;
+			}
+			return true;
+		}
+
+		void AddNormalizedPath(TArray<FString>& Paths, const FString& Path)
+		{
+			Paths.Add(NormalizeRollbackPath(Path));
+		}
+
+		void CollectDeletionTargets(const FString& Directory, TArray<FString>& OutTargets)
+		{
+			OutTargets.Reset();
+			AddNormalizedPath(OutTargets, Directory);
+
+			TArray<FString> ChildDirectories;
+			TArray<FString> ChildFiles;
+			IFileManager::Get().FindFilesRecursive(ChildDirectories, *Directory, TEXT("*"), false, true);
+			IFileManager::Get().FindFilesRecursive(ChildFiles, *Directory, TEXT("*"), true, false);
+
+			TArray<FString> Children;
+			for (const FString& ChildDirectory : ChildDirectories)
+			{
+				AddNormalizedPath(Children, ChildDirectory);
+			}
+			for (const FString& ChildFile : ChildFiles)
+			{
+				AddNormalizedPath(Children, ChildFile);
+			}
+			Children.Sort();
+			OutTargets.Append(Children);
+		}
+
+		bool IsImmediateChildOfDirectory(const FString& Path, const FString& ParentDirectory)
+		{
+			const FString NormalizedPath = NormalizeRollbackPath(Path);
+			const FString NormalizedParent = NormalizeRollbackPath(ParentDirectory);
+			return NormalizeRollbackPath(FPaths::GetPath(NormalizedPath)).Equals(NormalizedParent, ESearchCase::IgnoreCase);
+		}
+
+		bool IsUserToolPathCandidate(const FString& ProjectDir, const FString& RequestedPath)
+		{
+			if (RequestedPath.Contains(UnrealMcp::Extension::UserPyToolsRelativeRoot, ESearchCase::CaseSensitive))
+			{
+				return true;
+			}
+
+			const FString TrimmedPath = RequestedPath.TrimStartAndEnd();
+			if (TrimmedPath.IsEmpty())
+			{
+				return false;
+			}
+
+			const FString UserToolsRoot = UserToolsRootForProject(ProjectDir);
+			const FString ResolvedPath = NormalizeRollbackPath(FPaths::IsRelative(TrimmedPath)
+				? FPaths::Combine(ProjectDir, TrimmedPath)
+				: TrimmedPath);
+			return IsPathInsideDirectory(ResolvedPath, UserToolsRoot);
+		}
+
+		bool ReadAndHashRollbackFile(const FString& FilePath, FString& OutHash)
+		{
+			FString Text;
+			if (!FFileHelper::LoadFileToString(Text, *FilePath))
+			{
+				OutHash.Reset();
+				return false;
+			}
+			OutHash = HashTextForManifest(Text);
+			return true;
+		}
+
+		bool IsCoreRollbackPath(const FString& Path, const FString& ProjectDir, const FString& PluginSourceRoot)
+		{
+			const FString NormalizedPath = NormalizeRollbackPath(Path);
+			const FString NormalizedPluginSourceRoot = PluginSourceRoot.TrimStartAndEnd().IsEmpty()
+				? FString()
+				: NormalizeRollbackPath(PluginSourceRoot);
+			if (!NormalizedPluginSourceRoot.IsEmpty() && IsPathInsideDirectory(NormalizedPath, NormalizedPluginSourceRoot))
+			{
+				return true;
+			}
+
+			const FString RegistryToolsPath = NormalizeRollbackPath(FPaths::Combine(ProjectDir, TEXT("Tools/UnrealMcpToolRegistry/tools.json")));
+			if (NormalizedPath.Equals(RegistryToolsPath, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+
+			return NormalizedPath.EndsWith(TEXT("/Tools/UnrealMcpToolRegistry/tools.json"), ESearchCase::IgnoreCase)
+				|| NormalizedPath.EndsWith(TEXT("/Plugins/UnrealMcp/Resources/ToolRegistry/tools.json"), ESearchCase::IgnoreCase);
+		}
+
+		void AddManifestSafetySourcePath(
+			const FString& ProjectDir,
+			const FString& PluginSourceRoot,
+			const FString& SourcePath,
+			const FString& ExpectedAfterHash,
+			FRollbackManifestSafety& Safety)
+		{
+			const FString TrimmedSourcePath = SourcePath.TrimStartAndEnd();
+			if (TrimmedSourcePath.IsEmpty())
+			{
+				return;
+			}
+
+			const FString ResolvedSourcePath = NormalizeRollbackPath(FPaths::IsRelative(TrimmedSourcePath)
+				? FPaths::Combine(ProjectDir, TrimmedSourcePath)
+				: TrimmedSourcePath);
+			Safety.SourcePaths.Add(ResolvedSourcePath);
+			Safety.bTouchesCoreFiles |= IsCoreRollbackPath(ResolvedSourcePath, ProjectDir, PluginSourceRoot);
+
+			if (!ExpectedAfterHash.IsEmpty())
+			{
+				FString CurrentHash;
+				const bool bCurrentReadable = ReadAndHashRollbackFile(ResolvedSourcePath, CurrentHash);
+				Safety.bManifestDriftDetected |= !bCurrentReadable || CurrentHash != ExpectedAfterHash;
+			}
+		}
+	}
+
+	bool BuildUserToolRollbackPlanForProject(
+		const FString& ProjectDir,
+		const FString& ToolNameOrPath,
+		FUserToolRollbackPlan& OutPlan,
+		FString& OutFailureReason)
+	{
+		OutPlan = FUserToolRollbackPlan();
+		OutFailureReason.Reset();
+
+		const FString NormalizedProjectDir = RollbackSafety::NormalizeRollbackPath(ProjectDir);
+		const FString TrimmedTarget = ToolNameOrPath.TrimStartAndEnd();
+		if (NormalizedProjectDir.IsEmpty() || TrimmedTarget.IsEmpty())
+		{
+			OutFailureReason = TEXT("User tool rollback target must not be empty.");
+			return false;
+		}
+
+		FString ToolId;
+		if (!RollbackSafety::TryExtractUserToolIdFromToolName(TrimmedTarget, ToolId, OutFailureReason))
+		{
+			if (TrimmedTarget.StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+
+			const FString UserToolsRoot = RollbackSafety::UserToolsRootForProject(NormalizedProjectDir);
+			const FString ResolvedPath = RollbackSafety::NormalizeRollbackPath(FPaths::IsRelative(TrimmedTarget)
+				? FPaths::Combine(NormalizedProjectDir, TrimmedTarget)
+				: TrimmedTarget);
+			if (!IsPathInsideDirectory(ResolvedPath, UserToolsRoot)
+				|| ResolvedPath.Equals(UserToolsRoot, ESearchCase::IgnoreCase)
+				|| !RollbackSafety::IsImmediateChildOfDirectory(ResolvedPath, UserToolsRoot))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("User tool rollback target '%s' must resolve to exactly one directory under '%s'."),
+					*TrimmedTarget,
+					*UserToolsRoot);
+				return false;
+			}
+
+			ToolId = FPaths::GetCleanFilename(ResolvedPath);
+			if (!RollbackSafety::IsSafeUserToolId(ToolId, OutFailureReason))
+			{
+				OutFailureReason = FString::Printf(TEXT("Invalid user tool rollback path '%s': %s"), *TrimmedTarget, *OutFailureReason);
+				return false;
+			}
+		}
+
+		OutPlan.ToolId = ToolId;
+		OutPlan.ToolName = FString::Printf(TEXT("user.%s"), *ToolId);
+		OutPlan.UserToolsRoot = RollbackSafety::UserToolsRootForProject(NormalizedProjectDir);
+		OutPlan.ToolDirectory = RollbackSafety::NormalizeRollbackPath(FPaths::Combine(OutPlan.UserToolsRoot, ToolId));
+		if (!IsPathInsideDirectory(OutPlan.ToolDirectory, OutPlan.UserToolsRoot)
+			|| OutPlan.ToolDirectory.Equals(OutPlan.UserToolsRoot, ESearchCase::IgnoreCase)
+			|| !RollbackSafety::IsImmediateChildOfDirectory(OutPlan.ToolDirectory, OutPlan.UserToolsRoot))
+		{
+			OutFailureReason = FString::Printf(
+				TEXT("Refusing user tool rollback because '%s' is outside the bounded user tools root '%s'."),
+				*OutPlan.ToolDirectory,
+				*OutPlan.UserToolsRoot);
+			return false;
+		}
+		if (!IFileManager::Get().DirectoryExists(*OutPlan.ToolDirectory))
+		{
+			OutFailureReason = FString::Printf(TEXT("User tool rollback target directory does not exist: %s."), *OutPlan.ToolDirectory);
+			return false;
+		}
+
+		RollbackSafety::CollectDeletionTargets(OutPlan.ToolDirectory, OutPlan.DeletionTargets);
+		return true;
+	}
+
+	FUnrealMcpExecutionResult RollbackUserToolForProjectRoot(
+		const FString& ProjectDir,
+		const FString& ToolNameOrPath,
+		bool bDryRun,
+		TFunctionRef<FUnrealMcpExecutionResult()> ReloadRegistry)
+	{
+		FUserToolRollbackPlan Plan;
+		FString FailureReason;
+		if (!BuildUserToolRollbackPlanForProject(ProjectDir, ToolNameOrPath, Plan, FailureReason))
+		{
+			return MakeExecutionResult(FailureReason, nullptr, true);
+		}
+
+		TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+		StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_rollback_last_extension"));
+		StructuredContent->SetStringField(TEXT("rollbackTrack"), TEXT("user"));
+		StructuredContent->SetStringField(TEXT("implementationTrack"), TEXT("python"));
+		StructuredContent->SetStringField(TEXT("toolId"), Plan.ToolId);
+		StructuredContent->SetStringField(TEXT("toolName"), Plan.ToolName);
+		StructuredContent->SetStringField(TEXT("userToolsRoot"), Plan.UserToolsRoot);
+		StructuredContent->SetStringField(TEXT("deletionBoundaryDir"), Plan.ToolDirectory);
+		StructuredContent->SetArrayField(TEXT("deletionTargets"), MakeJsonStringArray(Plan.DeletionTargets));
+		StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
+		StructuredContent->SetStringField(TEXT("nextRequiredAction"), UnrealMcp::Extension::ControlToolUserRegistryReload);
+		StructuredContent->SetBoolField(TEXT("registryReloadAttempted"), false);
+		StructuredContent->SetBoolField(TEXT("registryReloadRecommended"), bDryRun);
+
+		if (bDryRun)
+		{
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Dry run user-tool rollback for %s would delete %s."), *Plan.ToolName, *Plan.ToolDirectory),
+				StructuredContent,
+				false);
+		}
+
+		if (!IFileManager::Get().DeleteDirectory(*Plan.ToolDirectory, false, true))
+		{
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Failed to delete bounded user tool directory '%s'."), *Plan.ToolDirectory),
+				StructuredContent,
+				true);
+		}
+		if (IFileManager::Get().DirectoryExists(*Plan.ToolDirectory))
+		{
+			return MakeExecutionResult(
+				FString::Printf(TEXT("User tool directory still exists after rollback delete: %s."), *Plan.ToolDirectory),
+				StructuredContent,
+				true);
+		}
+
+		StructuredContent->SetBoolField(TEXT("deleted"), true);
+		StructuredContent->SetBoolField(TEXT("registryReloadAttempted"), true);
+		StructuredContent->SetBoolField(TEXT("registryReloadRecommended"), false);
+		const FUnrealMcpExecutionResult ReloadResult = ReloadRegistry();
+		if (ReloadResult.StructuredContent.IsValid())
+		{
+			StructuredContent->SetObjectField(TEXT("registryReload"), ReloadResult.StructuredContent);
+		}
+		if (ReloadResult.bIsError)
+		{
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Deleted %s, but unreal.mcp_user_registry_reload failed: %s"), *Plan.ToolDirectory, *ReloadResult.Text),
+				StructuredContent,
+				true);
+		}
+
+		return MakeExecutionResult(
+			FString::Printf(TEXT("Rolled back user Python tool %s by deleting %s and reloading the user registry."), *Plan.ToolName, *Plan.ToolDirectory),
+			StructuredContent,
+			false);
+	}
+
+	bool EvaluateRollbackManifestSafetyForProjectRoot(
+		const FString& ProjectDir,
+		const FString& PluginSourceRoot,
+		const TSharedPtr<FJsonObject>& ManifestObject,
+		bool bManifestPathExplicit,
+		bool bForceExplicit,
+		FRollbackManifestSafety& OutSafety,
+		FString& OutFailureReason)
+	{
+		OutSafety = FRollbackManifestSafety();
+		OutFailureReason.Reset();
+		if (!ManifestObject.IsValid())
+		{
+			OutFailureReason = TEXT("Cannot evaluate rollback safety for an invalid manifest.");
+			return false;
+		}
+
+		ManifestObject->TryGetStringField(TEXT("toolName"), OutSafety.ToolName);
+
+		const TArray<TSharedPtr<FJsonValue>>* ManifestFiles = nullptr;
+		if (ManifestObject->TryGetArrayField(TEXT("files"), ManifestFiles) && ManifestFiles)
+		{
+			for (const TSharedPtr<FJsonValue>& FileValue : *ManifestFiles)
+			{
+				const TSharedPtr<FJsonObject> FileObject = FileValue.IsValid() ? FileValue->AsObject() : nullptr;
+				if (!FileObject.IsValid())
+				{
+					continue;
+				}
+
+				FString SourcePath;
+				FString ExpectedAfterHash;
+				FileObject->TryGetStringField(TEXT("sourcePath"), SourcePath);
+				FileObject->TryGetStringField(TEXT("hashAfter"), ExpectedAfterHash);
+				RollbackSafety::AddManifestSafetySourcePath(ProjectDir, PluginSourceRoot, SourcePath, ExpectedAfterHash, OutSafety);
+			}
+		}
+		else
+		{
+			FString SourcePath;
+			FString ExpectedAfterHash;
+			ManifestObject->TryGetStringField(TEXT("sourcePath"), SourcePath);
+			ManifestObject->TryGetStringField(TEXT("sourceHashAfter"), ExpectedAfterHash);
+			RollbackSafety::AddManifestSafetySourcePath(ProjectDir, PluginSourceRoot, SourcePath, ExpectedAfterHash, OutSafety);
+		}
+
+		OutSafety.bIsCoreManifest = OutSafety.ToolName.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive)
+			&& OutSafety.bTouchesCoreFiles;
+		OutSafety.bRefuseCoreRollback = OutSafety.bIsCoreManifest && (!bManifestPathExplicit || !bForceExplicit);
+		if (OutSafety.bRefuseCoreRollback)
+		{
+			OutSafety.RefusalReason = RollbackSafety::CoreRollbackRefusalMessage();
+		}
+		return true;
+	}
+
 		FUnrealMcpExecutionResult RollbackLastMcpExtension(const FJsonObject& Arguments)
 		{
-			FString ManifestPath = GetLatestMcpExtensionManifestPath();
-			bool bDryRun = false;
+			FString ManifestPath;
+			const bool bManifestPathProvided = Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath)
+				&& !ManifestPath.TrimStartAndEnd().IsEmpty();
+			if (!bManifestPathProvided)
+			{
+				ManifestPath = GetLatestMcpExtensionManifestPath();
+			}
+			bool bDryRun = true;
 			bool bForce = false;
-			Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath);
 			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
-			Arguments.TryGetBoolField(TEXT("force"), bForce);
+			const bool bForceExplicit = Arguments.TryGetBoolField(TEXT("force"), bForce);
+
+			auto ReloadUserRegistry = []() -> FUnrealMcpExecutionResult
+			{
+				FJsonObject ReloadArguments;
+				return UnrealMcpUserRegistryReloadTool::Execute(ReloadArguments);
+			};
+
+			FString RequestedToolName;
+			if (Arguments.TryGetStringField(TEXT("toolName"), RequestedToolName) && !RequestedToolName.TrimStartAndEnd().IsEmpty())
+			{
+				if (RequestedToolName.TrimStartAndEnd().StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+				{
+					return RollbackUserToolForProjectRoot(FPaths::ProjectDir(), RequestedToolName, bDryRun, ReloadUserRegistry);
+				}
+			}
+
+			if (bManifestPathProvided)
+			{
+				FUserToolRollbackPlan UserToolPlan;
+				FString UserToolFailure;
+				if (BuildUserToolRollbackPlanForProject(FPaths::ProjectDir(), ManifestPath, UserToolPlan, UserToolFailure))
+				{
+					return RollbackUserToolForProjectRoot(FPaths::ProjectDir(), ManifestPath, bDryRun, ReloadUserRegistry);
+				}
+				if (RollbackSafety::IsUserToolPathCandidate(FPaths::ProjectDir(), ManifestPath))
+				{
+					return MakeExecutionResult(UserToolFailure, nullptr, true);
+				}
+			}
 
 			auto ReadAndHashFile = [](const FString& FilePath, FString& OutText, FString& OutHash) -> bool
 			{
@@ -142,6 +574,43 @@ namespace UnrealMcp
 				return MakeExecutionResult(FString::Printf(TEXT("Manifest '%s' is not valid JSON."), *ResolvedManifestPath), nullptr, true);
 			}
 
+			FString ManifestToolName;
+			if (ManifestObject->TryGetStringField(TEXT("toolName"), ManifestToolName)
+				&& ManifestToolName.StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+			{
+				return RollbackUserToolForProjectRoot(FPaths::ProjectDir(), ManifestToolName, bDryRun, ReloadUserRegistry);
+			}
+
+			FRollbackManifestSafety ManifestSafety;
+			const FToolsReadResolution PluginSourceRoot = ResolvePluginSourceRoot();
+			if (!EvaluateRollbackManifestSafetyForProjectRoot(
+				FPaths::ProjectDir(),
+				PluginSourceRoot.Path,
+				ManifestObject,
+				bManifestPathProvided,
+				bForceExplicit,
+				ManifestSafety,
+				FailureReason))
+			{
+				return MakeExecutionResult(FailureReason, nullptr, true);
+			}
+			if (ManifestSafety.bRefuseCoreRollback)
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_rollback_last_extension"));
+				StructuredContent->SetStringField(TEXT("rollbackTrack"), TEXT("core"));
+				StructuredContent->SetStringField(TEXT("toolName"), ManifestSafety.ToolName);
+				StructuredContent->SetStringField(TEXT("manifestPath"), ResolvedManifestPath);
+				StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
+				StructuredContent->SetBoolField(TEXT("force"), bForce);
+				StructuredContent->SetBoolField(TEXT("forceExplicit"), bForceExplicit);
+				StructuredContent->SetBoolField(TEXT("manifestPathExplicit"), bManifestPathProvided);
+				StructuredContent->SetBoolField(TEXT("manifestDriftDetected"), ManifestSafety.bManifestDriftDetected);
+				StructuredContent->SetBoolField(TEXT("coreRollbackDeveloperOnly"), true);
+				StructuredContent->SetArrayField(TEXT("sourcePaths"), MakeJsonStringArray(ManifestSafety.SourcePaths));
+				return MakeExecutionResult(ManifestSafety.RefusalReason, StructuredContent, true);
+			}
+
 			const TArray<TSharedPtr<FJsonValue>>* ManifestFiles = nullptr;
 			if (ManifestObject->TryGetArrayField(TEXT("files"), ManifestFiles) && ManifestFiles && ManifestFiles->Num() > 0)
 			{
@@ -225,10 +694,14 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 				StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_rollback_last_extension"));
 				StructuredContent->SetStringField(TEXT("applyMode"), TEXT("descriptor_first"));
+				StructuredContent->SetStringField(TEXT("rollbackTrack"), ManifestSafety.bIsCoreManifest ? TEXT("core") : TEXT("manifest"));
 				StructuredContent->SetStringField(TEXT("toolName"), ToolName);
 				StructuredContent->SetStringField(TEXT("manifestPath"), ResolvedManifestPath);
 				StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 				StructuredContent->SetBoolField(TEXT("force"), bForce);
+				StructuredContent->SetBoolField(TEXT("forceExplicit"), bForceExplicit);
+				StructuredContent->SetBoolField(TEXT("manifestPathExplicit"), bManifestPathProvided);
+				StructuredContent->SetBoolField(TEXT("coreRollbackDeveloperOnly"), ManifestSafety.bIsCoreManifest);
 				StructuredContent->SetBoolField(TEXT("hashMatchesExpectedAfter"), bAllHashesMatch);
 				StructuredContent->SetBoolField(TEXT("manifestDriftDetected"), !bAllHashesMatch);
 				StructuredContent->SetArrayField(TEXT("files"), FileResults);
@@ -339,6 +812,7 @@ namespace UnrealMcp
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
 			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_rollback_last_extension"));
 			StructuredContent->SetStringField(TEXT("toolName"), ToolName);
+			StructuredContent->SetStringField(TEXT("rollbackTrack"), ManifestSafety.bIsCoreManifest ? TEXT("core") : TEXT("manifest"));
 				StructuredContent->SetStringField(TEXT("manifestPath"), ResolvedManifestPath);
 				StructuredContent->SetStringField(TEXT("sourcePath"), ResolvedSourcePath);
 				StructuredContent->SetStringField(TEXT("sourcePathKind"), LexToString(SourceKind));
@@ -352,6 +826,9 @@ namespace UnrealMcp
 			StructuredContent->SetBoolField(TEXT("backupHashMatchesExpectedBefore"), bBackupMatchesExpectedBefore);
 			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
 			StructuredContent->SetBoolField(TEXT("force"), bForce);
+			StructuredContent->SetBoolField(TEXT("forceExplicit"), bForceExplicit);
+			StructuredContent->SetBoolField(TEXT("manifestPathExplicit"), bManifestPathProvided);
+			StructuredContent->SetBoolField(TEXT("coreRollbackDeveloperOnly"), ManifestSafety.bIsCoreManifest);
 			StructuredContent->SetBoolField(TEXT("hashMatchesExpectedAfter"), bHashMatches);
 			StructuredContent->SetBoolField(TEXT("manifestDriftDetected"), !bHashMatches);
 
@@ -968,16 +1445,17 @@ namespace UnrealMcp
 			FString ManifestPath;
 			FString ToolName;
 			FString Selector = TEXT("latest");
-			bool bDryRun = false;
+			bool bDryRun = true;
 			bool bForce = false;
 			bool bCreatePreRollbackBackup = true;
 			double ManifestIndexDouble = -1.0;
 
-			Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath);
+			const bool bManifestPathProvided = Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath)
+				&& !ManifestPath.TrimStartAndEnd().IsEmpty();
 			Arguments.TryGetStringField(TEXT("toolName"), ToolName);
 			Arguments.TryGetStringField(TEXT("selector"), Selector);
 			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
-			Arguments.TryGetBoolField(TEXT("force"), bForce);
+			const bool bForceExplicit = Arguments.TryGetBoolField(TEXT("force"), bForce);
 			Arguments.TryGetBoolField(TEXT("createPreRollbackBackup"), bCreatePreRollbackBackup);
 			Arguments.TryGetNumberField(TEXT("manifestIndex"), ManifestIndexDouble);
 
@@ -985,7 +1463,7 @@ namespace UnrealMcp
 			CollectExtensionManifestPaths(ManifestPaths);
 
 			TArray<FString> CandidatePaths;
-			if (!ManifestPath.TrimStartAndEnd().IsEmpty())
+			if (bManifestPathProvided)
 			{
 				FString ResolvedManifestPath;
 				FString FailureReason;
@@ -1054,6 +1532,38 @@ namespace UnrealMcp
 			const FString SelectedManifestPath = CandidatePaths[SelectedIndex];
 			StructuredContent->SetNumberField(TEXT("selectedIndex"), SelectedIndex);
 			StructuredContent->SetStringField(TEXT("selectedManifestPath"), SelectedManifestPath);
+
+			TSharedPtr<FJsonObject> SelectedManifestObject;
+			FString SelectedManifestFailure;
+			if (LoadJsonObjectFromFile(SelectedManifestPath, SelectedManifestObject, SelectedManifestFailure))
+			{
+				FRollbackManifestSafety ManifestSafety;
+				const FToolsReadResolution PluginSourceRoot = ResolvePluginSourceRoot();
+				if (!EvaluateRollbackManifestSafetyForProjectRoot(
+					FPaths::ProjectDir(),
+					PluginSourceRoot.Path,
+					SelectedManifestObject,
+					bManifestPathProvided,
+					bForceExplicit,
+					ManifestSafety,
+					SelectedManifestFailure))
+				{
+					return MakeExecutionResult(SelectedManifestFailure, StructuredContent, true);
+				}
+				StructuredContent->SetStringField(TEXT("rollbackTrack"), ManifestSafety.bIsCoreManifest ? TEXT("core") : TEXT("manifest"));
+				StructuredContent->SetBoolField(TEXT("manifestPathExplicit"), bManifestPathProvided);
+				StructuredContent->SetBoolField(TEXT("forceExplicit"), bForceExplicit);
+				StructuredContent->SetBoolField(TEXT("manifestDriftDetected"), ManifestSafety.bManifestDriftDetected);
+				StructuredContent->SetBoolField(TEXT("coreRollbackDeveloperOnly"), ManifestSafety.bIsCoreManifest);
+				if (ManifestSafety.bRefuseCoreRollback)
+				{
+					return MakeExecutionResult(ManifestSafety.RefusalReason, StructuredContent, true);
+				}
+			}
+			else
+			{
+				return MakeExecutionResult(SelectedManifestFailure, StructuredContent, true);
+			}
 
 			if (!bDryRun && bCreatePreRollbackBackup)
 			{

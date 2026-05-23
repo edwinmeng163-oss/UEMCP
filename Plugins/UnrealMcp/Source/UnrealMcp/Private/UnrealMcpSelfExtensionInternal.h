@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSharedPathResolver.h"
+#include "Templates/Function.h"
 
 class FJsonObject;
 class FJsonValue;
@@ -38,6 +39,42 @@ namespace UnrealMcp
 	FString GetMcpExtensionLockPath();
 	FString GetMcpProjectStateBackupRoot();
 	FString HashTextForManifest(const FString& Text);
+	struct FUserToolRollbackPlan
+	{
+		FString ToolId;
+		FString ToolName;
+		FString UserToolsRoot;
+		FString ToolDirectory;
+		TArray<FString> DeletionTargets;
+	};
+	struct FRollbackManifestSafety
+	{
+		FString ToolName;
+		bool bIsCoreManifest = false;
+		bool bTouchesCoreFiles = false;
+		bool bManifestDriftDetected = false;
+		bool bRefuseCoreRollback = false;
+		FString RefusalReason;
+		TArray<FString> SourcePaths;
+	};
+	bool BuildUserToolRollbackPlanForProject(
+		const FString& ProjectDir,
+		const FString& ToolNameOrPath,
+		FUserToolRollbackPlan& OutPlan,
+		FString& OutFailureReason);
+	FUnrealMcpExecutionResult RollbackUserToolForProjectRoot(
+		const FString& ProjectDir,
+		const FString& ToolNameOrPath,
+		bool bDryRun,
+		TFunctionRef<FUnrealMcpExecutionResult()> ReloadRegistry);
+	bool EvaluateRollbackManifestSafetyForProjectRoot(
+		const FString& ProjectDir,
+		const FString& PluginSourceRoot,
+		const TSharedPtr<FJsonObject>& ManifestObject,
+		bool bManifestPathExplicit,
+		bool bForceExplicit,
+		FRollbackManifestSafety& OutSafety,
+		FString& OutFailureReason);
 	FString MakePathRelativeToProject(const FString& Path);
 	FString FileTimeToIsoString(const FDateTime& Time);
 	bool IsPathInsideDirectory(const FString& Path, const FString& Directory);
