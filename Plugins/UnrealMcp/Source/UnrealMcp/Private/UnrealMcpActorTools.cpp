@@ -8,8 +8,10 @@
 #include "Editor.h"
 #include "Editor/EditorEngine.h"
 #include "EditorScriptingHelpers.h"
+#include "Engine/Level.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "Materials/MaterialInterface.h"
 #include "ScopedTransaction.h"
 #include "Subsystems/EditorActorSubsystem.h"
@@ -174,6 +176,57 @@ namespace UnrealMcp
 			ActorObject->SetObjectField(TEXT("location"), ActorToolMakeVectorObject(Actor->GetActorLocation()));
 			ActorObject->SetObjectField(TEXT("rotation"), ActorToolMakeRotatorObject(Actor->GetActorRotation()));
 			return ActorObject;
+		}
+
+		FString ActorToolAutoPossessPlayerToString(EAutoReceiveInput::Type Value)
+		{
+			switch (Value)
+			{
+			case EAutoReceiveInput::Disabled:
+				return TEXT("Disabled");
+			case EAutoReceiveInput::Player0:
+				return TEXT("Player0");
+			case EAutoReceiveInput::Player1:
+				return TEXT("Player1");
+			case EAutoReceiveInput::Player2:
+				return TEXT("Player2");
+			case EAutoReceiveInput::Player3:
+				return TEXT("Player3");
+			default:
+				return FString::Printf(TEXT("Player%d"), static_cast<int32>(Value) - static_cast<int32>(EAutoReceiveInput::Player0));
+			}
+		}
+
+		bool ActorToolTryParseAutoPossessPlayer(const FString& RawValue, EAutoReceiveInput::Type& OutValue)
+		{
+			const FString Value = RawValue.TrimStartAndEnd();
+			if (Value.Equals(TEXT("Disabled"), ESearchCase::IgnoreCase))
+			{
+				OutValue = EAutoReceiveInput::Disabled;
+				return true;
+			}
+			if (Value.Equals(TEXT("Player0"), ESearchCase::IgnoreCase))
+			{
+				OutValue = EAutoReceiveInput::Player0;
+				return true;
+			}
+			if (Value.Equals(TEXT("Player1"), ESearchCase::IgnoreCase))
+			{
+				OutValue = EAutoReceiveInput::Player1;
+				return true;
+			}
+			if (Value.Equals(TEXT("Player2"), ESearchCase::IgnoreCase))
+			{
+				OutValue = EAutoReceiveInput::Player2;
+				return true;
+			}
+			if (Value.Equals(TEXT("Player3"), ESearchCase::IgnoreCase))
+			{
+				OutValue = EAutoReceiveInput::Player3;
+				return true;
+			}
+
+			return false;
 		}
 
 		void ActorToolAttachError(TSharedPtr<FJsonObject> StructuredContent, const FString& Code, const FString& Message)
@@ -975,6 +1028,78 @@ namespace UnrealMcp
 				FString::Printf(TEXT("Set transform on actor %s. success=%s"), *Actor->GetActorLabel(), bMoved ? TEXT("true") : TEXT("false")),
 				StructuredContent,
 				!bMoved);
+		}
+
+		FUnrealMcpExecutionResult ExecuteActorSetAutoPossess(const FString& ToolName, const FJsonObject& Arguments)
+		{
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			UEditorActorSubsystem* EditorActorSubsystem = ActorToolGetEditorActorSubsystem();
+			if (!EditorActorSubsystem)
+			{
+				return ActorToolMakeExecutionResult(TEXT("EditorActorSubsystem is unavailable."), nullptr, true);
+			}
+
+			FString ActorName;
+			if (!Arguments.TryGetStringField(TEXT("actorName"), ActorName) || ActorName.TrimStartAndEnd().IsEmpty())
+			{
+				return ActorToolMakeExecutionResult(TEXT("Missing required field 'actorName'."), nullptr, true);
+			}
+			ActorName = ActorName.TrimStartAndEnd();
+
+			FString AutoPossessPlayerText = TEXT("Player0");
+			Arguments.TryGetStringField(TEXT("autoPossessPlayer"), AutoPossessPlayerText);
+			EAutoReceiveInput::Type AutoPossessPlayer = EAutoReceiveInput::Player0;
+			if (!ActorToolTryParseAutoPossessPlayer(AutoPossessPlayerText, AutoPossessPlayer))
+			{
+				return ActorToolMakeExecutionResult(
+					FString::Printf(TEXT("Invalid autoPossessPlayer '%s'. Use Disabled, Player0, Player1, Player2, or Player3."), *AutoPossessPlayerText),
+					nullptr,
+					true);
+			}
+
+			FString FailureReason;
+			AActor* Actor = ActorToolResolveActorPathOrLabel(EditorActorSubsystem, ActorName, FailureReason);
+			if (!Actor)
+			{
+				return ActorToolMakeExecutionResult(FailureReason, nullptr, true);
+			}
+
+			APawn* Pawn = Cast<APawn>(Actor);
+			if (!Pawn)
+			{
+				return ActorToolMakeExecutionResult(
+					FString::Printf(TEXT("Actor '%s' is not a Pawn and has no AutoPossessPlayer property."), *ActorName),
+					nullptr,
+					true);
+			}
+
+			const EAutoReceiveInput::Type PreviousValue = Pawn->AutoPossessPlayer.GetValue();
+			const FScopedTransaction Transaction(NSLOCTEXT("UnrealMcpActorTools", "UnrealMcpActorSetAutoPossess", "Unreal MCP Set Actor Auto Possess"));
+			Pawn->Modify();
+			Pawn->AutoPossessPlayer = AutoPossessPlayer;
+			Pawn->PostEditChange();
+			Pawn->MarkPackageDirty();
+			if (ULevel* Level = Pawn->GetLevel())
+			{
+				Level->MarkPackageDirty();
+			}
+
+			const EAutoReceiveInput::Type ReadbackValue = Pawn->AutoPossessPlayer.GetValue();
+			TSharedPtr<FJsonObject> StructuredContent = ActorToolMakeActorObject(Pawn);
+			StructuredContent->SetStringField(TEXT("actorName"), ActorName);
+			StructuredContent->SetStringField(TEXT("previousAutoPossessPlayer"), ActorToolAutoPossessPlayerToString(PreviousValue));
+			StructuredContent->SetStringField(TEXT("autoPossessPlayer"), ActorToolAutoPossessPlayerToString(AutoPossessPlayer));
+			StructuredContent->SetStringField(TEXT("readbackAutoPossessPlayer"), ActorToolAutoPossessPlayerToString(ReadbackValue));
+			StructuredContent->SetBoolField(TEXT("postcheckMatchedReadback"), ReadbackValue == AutoPossessPlayer);
+
+			return ActorToolMakeExecutionResult(
+				FString::Printf(TEXT("Set AutoPossessPlayer on actor %s to %s."), *Pawn->GetActorLabel(), *ActorToolAutoPossessPlayerToString(ReadbackValue)),
+				StructuredContent,
+				ReadbackValue != AutoPossessPlayer);
 		}
 
 		FUnrealMcpExecutionResult ExecuteDestroySelectedActors(const FString& ToolName)
@@ -2529,6 +2654,12 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.set_actor_transform"))
 		{
 			OutResult = ExecuteSetActorTransform(ToolName, Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.actor_set_auto_possess"))
+		{
+			OutResult = ExecuteActorSetAutoPossess(ToolName, Arguments);
 			return true;
 		}
 

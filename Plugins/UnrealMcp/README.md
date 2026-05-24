@@ -26,12 +26,16 @@ Editor action tools:
 - `unreal.start_pie`
 - `unreal.stop_pie`
 - `unreal.configure_player_input`
+- `unreal.editor_set_map_game_mode`
 - `unreal.verify_player_controls`
+- `unreal.pie_input_probe`
+- `unreal.verify_viewport_widgets`
 - `unreal.execute_console_command`
 - `unreal.execute_python`
 - `unreal.execute_python_file`
 - `unreal.select_actors`
 - `unreal.set_actor_transform`
+- `unreal.actor_set_auto_possess`
 - `unreal.batch_set_actor_scale`
 - `unreal.batch_set_actor_tags`
 - `unreal.batch_set_point_light_properties`
@@ -60,9 +64,15 @@ Editor action tools:
 - `unreal.bp_interface_add`
 - `unreal.bp_interface_remove`
 - `unreal.bp_add_event_node`
+- `unreal.bp_add_input_axis_event_node`
+- `unreal.bp_add_input_action_event_node`
+- `unreal.bp_add_gameplay_node`
 - `unreal.bp_add_call_function_node`
 - `unreal.bp_add_branch_node`
 - `unreal.bp_add_for_each_node`
+- `unreal.bp_add_component`
+- `unreal.bp_set_component_property`
+- `unreal.bp_set_class_default`
 - `unreal.bp_delete_node`
 - `unreal.bp_delete_variable`
 - `unreal.bp_delete_function`
@@ -299,7 +309,7 @@ The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
 tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
 v0.19 `Make Tool` scaffold draft creation.
-The plugin registry currently contains 164 registered MCP tools across actors,
+The plugin registry currently contains 174 registered MCP tools across actors,
 blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget categories.
 v0.27 makes AI self-extension the project-local Python user-tool path only.

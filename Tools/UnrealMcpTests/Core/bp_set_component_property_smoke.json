@@ -1,0 +1,22 @@
+{
+  "name": "bp_set_component_property_smoke",
+  "description": "List-only smoke for setting an allowlisted Blueprint component template property. The edit call requires a pre-staged Blueprint and component and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 153,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_set_component_property",
+      "arguments": {
+        "blueprintPath": "/Game/__UEAtelierPlayer/BP_TestCharacter",
+        "componentName": "CameraBoom",
+        "propertyName": "TargetArmLength",
+        "value": "400.0"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "actor_set_auto_possess_smoke",
+  "description": "List-only smoke for setting AutoPossessPlayer on a Pawn actor. The edit call requires a pre-staged Pawn actor and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 157,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.actor_set_auto_possess",
+      "arguments": {
+        "actorName": "UEvolveMcpTest_PlayerCharacter",
+        "autoPossessPlayer": "Player0"
+      }
+    }
+  }
+}

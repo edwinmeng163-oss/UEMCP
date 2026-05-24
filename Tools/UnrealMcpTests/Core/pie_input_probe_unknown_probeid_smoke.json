@@ -1,0 +1,25 @@
+{
+  "name": "pie_input_probe_unknown_probeid_smoke",
+  "description": "Core smoke for safe pie_input_probe result polling with an unknown probeId.",
+  "category": "error_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": true,
+  "expectToolCallStructuredFields": {
+    "action": "pie_input_probe",
+    "probeId": "__missing_probe__",
+    "errorKind": "UnknownProbeId"
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 157,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.pie_input_probe",
+      "arguments": {
+        "action": "result",
+        "probeId": "__missing_probe__"
+      }
+    }
+  }
+}

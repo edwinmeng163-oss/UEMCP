@@ -80,6 +80,49 @@ namespace UnrealMcp
 			return nullptr;
 		}
 
+		TArray<FString> BlueprintMakePinDefaultObjectCandidates(const FString& RawPath)
+		{
+			TArray<FString> Candidates;
+			FString Path = RawPath.TrimStartAndEnd();
+			if (Path.StartsWith(TEXT("Class'"), ESearchCase::CaseSensitive)
+				|| Path.StartsWith(TEXT("Blueprint'"), ESearchCase::CaseSensitive)
+				|| Path.StartsWith(TEXT("Object'"), ESearchCase::CaseSensitive))
+			{
+				int32 QuoteIndex = INDEX_NONE;
+				if (Path.FindChar(TEXT('\''), QuoteIndex))
+				{
+					Path.RightChopInline(QuoteIndex + 1, EAllowShrinking::No);
+				}
+				Path.RemoveFromEnd(TEXT("'"));
+			}
+
+			if (!Path.IsEmpty())
+			{
+				Candidates.Add(Path);
+				Candidates.Add(BlueprintAddObjectNameCandidate(Path));
+			}
+			return Candidates;
+		}
+
+		bool BlueprintPinDefaultObjectMatches(UEdGraphPin* Pin, const FString& ExpectedValue, FString& OutDefaultObjectPath)
+		{
+			OutDefaultObjectPath.Reset();
+			if (!Pin || !Pin->DefaultObject)
+			{
+				return false;
+			}
+
+			OutDefaultObjectPath = Pin->DefaultObject->GetPathName();
+			for (const FString& Candidate : BlueprintMakePinDefaultObjectCandidates(ExpectedValue))
+			{
+				if (OutDefaultObjectPath.Equals(Candidate, ESearchCase::CaseSensitive))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
 		UBlueprint* LoadBlueprintFromPaths(const FJsonObject& Arguments, const FUnrealMcpExecutionResult& Result, FString& OutPath)
 		{
 			TArray<FString> Candidates;
@@ -451,9 +494,14 @@ namespace UnrealMcp
 			Arguments.TryGetStringField(TEXT("pinName"), PinName);
 			Arguments.TryGetStringField(TEXT("value"), ExpectedValue);
 			UEdGraphPin* Pin = FindPinByName(FindNodeByGuid(Graph, NodeGuid), PinName);
+			FString DefaultObjectPath;
 			if (Pin && Pin->DefaultValue.Equals(ExpectedValue, ESearchCase::CaseSensitive))
 			{
 				Evidence.Add(FString::Printf(TEXT("Pin default value is '%s'."), *Pin->DefaultValue));
+			}
+			else if (BlueprintPinDefaultObjectMatches(Pin, ExpectedValue, DefaultObjectPath))
+			{
+				Evidence.Add(FString::Printf(TEXT("Pin default object is '%s'."), *DefaultObjectPath));
 			}
 			else
 			{

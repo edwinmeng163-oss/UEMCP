@@ -1,0 +1,23 @@
+{
+  "name": "bp_add_gameplay_node_smoke",
+  "description": "List-only smoke for adding a Blueprint gameplay helper node. The edit call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 155,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_add_gameplay_node",
+      "arguments": {
+        "blueprintPath": "/Game/__UEAtelierPlayer/BP_TestCharacter",
+        "graphName": "EventGraph",
+        "nodeKind": "AddMovementInput",
+        "x": 600,
+        "y": 0
+      }
+    }
+  }
+}

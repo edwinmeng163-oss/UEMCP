@@ -126,7 +126,25 @@ follow this narration rule:
 
 ## Self-extension workflow (when adding new MCP tools)
 
-When the task asks for a new MCP tool, NEVER hand-edit these files:
+> **Core C++ tools vs. Python user tools (post-v0.27 carve-out).** The
+> scaffold / self-extension pipeline described in this section produces
+> PYTHON USER TOOLS (`user.*` namespace, project-local
+> `Tools/UnrealMcpPyTools/<id>/`). It does NOT produce core C++ tools:
+> `unreal.scaffold_mcp_tool` is python-track-only as of v0.27. Therefore
+> developing a CORE C++ tool (`unreal.*`, compiled into the plugin) is done
+> by deliberately hand-editing the registrar / category handler / tools.json /
+> Core test fixtures — that IS the sanctioned path for core tools, performed
+> by codex under explicit PM direction, with PM review +
+> `validate_tool_registry.py` + dual-engine build as the gates (these replace
+> the pipeline's manifest/rollback for core work). The "NEVER hand-edit" rule
+> just below governs the Python / AI-driven self-extension track; it does NOT
+> forbid PM-directed core C++ tool development. A core-tool task prompt MUST
+> say "core C++ tool development" explicitly and enumerate the exact
+> registrar / handler / tools.json / test files in its EDIT list — that EDIT
+> list then licenses hand-editing those listed files only.
+
+When the AI or the self-extension toolchain asks for a new MCP tool (the
+Python user-tool track), NEVER hand-edit these files:
 
 - `Plugins/UnrealMcp/Source/UnrealMcp/Private/UnrealMcp*Tools.cpp`
   (category dispatcher + handler functions live here; they are populated by

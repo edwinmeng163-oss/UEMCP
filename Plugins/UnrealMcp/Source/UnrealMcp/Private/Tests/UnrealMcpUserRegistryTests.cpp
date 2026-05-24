@@ -368,7 +368,7 @@ bool FUnrealMcpUserRegistry_CountSeparationTest::RunTest(const FString& Paramete
 	(void)Parameters;
 	UserRegistryDeleteTestDirs();
 	UserRegistryReloadClean();
-	TestEqual(TEXT("core count remains canonical"), UnrealMcp::GetCoreToolCount(), 164);
+	TestEqual(TEXT("core count remains canonical"), UnrealMcp::GetCoreToolCount(), 174);
 	TestEqual(TEXT("user count initially zero"), UnrealMcp::GetUserToolCount(), 0);
 
 	TestTrue(TEXT("tool a writes"), UserRegistryWriteTool(UserRegistryTestPrefix + TEXT("count_a"), UserRegistryPassPy, UserRegistryPassSha));
@@ -376,7 +376,7 @@ bool FUnrealMcpUserRegistry_CountSeparationTest::RunTest(const FString& Paramete
 	TestTrue(TEXT("tool c writes"), UserRegistryWriteTool(UserRegistryTestPrefix + TEXT("count_c"), UserRegistryUpdate2Py, UserRegistryUpdate2Sha));
 	UserRegistryReload();
 	TestEqual(TEXT("user count after load"), UnrealMcp::GetUserToolCount(), 3);
-	TestEqual(TEXT("core count still canonical"), UnrealMcp::GetCoreToolCount(), 164);
+	TestEqual(TEXT("core count still canonical"), UnrealMcp::GetCoreToolCount(), 174);
 
 	UserRegistryDeleteTestDirs();
 	UserRegistryReloadClean();

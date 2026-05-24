@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
+#include "Editor.h"
 #include "Engine/DataAsset.h"
 #include "Misc/AutomationTest.h"
 #include "Modules/ModuleManager.h"
@@ -11,8 +12,27 @@
 #include "UnrealMcpPieSmokeTools.h"
 #include "UObject/Package.h"
 
+namespace UnrealMcp
+{
+	void SetVerifyPlayerControlsSuppressPieRequestForTests(bool bSuppress);
+}
+
 namespace
 {
+	class FScopedVerifyPlayerControlsPieRequestSuppression
+	{
+	public:
+		FScopedVerifyPlayerControlsPieRequestSuppression()
+		{
+			UnrealMcp::SetVerifyPlayerControlsSuppressPieRequestForTests(true);
+		}
+
+		~FScopedVerifyPlayerControlsPieRequestSuppression()
+		{
+			UnrealMcp::SetVerifyPlayerControlsSuppressPieRequestForTests(false);
+		}
+	};
+
 	FString MakePieSmokeTestRunId(const FString& Suffix)
 	{
 		return FString::Printf(TEXT("20260101T010000Z-%s"), *Suffix);
@@ -168,6 +188,53 @@ bool FUnrealMcpVerifyPlayerControlsNoPieDiagnosticsTest::RunTest(const FString& 
 	TestFalse(TEXT("BeginPIE not observed"), GetPieSmokeStructuredBool(Result, TEXT("beginPieObserved")));
 	TestFalse(TEXT("input injection not performed"), GetPieSmokeStructuredBool(Result, TEXT("inputInjectionPerformed")));
 	TestFalse(TEXT("movement delta not measured"), GetPieSmokeStructuredBool(Result, TEXT("movementDeltaMeasured")));
+
+	UnrealMcp::ResetAutomationToolStateForTests();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpVerifyPlayerControlsStartIfNeededPendingPieTest,
+	"UnrealMcp.PlayerControls.StartIfNeededPendingPie",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpVerifyPlayerControlsStartIfNeededPendingPieTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	UnrealMcp::ResetAutomationToolStateForTests();
+
+	TestNotNull(TEXT("GEditor available"), GEditor);
+	TestTrue(TEXT("PIE is not already active"), !GEditor || GEditor->PlayWorld == nullptr);
+	if (GEditor && GEditor->PlayWorld != nullptr)
+	{
+		return false;
+	}
+
+	const FScopedVerifyPlayerControlsPieRequestSuppression SuppressPieRequest;
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetBoolField(TEXT("startIfNeeded"), true);
+
+	FUnrealMcpExecutionResult Result;
+	TestTrue(TEXT("verify_player_controls handled"), UnrealMcp::TryExecutePieSmokeTool(TEXT("unreal.verify_player_controls"), *Arguments, Result));
+	TestFalse(TEXT("pending PIE result is not an error"), Result.bIsError);
+	TestTrue(TEXT("structured content is present"), Result.StructuredContent.IsValid());
+	if (!Result.StructuredContent.IsValid())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("needsPie reported"), GetPieSmokeStructuredBool(Result, TEXT("needsPie")));
+	TestFalse(TEXT("runtime verification not possible yet"), GetPieSmokeStructuredBool(Result, TEXT("canVerifyRuntime")));
+	TestFalse(TEXT("BeginPIE not observed"), GetPieSmokeStructuredBool(Result, TEXT("beginPieObserved")));
+	TestTrue(TEXT("pending PIE reported"), GetPieSmokeStructuredBool(Result, TEXT("pendingPie")));
+	TestTrue(TEXT("PIE request reported"), GetPieSmokeStructuredBool(Result, TEXT("pieRequested")));
+	TestFalse(TEXT("input injection not performed"), GetPieSmokeStructuredBool(Result, TEXT("inputInjectionPerformed")));
+	TestFalse(TEXT("movement delta not measured"), GetPieSmokeStructuredBool(Result, TEXT("movementDeltaMeasured")));
+	TestFalse(TEXT("PIE stop not requested"), GetPieSmokeStructuredBool(Result, TEXT("stopRequested")));
+	TestEqual(
+		TEXT("pending note"),
+		GetPieSmokeStructuredString(Result, TEXT("note")),
+		TEXT("PIE start requested; call verify_player_controls again after BeginPIE."));
 
 	UnrealMcp::ResetAutomationToolStateForTests();
 	return true;

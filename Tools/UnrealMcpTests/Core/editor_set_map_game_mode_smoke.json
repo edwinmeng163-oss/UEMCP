@@ -1,0 +1,20 @@
+{
+  "name": "editor_set_map_game_mode_smoke",
+  "description": "List-only smoke for setting the current map GameMode override. The edit call mutates map settings and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 156,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.editor_set_map_game_mode",
+      "arguments": {
+        "gameModeClassPath": "/Script/Engine.GameModeBase",
+        "scope": "worldSettingsOverride"
+      }
+    }
+  }
+}

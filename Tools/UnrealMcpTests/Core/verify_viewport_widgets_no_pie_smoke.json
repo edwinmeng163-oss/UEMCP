@@ -1,0 +1,22 @@
+{
+  "name": "verify_viewport_widgets_no_pie_smoke",
+  "description": "Core smoke for verify_viewport_widgets no-PIE diagnostics.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "expectToolCallStructuredFields": {
+    "action": "verify_viewport_widgets",
+    "needsPie": true,
+    "count": 0
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 158,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.verify_viewport_widgets",
+      "arguments": {}
+    }
+  }
+}

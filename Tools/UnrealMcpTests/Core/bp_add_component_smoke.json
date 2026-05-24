@@ -1,0 +1,22 @@
+{
+  "name": "bp_add_component_smoke",
+  "description": "List-only smoke for adding a Blueprint component. The edit call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 152,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_add_component",
+      "arguments": {
+        "blueprintPath": "/Game/__UEAtelierPlayer/BP_TestCharacter",
+        "componentClass": "/Script/Engine.SpringArmComponent",
+        "componentName": "CameraBoom",
+        "attachParentComponentName": ""
+      }
+    }
+  }
+}

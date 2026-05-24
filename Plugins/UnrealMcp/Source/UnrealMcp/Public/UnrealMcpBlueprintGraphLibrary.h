@@ -55,6 +55,15 @@ public:
 		TArray<FString>& OutPinNames,
 		FString& OutFailureReason);
 
+	UFUNCTION(BlueprintCallable, Category="Unreal MCP|Graph", meta=(ScriptName="AddInputActionEventNode"))
+	static bool AddInputActionEventNode(
+		UBlueprint* Blueprint,
+		FName ActionName,
+		FVector2D Location,
+		FString& OutNodeGuid,
+		TArray<FString>& OutPinNames,
+		FString& OutFailureReason);
+
 	UFUNCTION(BlueprintCallable, Category="Unreal MCP|Graph", meta=(ScriptName="AddGetActorForwardVectorNode"))
 	static bool AddGetActorForwardVectorNode(
 		UBlueprint* Blueprint,

@@ -1,0 +1,23 @@
+{
+  "name": "bp_add_input_action_event_node_smoke",
+  "description": "List-only smoke for adding a legacy Blueprint input action event node. The edit call requires a pre-staged Blueprint and is not executed in CI.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": false,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 151,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.bp_add_input_action_event_node",
+      "arguments": {
+        "blueprintPath": "/Game/__UEAtelierPlayer/BP_TestCharacter",
+        "graphName": "EventGraph",
+        "actionName": "Jump",
+        "x": 0,
+        "y": 240
+      }
+    }
+  }
+}

@@ -11,6 +11,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_InputAction.h"
 #include "K2Node_InputAxisEvent.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -623,6 +624,56 @@ bool UUnrealMcpBlueprintGraphLibrary::AddInputAxisEventNode(
 		{
 			NewInstance->Initialize(AxisName);
 		});
+
+	return FinalizeCreatedNode(Blueprint, Graph, NewNode, true, OutNodeGuid, OutPinNames, OutFailureReason);
+}
+
+bool UUnrealMcpBlueprintGraphLibrary::AddInputActionEventNode(
+	UBlueprint* Blueprint,
+	FName ActionName,
+	FVector2D Location,
+	FString& OutNodeGuid,
+	TArray<FString>& OutPinNames,
+	FString& OutFailureReason)
+{
+	ResetNodeOutputs(OutNodeGuid, OutPinNames, OutFailureReason);
+	if (IsPieActive(OutFailureReason) || !ValidateBlueprint(Blueprint, OutFailureReason))
+	{
+		return false;
+	}
+	if (ActionName.IsNone())
+	{
+		OutFailureReason = TEXT("ActionName is None.");
+		return false;
+	}
+
+	UEdGraph* Graph = GetEventGraph(Blueprint, OutFailureReason);
+	if (!Graph)
+	{
+		return false;
+	}
+	if (!GetK2Schema(Graph, OutFailureReason))
+	{
+		return false;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("AddInputActionEventNode", "Unreal MCP Add Input Action Event Node"));
+	Graph->Modify();
+	Blueprint->Modify();
+
+	UK2Node_InputAction* NewNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_InputAction>(
+		Graph,
+		Location,
+		EK2NewNodeFlags::None,
+		[ActionName](UK2Node_InputAction* NewInstance)
+		{
+			NewInstance->InputActionName = ActionName;
+		});
+
+	if (NewNode)
+	{
+		NewNode->ReconstructNode();
+	}
 
 	return FinalizeCreatedNode(Blueprint, Graph, NewNode, true, OutNodeGuid, OutPinNames, OutFailureReason);
 }

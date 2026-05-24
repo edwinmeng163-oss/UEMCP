@@ -8,6 +8,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Async/Async.h"
+#include "Blueprint/UserWidget.h"
 #include "Containers/Ticker.h"
 #include "Camera/CameraComponent.h"
 #include "Components/InputComponent.h"
@@ -16,12 +17,14 @@
 #include "Editor.h"
 #include "Engine/World.h"
 #include "FileHelpers.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerInput.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/InputSettings.h"
-#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+#include "InputKeyEventArgs.h"
 #include "Misc/PackageName.h"
 #include "Misc/ScopeLock.h"
 #include "PlayInEditorDataTypes.h"
@@ -82,6 +85,37 @@ namespace UnrealMcp
 		bool bHasActivePieSmokeRun = false;
 		FPieSmokeRunState GActivePieSmokeRun;
 		FTSTicker::FDelegateHandle GPieSmokeTickerHandle;
+#if WITH_DEV_AUTOMATION_TESTS
+		bool bSuppressPlayerControlsPieRequestForTests = false;
+#endif
+
+		struct FPieInputProbeState
+		{
+			FString ProbeId;
+			FString InputProfile;
+			FString Status = TEXT("sampling");
+			TWeakObjectPtr<APlayerController> PlayerController;
+			TWeakObjectPtr<APawn> Pawn;
+			FVector StartLocation = FVector::ZeroVector;
+			FVector EndLocation = FVector::ZeroVector;
+			FRotator StartRotation = FRotator::ZeroRotator;
+			FRotator EndRotation = FRotator::ZeroRotator;
+			double DurationSeconds = 0.5;
+			double ElapsedSeconds = 0.0;
+			int32 SampleCount = 0;
+			bool bInputLayerAccepted = false;
+			bool bUsedDirectFallback = false;
+			bool bPressedInputKey = false;
+			bool bReleasedInputKey = false;
+			bool bSentDirectJump = false;
+			FString ErrorKind;
+			FString Message;
+		};
+
+		FCriticalSection GPieInputProbeMutex;
+		TMap<FString, FPieInputProbeState> GPieInputProbeStates;
+		FTSTicker::FDelegateHandle GPieInputProbeTickerHandle;
+		FDelegateHandle GPieInputProbeEndPieHandle;
 
 		TArray<TSharedPtr<FJsonValue>> MakePieSmokeStringArrayValues(const TArray<FString>& Values)
 		{
@@ -105,6 +139,477 @@ namespace UnrealMcp
 		FUnrealMcpExecutionResult MakePieSmokeErrorResult(const FString& ErrorKind, const FString& Message)
 		{
 			return MakeExecutionResult(Message, MakePieSmokeErrorObject(ErrorKind, Message), true);
+		}
+
+		enum class EPieInputProbeProfile : uint8
+		{
+			MoveForward,
+			MoveBackward,
+			MoveRight,
+			MoveLeft,
+			Jump,
+			LookYaw,
+			LookPitch
+		};
+
+		bool ParsePieInputProbeProfile(const FString& RawProfile, EPieInputProbeProfile& OutProfile)
+		{
+			if (RawProfile.Equals(TEXT("moveForward"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::MoveForward;
+				return true;
+			}
+			if (RawProfile.Equals(TEXT("moveBackward"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::MoveBackward;
+				return true;
+			}
+			if (RawProfile.Equals(TEXT("moveRight"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::MoveRight;
+				return true;
+			}
+			if (RawProfile.Equals(TEXT("moveLeft"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::MoveLeft;
+				return true;
+			}
+			if (RawProfile.Equals(TEXT("jump"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::Jump;
+				return true;
+			}
+			if (RawProfile.Equals(TEXT("lookYaw"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::LookYaw;
+				return true;
+			}
+			if (RawProfile.Equals(TEXT("lookPitch"), ESearchCase::CaseSensitive))
+			{
+				OutProfile = EPieInputProbeProfile::LookPitch;
+				return true;
+			}
+			return false;
+		}
+
+		FKey GetPieInputProbeKey(EPieInputProbeProfile Profile)
+		{
+			switch (Profile)
+			{
+			case EPieInputProbeProfile::MoveForward:
+				return EKeys::W;
+			case EPieInputProbeProfile::MoveBackward:
+				return EKeys::S;
+			case EPieInputProbeProfile::MoveRight:
+				return EKeys::D;
+			case EPieInputProbeProfile::MoveLeft:
+				return EKeys::A;
+			case EPieInputProbeProfile::Jump:
+				return EKeys::SpaceBar;
+			case EPieInputProbeProfile::LookYaw:
+				return EKeys::MouseX;
+			case EPieInputProbeProfile::LookPitch:
+				return EKeys::MouseY;
+			default:
+				return EKeys::Invalid;
+			}
+		}
+
+		bool IsPieInputProbeLookProfile(EPieInputProbeProfile Profile)
+		{
+			return Profile == EPieInputProbeProfile::LookYaw || Profile == EPieInputProbeProfile::LookPitch;
+		}
+
+		FVector GetPieInputProbeDirectMovement(APawn* Pawn, EPieInputProbeProfile Profile)
+		{
+			if (!Pawn)
+			{
+				return FVector::ZeroVector;
+			}
+			switch (Profile)
+			{
+			case EPieInputProbeProfile::MoveForward:
+				return Pawn->GetActorForwardVector();
+			case EPieInputProbeProfile::MoveBackward:
+				return -Pawn->GetActorForwardVector();
+			case EPieInputProbeProfile::MoveRight:
+				return Pawn->GetActorRightVector();
+			case EPieInputProbeProfile::MoveLeft:
+				return -Pawn->GetActorRightVector();
+			default:
+				return FVector::ZeroVector;
+			}
+		}
+
+		TSharedPtr<FJsonObject> MakePieInputProbeVectorObject(const FVector& Vector)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetNumberField(TEXT("x"), Vector.X);
+			Object->SetNumberField(TEXT("y"), Vector.Y);
+			Object->SetNumberField(TEXT("z"), Vector.Z);
+			return Object;
+		}
+
+		TSharedPtr<FJsonObject> MakePieInputProbeRotatorObject(const FRotator& Rotator)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetNumberField(TEXT("pitch"), Rotator.Pitch);
+			Object->SetNumberField(TEXT("yaw"), Rotator.Yaw);
+			Object->SetNumberField(TEXT("roll"), Rotator.Roll);
+			return Object;
+		}
+
+		double GetPieInputProbeDisplacementCm(const FPieInputProbeState& State)
+		{
+			return static_cast<double>(FVector::Dist(State.StartLocation, State.EndLocation));
+		}
+
+		double GetPieInputProbeRotationDeltaDegrees(const FPieInputProbeState& State)
+		{
+			const double PitchDelta = FMath::Abs(FMath::FindDeltaAngleDegrees(State.StartRotation.Pitch, State.EndRotation.Pitch));
+			const double YawDelta = FMath::Abs(FMath::FindDeltaAngleDegrees(State.StartRotation.Yaw, State.EndRotation.Yaw));
+			const double RollDelta = FMath::Abs(FMath::FindDeltaAngleDegrees(State.StartRotation.Roll, State.EndRotation.Roll));
+			return FMath::Max3(PitchDelta, YawDelta, RollDelta);
+		}
+
+		bool DidPieInputProbeMove(const FPieInputProbeState& State)
+		{
+			return GetPieInputProbeDisplacementCm(State) > 1.0 || GetPieInputProbeRotationDeltaDegrees(State) > 0.5;
+		}
+
+		FString GetPieInputProbeInjectionMethod(const FPieInputProbeState& State)
+		{
+			if (State.bInputLayerAccepted && State.bUsedDirectFallback)
+			{
+				return TEXT("input_key_event_args_with_direct_fallback");
+			}
+			if (State.bUsedDirectFallback)
+			{
+				return TEXT("direct_pawn_fallback");
+			}
+			return TEXT("input_key_event_args");
+		}
+
+		TSharedPtr<FJsonObject> MakePieInputProbeResultObject(const FPieInputProbeState& State)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("probeId"), State.ProbeId);
+			Object->SetStringField(TEXT("status"), State.Status);
+			Object->SetStringField(TEXT("inputProfile"), State.InputProfile);
+			Object->SetObjectField(TEXT("startLocation"), MakePieInputProbeVectorObject(State.StartLocation));
+			Object->SetObjectField(TEXT("endLocation"), MakePieInputProbeVectorObject(State.EndLocation));
+			Object->SetObjectField(TEXT("startRotation"), MakePieInputProbeRotatorObject(State.StartRotation));
+			Object->SetObjectField(TEXT("endRotation"), MakePieInputProbeRotatorObject(State.EndRotation));
+			Object->SetNumberField(TEXT("durationSeconds"), State.DurationSeconds);
+			Object->SetNumberField(TEXT("elapsedSeconds"), State.ElapsedSeconds);
+			Object->SetNumberField(TEXT("sampleCount"), State.SampleCount);
+			Object->SetNumberField(TEXT("displacement"), GetPieInputProbeDisplacementCm(State));
+			Object->SetNumberField(TEXT("rotationDelta"), GetPieInputProbeRotationDeltaDegrees(State));
+			Object->SetBoolField(TEXT("moved"), DidPieInputProbeMove(State));
+			Object->SetStringField(TEXT("injectionMethod"), GetPieInputProbeInjectionMethod(State));
+			if (!State.ErrorKind.IsEmpty())
+			{
+				Object->SetStringField(TEXT("errorKind"), State.ErrorKind);
+			}
+			if (!State.Message.IsEmpty())
+			{
+				Object->SetStringField(TEXT("message"), State.Message);
+			}
+			return Object;
+		}
+
+		bool SendPieInputProbeKeyEvent(APlayerController* PlayerController, const FKey& Key, EInputEvent Event, float Amount)
+		{
+			if (!PlayerController || !Key.IsValid())
+			{
+				return false;
+			}
+			FInputKeyEventArgs Args = FInputKeyEventArgs::CreateSimulated(Key, Event, Amount, 1, INPUTDEVICEID_NONE);
+			return PlayerController->InputKey(Args);
+		}
+
+		bool SendPieInputProbeAxisEvent(APlayerController* PlayerController, const FKey& Key, float Amount, float DeltaTime)
+		{
+			if (!PlayerController || !Key.IsValid())
+			{
+				return false;
+			}
+			FInputKeyEventArgs Args(nullptr, INPUTDEVICEID_NONE, Key, Amount, FMath::Max(DeltaTime, KINDA_SMALL_NUMBER), 1, FPlatformTime::Cycles64());
+			return PlayerController->InputKey(Args);
+		}
+
+		void ApplyPieInputProbeDirectFallback(FPieInputProbeState& State, EPieInputProbeProfile Profile, APlayerController* PlayerController, APawn* Pawn, float DeltaTime)
+		{
+			State.bUsedDirectFallback = true;
+			if (Profile == EPieInputProbeProfile::Jump)
+			{
+				if (!State.bSentDirectJump)
+				{
+					if (ACharacter* Character = Cast<ACharacter>(Pawn))
+					{
+						Character->Jump();
+						State.bSentDirectJump = true;
+					}
+				}
+				return;
+			}
+			if (Profile == EPieInputProbeProfile::LookYaw)
+			{
+				if (PlayerController)
+				{
+					PlayerController->AddYawInput(45.0f * FMath::Max(DeltaTime, KINDA_SMALL_NUMBER));
+				}
+				return;
+			}
+			if (Profile == EPieInputProbeProfile::LookPitch)
+			{
+				if (PlayerController)
+				{
+					PlayerController->AddPitchInput(45.0f * FMath::Max(DeltaTime, KINDA_SMALL_NUMBER));
+				}
+				return;
+			}
+
+			const FVector Direction = GetPieInputProbeDirectMovement(Pawn, Profile);
+			if (!Direction.IsNearlyZero() && Pawn)
+			{
+				Pawn->AddMovementInput(Direction.GetSafeNormal(), 1.0f);
+			}
+		}
+
+		void InjectPieInputProbeInput(FPieInputProbeState& State, float DeltaTime)
+		{
+			EPieInputProbeProfile Profile;
+			if (!ParsePieInputProbeProfile(State.InputProfile, Profile))
+			{
+				return;
+			}
+
+			APlayerController* PlayerController = State.PlayerController.Get();
+			APawn* Pawn = State.Pawn.Get();
+			const FKey Key = GetPieInputProbeKey(Profile);
+			bool bAccepted = false;
+			if (IsPieInputProbeLookProfile(Profile))
+			{
+				bAccepted = SendPieInputProbeAxisEvent(PlayerController, Key, 1.0f, DeltaTime);
+			}
+			else if (Profile == EPieInputProbeProfile::Jump)
+			{
+				if (!State.bPressedInputKey)
+				{
+					bAccepted = SendPieInputProbeKeyEvent(PlayerController, Key, IE_Pressed, 1.0f);
+					State.bPressedInputKey = true;
+				}
+				else
+				{
+					bAccepted = State.bInputLayerAccepted;
+				}
+			}
+			else
+			{
+				bAccepted = SendPieInputProbeKeyEvent(PlayerController, Key, State.bPressedInputKey ? IE_Repeat : IE_Pressed, 1.0f);
+				State.bPressedInputKey = true;
+			}
+
+			State.bInputLayerAccepted = State.bInputLayerAccepted || bAccepted;
+			if (!bAccepted)
+			{
+				ApplyPieInputProbeDirectFallback(State, Profile, PlayerController, Pawn, DeltaTime);
+			}
+		}
+
+		void ReleasePieInputProbeInput(FPieInputProbeState& State)
+		{
+			if (State.bReleasedInputKey)
+			{
+				return;
+			}
+			EPieInputProbeProfile Profile;
+			if (!ParsePieInputProbeProfile(State.InputProfile, Profile))
+			{
+				return;
+			}
+
+			APlayerController* PlayerController = State.PlayerController.Get();
+			const FKey Key = GetPieInputProbeKey(Profile);
+			if (IsPieInputProbeLookProfile(Profile))
+			{
+				SendPieInputProbeAxisEvent(PlayerController, Key, 0.0f, 0.016f);
+			}
+			else if (State.bPressedInputKey)
+			{
+				SendPieInputProbeKeyEvent(PlayerController, Key, IE_Released, 0.0f);
+			}
+			if (State.bSentDirectJump)
+			{
+				if (ACharacter* Character = Cast<ACharacter>(State.Pawn.Get()))
+				{
+					Character->StopJumping();
+				}
+			}
+			State.bReleasedInputKey = true;
+		}
+
+		void FinishPieInputProbe(FPieInputProbeState& State, const FString& Message)
+		{
+			ReleasePieInputProbeInput(State);
+			if (APawn* Pawn = State.Pawn.Get())
+			{
+				State.EndLocation = Pawn->GetActorLocation();
+				State.EndRotation = Pawn->GetActorRotation();
+			}
+			State.Status = TEXT("done");
+			State.Message = Message;
+		}
+
+		bool HasSamplingPieInputProbeLocked()
+		{
+			for (const TPair<FString, FPieInputProbeState>& Pair : GPieInputProbeStates)
+			{
+				if (Pair.Value.Status == TEXT("sampling"))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		void UnregisterPieInputProbeEndPieDelegate()
+		{
+			if (GPieInputProbeEndPieHandle.IsValid())
+			{
+				FEditorDelegates::EndPIE.Remove(GPieInputProbeEndPieHandle);
+				GPieInputProbeEndPieHandle.Reset();
+			}
+		}
+
+		void MarkPieInputProbesDoneForEndPie()
+		{
+			FScopeLock Lock(&GPieInputProbeMutex);
+			for (TPair<FString, FPieInputProbeState>& Pair : GPieInputProbeStates)
+			{
+				FPieInputProbeState& State = Pair.Value;
+				if (State.Status == TEXT("sampling"))
+				{
+					State.ErrorKind = TEXT("PieEnded");
+					if (APawn* Pawn = State.Pawn.Get())
+					{
+						State.EndLocation = Pawn->GetActorLocation();
+						State.EndRotation = Pawn->GetActorRotation();
+					}
+					State.Status = TEXT("done");
+					State.Message = TEXT("PIE ended before the input probe completed.");
+				}
+			}
+			if (GPieInputProbeTickerHandle.IsValid())
+			{
+				FTSTicker::GetCoreTicker().RemoveTicker(GPieInputProbeTickerHandle);
+				GPieInputProbeTickerHandle.Reset();
+			}
+		}
+
+		void RegisterPieInputProbeEndPieDelegate()
+		{
+			if (GPieInputProbeEndPieHandle.IsValid())
+			{
+				return;
+			}
+			GPieInputProbeEndPieHandle = FEditorDelegates::EndPIE.AddLambda([](const bool bIsSimulating)
+			{
+				(void)bIsSimulating;
+				MarkPieInputProbesDoneForEndPie();
+			});
+		}
+
+		bool TickActivePieInputProbes(float DeltaTime)
+		{
+			if (!IsInGameThread())
+			{
+				return true;
+			}
+
+			TArray<FString> ProbeIds;
+			{
+				FScopeLock Lock(&GPieInputProbeMutex);
+				for (const TPair<FString, FPieInputProbeState>& Pair : GPieInputProbeStates)
+				{
+					if (Pair.Value.Status == TEXT("sampling"))
+					{
+						ProbeIds.Add(Pair.Key);
+					}
+				}
+			}
+
+			for (const FString& ProbeId : ProbeIds)
+			{
+				FPieInputProbeState State;
+				{
+					FScopeLock Lock(&GPieInputProbeMutex);
+					FPieInputProbeState* StoredState = GPieInputProbeStates.Find(ProbeId);
+					if (!StoredState || StoredState->Status != TEXT("sampling"))
+					{
+						continue;
+					}
+					State = *StoredState;
+				}
+
+				APawn* Pawn = State.Pawn.Get();
+				APlayerController* PlayerController = State.PlayerController.Get();
+				if (!GEditor || !GEditor->PlayWorld || !Pawn || !PlayerController)
+				{
+					State.ErrorKind = TEXT("PieUnavailable");
+					FinishPieInputProbe(State, TEXT("PIE, player controller, or pawn became unavailable during sampling."));
+				}
+				else
+				{
+					InjectPieInputProbeInput(State, DeltaTime);
+					State.ElapsedSeconds += FMath::Max(0.0f, DeltaTime);
+					State.EndLocation = Pawn->GetActorLocation();
+					State.EndRotation = Pawn->GetActorRotation();
+					++State.SampleCount;
+					if (State.ElapsedSeconds >= State.DurationSeconds)
+					{
+						FinishPieInputProbe(State, TEXT("PIE input probe completed."));
+					}
+				}
+
+				{
+					FScopeLock Lock(&GPieInputProbeMutex);
+					GPieInputProbeStates.Add(ProbeId, State);
+				}
+			}
+
+			{
+				FScopeLock Lock(&GPieInputProbeMutex);
+				if (!HasSamplingPieInputProbeLocked())
+				{
+					GPieInputProbeTickerHandle.Reset();
+					UnregisterPieInputProbeEndPieDelegate();
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void EnsurePieInputProbeTicker()
+		{
+			if (!GPieInputProbeTickerHandle.IsValid())
+			{
+				RegisterPieInputProbeEndPieDelegate();
+				GPieInputProbeTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateStatic(&TickActivePieInputProbes), 0.0f);
+			}
+		}
+
+		void ResetPieInputProbeState()
+		{
+			FScopeLock Lock(&GPieInputProbeMutex);
+			if (GPieInputProbeTickerHandle.IsValid())
+			{
+				FTSTicker::GetCoreTicker().RemoveTicker(GPieInputProbeTickerHandle);
+				GPieInputProbeTickerHandle.Reset();
+			}
+			UnregisterPieInputProbeEndPieDelegate();
+			GPieInputProbeStates.Reset();
 		}
 
 		int32 GetClampedIntArgument(const FJsonObject& Arguments, const FString& FieldName, int32 DefaultValue, int32 MinValue, int32 MaxValue)
@@ -773,81 +1278,6 @@ namespace UnrealMcp
 			return BindingObject;
 		}
 
-		struct FPlayerControlsBeginPieWaitResult
-		{
-			bool bBeginPieObserved = false;
-			bool bTimedOut = false;
-			bool bPlayWorldAvailable = false;
-			FString Message;
-		};
-
-		FPlayerControlsBeginPieWaitResult WaitForBeginPieForPlayerControls(double TimeoutSeconds)
-		{
-			FPlayerControlsBeginPieWaitResult Result;
-			if (!GEditor)
-			{
-				Result.Message = TEXT("GEditor is unavailable.");
-				return Result;
-			}
-
-			bool bObservedBeginPie = false;
-			FDelegateHandle BeginPieHandle = FEditorDelegates::BeginPIE.AddLambda([&bObservedBeginPie](const bool bIsSimulating)
-			{
-				(void)bIsSimulating;
-				bObservedBeginPie = true;
-			});
-
-			const double ClampedTimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1.0, 60.0);
-			const double StartedAtSeconds = FPlatformTime::Seconds();
-			while ((FPlatformTime::Seconds() - StartedAtSeconds) < ClampedTimeoutSeconds)
-			{
-				UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
-				if (PlayWorld && (bObservedBeginPie || PlayWorld->HasBegunPlay()))
-				{
-					Result.bBeginPieObserved = bObservedBeginPie || PlayWorld->HasBegunPlay();
-					Result.bPlayWorldAvailable = true;
-					break;
-				}
-
-				if (GEditor)
-				{
-					GEditor->Tick(0.05f, false);
-				}
-				FPlatformProcess::Sleep(0.01f);
-			}
-
-			if (BeginPieHandle.IsValid())
-			{
-				FEditorDelegates::BeginPIE.Remove(BeginPieHandle);
-			}
-
-			if (!Result.bPlayWorldAvailable)
-			{
-				Result.bTimedOut = true;
-				Result.Message = TEXT("Timed out waiting for BeginPIE and PlayWorld.");
-			}
-			return Result;
-		}
-
-		bool RequestStopPieAndWaitForPlayerControls(double TimeoutSeconds)
-		{
-			RequestEndPieOnGameThread();
-			const double StartedAtSeconds = FPlatformTime::Seconds();
-			while ((FPlatformTime::Seconds() - StartedAtSeconds) < FMath::Clamp(TimeoutSeconds, 1.0, 30.0))
-			{
-				if (!GEditor || (GEditor->PlayWorld == nullptr && !GEditor->GetPlaySessionRequest().IsSet()))
-				{
-					return true;
-				}
-				if (GEditor)
-				{
-					GEditor->Tick(0.05f, false);
-				}
-				FPlatformProcess::Sleep(0.01f);
-			}
-			return !GEditor || GEditor->PlayWorld == nullptr;
-		}
-
 		class FScopedPlayerControlsVerificationLock
 		{
 		public:
@@ -894,6 +1324,25 @@ namespace UnrealMcp
 			bool bAcquired = false;
 			FString RunId;
 		};
+
+		bool RequestPieForPlayerControls()
+		{
+			if (!GEditor)
+			{
+				return false;
+			}
+
+#if WITH_DEV_AUTOMATION_TESTS
+			if (bSuppressPlayerControlsPieRequestForTests)
+			{
+				return true;
+			}
+#endif
+
+			FRequestPlaySessionParams SessionParams;
+			GEditor->RequestPlaySession(SessionParams);
+			return true;
+		}
 
 		TSharedPtr<FJsonObject> InspectPlayerControlsRuntime(const FString& ExpectedPawnClassText, bool bBeginPieObserved, bool bPieAlreadyActive)
 		{
@@ -1029,7 +1478,6 @@ namespace UnrealMcp
 			}
 
 			bool bBeginPieObserved = bPieAlreadyActive;
-			bool bStartedPie = false;
 			if (!bPieAlreadyActive)
 			{
 				FScopedPlayerControlsVerificationLock VerificationLock;
@@ -1045,36 +1493,15 @@ namespace UnrealMcp
 					}
 					return MakeExecutionResult(TEXT("Another verification run is already active."), Content, true);
 				}
-				Content->SetStringField(TEXT("verificationRunId"), VerificationLock.GetRunId());
 
-				FRequestPlaySessionParams SessionParams;
-				GEditor->RequestPlaySession(SessionParams);
-				bStartedPie = true;
-
-				const FPlayerControlsBeginPieWaitResult BeginPieWait = WaitForBeginPieForPlayerControls(15.0);
-				bBeginPieObserved = BeginPieWait.bBeginPieObserved;
-				Content->SetBoolField(TEXT("beginPieObserved"), BeginPieWait.bBeginPieObserved);
-				Content->SetBoolField(TEXT("beginPieTimedOut"), BeginPieWait.bTimedOut);
-				Content->SetStringField(TEXT("beginPieWaitMessage"), BeginPieWait.Message);
-				if (!BeginPieWait.bPlayWorldAvailable)
-				{
-					Content->SetBoolField(TEXT("stopRequested"), true);
-					Content->SetBoolField(TEXT("stopObserved"), RequestStopPieAndWaitForPlayerControls(10.0));
-					return MakePlayerControlsErrorResult(TEXT("BeginPieTimeout"), BeginPieWait.Message, Content);
-				}
-
-				TSharedPtr<FJsonObject> RuntimeContent = InspectPlayerControlsRuntime(ExpectedPawnClassText, bBeginPieObserved, false);
-				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : RuntimeContent->Values)
-				{
-					Content->SetField(Pair.Key, Pair.Value);
-				}
-
-				if (bStopAfter)
-				{
-					Content->SetBoolField(TEXT("stopRequested"), true);
-					Content->SetBoolField(TEXT("stopObserved"), RequestStopPieAndWaitForPlayerControls(10.0));
-				}
-				return MakeExecutionResult(TEXT("Player controls verification completed."), Content, false);
+				const bool bPieRequested = RequestPieForPlayerControls();
+				Content->SetBoolField(TEXT("needsPie"), true);
+				Content->SetBoolField(TEXT("canVerifyRuntime"), false);
+				Content->SetBoolField(TEXT("beginPieObserved"), false);
+				Content->SetBoolField(TEXT("pendingPie"), bPieRequested);
+				Content->SetBoolField(TEXT("pieRequested"), bPieRequested);
+				Content->SetStringField(TEXT("note"), TEXT("PIE start requested; call verify_player_controls again after BeginPIE."));
+				return MakeExecutionResult(TEXT("PIE start requested; call verify_player_controls again after BeginPIE."), Content, false);
 			}
 
 			TSharedPtr<FJsonObject> RuntimeContent = InspectPlayerControlsRuntime(ExpectedPawnClassText, bBeginPieObserved, true);
@@ -1083,12 +1510,188 @@ namespace UnrealMcp
 				Content->SetField(Pair.Key, Pair.Value);
 			}
 			Content->SetBoolField(TEXT("beginPieObserved"), bBeginPieObserved);
-			if (bStopAfter && (bStartedPie || bPieAlreadyActive))
-			{
-				Content->SetBoolField(TEXT("stopRequested"), true);
-				Content->SetBoolField(TEXT("stopObserved"), RequestStopPieAndWaitForPlayerControls(10.0));
-			}
 			return MakeExecutionResult(TEXT("Player controls verification completed."), Content, false);
+		}
+
+		FUnrealMcpExecutionResult PieInputProbeStartTool(const FJsonObject& Arguments)
+		{
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+			Content->SetStringField(TEXT("status"), TEXT("rejected"));
+
+			FString InputProfile;
+			if (!Arguments.TryGetStringField(TEXT("inputProfile"), InputProfile) || InputProfile.TrimStartAndEnd().IsEmpty())
+			{
+				Content->SetStringField(TEXT("errorKind"), TEXT("MissingInputProfile"));
+				return MakeExecutionResult(TEXT("Missing required field 'inputProfile' for action=start."), Content, true);
+			}
+			InputProfile = InputProfile.TrimStartAndEnd();
+
+			EPieInputProbeProfile ParsedProfile;
+			if (!ParsePieInputProbeProfile(InputProfile, ParsedProfile))
+			{
+				Content->SetStringField(TEXT("errorKind"), TEXT("InvalidInputProfile"));
+				Content->SetStringField(TEXT("inputProfile"), InputProfile);
+				return MakeExecutionResult(FString::Printf(TEXT("Unsupported inputProfile '%s'."), *InputProfile), Content, true);
+			}
+
+			double DurationSeconds = 0.5;
+			Arguments.TryGetNumberField(TEXT("durationSeconds"), DurationSeconds);
+			DurationSeconds = FMath::Clamp(DurationSeconds, 0.05, 5.0);
+
+			UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
+			if (!PlayWorld)
+			{
+				Content->SetBoolField(TEXT("needsPie"), true);
+				Content->SetBoolField(TEXT("canVerifyRuntime"), false);
+				Content->SetStringField(TEXT("status"), TEXT("needs_pie"));
+				return MakeExecutionResult(TEXT("PIE is required to run an input probe."), Content, false);
+			}
+
+			APlayerController* PlayerController = PlayWorld->GetFirstPlayerController();
+			APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+			if (!PlayerController || !Pawn)
+			{
+				Content->SetBoolField(TEXT("needsPie"), false);
+				Content->SetBoolField(TEXT("canVerifyRuntime"), false);
+				Content->SetStringField(TEXT("errorKind"), TEXT("NoPossessedPawn"));
+				return MakeExecutionResult(TEXT("PIE is active, but no possessed pawn was found for player 0."), Content, true);
+			}
+
+			FPieInputProbeState State;
+			State.ProbeId = FString::Printf(TEXT("pie-input-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12).ToLower());
+			State.InputProfile = InputProfile;
+			State.PlayerController = PlayerController;
+			State.Pawn = Pawn;
+			State.StartLocation = Pawn->GetActorLocation();
+			State.EndLocation = State.StartLocation;
+			State.StartRotation = Pawn->GetActorRotation();
+			State.EndRotation = State.StartRotation;
+			State.DurationSeconds = DurationSeconds;
+
+			{
+				FScopeLock Lock(&GPieInputProbeMutex);
+				GPieInputProbeStates.Add(State.ProbeId, State);
+			}
+			EnsurePieInputProbeTicker();
+
+			Content = MakePieInputProbeResultObject(State);
+			Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+			Content->SetBoolField(TEXT("needsPie"), false);
+			Content->SetBoolField(TEXT("canVerifyRuntime"), true);
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Started PIE input probe '%s'."), *State.ProbeId),
+				Content,
+				false);
+		}
+
+		FUnrealMcpExecutionResult PieInputProbeResultTool(const FJsonObject& Arguments)
+		{
+			FString ProbeId;
+			if (!Arguments.TryGetStringField(TEXT("probeId"), ProbeId) || ProbeId.TrimStartAndEnd().IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+				Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+				Content->SetStringField(TEXT("errorKind"), TEXT("MissingProbeId"));
+				return MakeExecutionResult(TEXT("Missing required field 'probeId' for action=result."), Content, true);
+			}
+			ProbeId = ProbeId.TrimStartAndEnd();
+
+			FPieInputProbeState State;
+			{
+				FScopeLock Lock(&GPieInputProbeMutex);
+				const FPieInputProbeState* StoredState = GPieInputProbeStates.Find(ProbeId);
+				if (!StoredState)
+				{
+					TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+					Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+					Content->SetStringField(TEXT("probeId"), ProbeId);
+					Content->SetStringField(TEXT("errorKind"), TEXT("UnknownProbeId"));
+					return MakeExecutionResult(FString::Printf(TEXT("Unknown or expired PIE input probe '%s'."), *ProbeId), Content, true);
+				}
+				State = *StoredState;
+			}
+
+			TSharedPtr<FJsonObject> Content = MakePieInputProbeResultObject(State);
+			Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+			return MakeExecutionResult(
+				State.Status == TEXT("done") ? TEXT("PIE input probe completed.") : TEXT("PIE input probe is still sampling."),
+				Content,
+				false);
+		}
+
+		FUnrealMcpExecutionResult PieInputProbeTool(const FJsonObject& Arguments)
+		{
+			FString Action;
+			if (!Arguments.TryGetStringField(TEXT("action"), Action) || Action.TrimStartAndEnd().IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+				Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+				Content->SetStringField(TEXT("errorKind"), TEXT("MissingAction"));
+				return MakeExecutionResult(TEXT("Missing required field 'action'."), Content, true);
+			}
+			Action = Action.TrimStartAndEnd();
+			if (Action == TEXT("start"))
+			{
+				return PieInputProbeStartTool(Arguments);
+			}
+			if (Action == TEXT("result"))
+			{
+				return PieInputProbeResultTool(Arguments);
+			}
+
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("pie_input_probe"));
+			Content->SetStringField(TEXT("errorKind"), TEXT("InvalidAction"));
+			Content->SetStringField(TEXT("requestedAction"), Action);
+			return MakeExecutionResult(FString::Printf(TEXT("Unsupported pie_input_probe action '%s'."), *Action), Content, true);
+		}
+
+		FUnrealMcpExecutionResult VerifyViewportWidgetsTool(const FJsonObject& Arguments)
+		{
+			FString WidgetClassFilter;
+			Arguments.TryGetStringField(TEXT("widgetClassFilter"), WidgetClassFilter);
+			WidgetClassFilter = WidgetClassFilter.TrimStartAndEnd();
+
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("verify_viewport_widgets"));
+			Content->SetStringField(TEXT("widgetClassFilter"), WidgetClassFilter);
+
+			UWorld* PlayWorld = GEditor ? GEditor->PlayWorld : nullptr;
+			if (!PlayWorld)
+			{
+				Content->SetBoolField(TEXT("needsPie"), true);
+				Content->SetNumberField(TEXT("count"), 0);
+				Content->SetArrayField(TEXT("widgets"), TArray<TSharedPtr<FJsonValue>>());
+				return MakeExecutionResult(TEXT("PIE is required to verify viewport widgets."), Content, false);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> WidgetValues;
+			for (TObjectIterator<UUserWidget> WidgetIt; WidgetIt; ++WidgetIt)
+			{
+				UUserWidget* Widget = *WidgetIt;
+				if (!Widget || Widget->HasAnyFlags(RF_ClassDefaultObject) || Widget->GetWorld() != PlayWorld || !Widget->IsInViewport())
+				{
+					continue;
+				}
+
+				UClass* WidgetClass = Widget->GetClass();
+				const FString ClassPath = WidgetClass ? WidgetClass->GetPathName() : FString();
+				if (!WidgetClassFilter.IsEmpty() && ClassPath != WidgetClassFilter)
+				{
+					continue;
+				}
+
+				TSharedPtr<FJsonObject> WidgetObject = MakeShared<FJsonObject>();
+				WidgetObject->SetStringField(TEXT("name"), Widget->GetName());
+				WidgetObject->SetStringField(TEXT("class"), ClassPath);
+				WidgetValues.Add(MakeShared<FJsonValueObject>(WidgetObject));
+			}
+
+			Content->SetBoolField(TEXT("needsPie"), false);
+			Content->SetNumberField(TEXT("count"), WidgetValues.Num());
+			Content->SetArrayField(TEXT("widgets"), WidgetValues);
+			return MakeExecutionResult(TEXT("Viewport widget verification completed."), Content, false);
 		}
 
 		FUnrealMcpExecutionResult PieSmokeTool(const FJsonObject& Arguments)
@@ -1187,6 +1790,16 @@ namespace UnrealMcp
 			OutResult = VerifyPlayerControlsTool(Arguments);
 			return true;
 		}
+		if (ToolName == TEXT("unreal.pie_input_probe"))
+		{
+			OutResult = PieInputProbeTool(Arguments);
+			return true;
+		}
+		if (ToolName == TEXT("unreal.verify_viewport_widgets"))
+		{
+			OutResult = VerifyViewportWidgetsTool(Arguments);
+			return true;
+		}
 		return false;
 	}
 
@@ -1211,6 +1824,7 @@ namespace UnrealMcp
 			FTSTicker::GetCoreTicker().RemoveTicker(GPieSmokeTickerHandle);
 			GPieSmokeTickerHandle.Reset();
 		}
+		ResetPieInputProbeState();
 	}
 
 	bool MarkActivePieSmokeStaleFromAutomationLock(const FString& RunId, const FString& StaleReason)
@@ -1233,6 +1847,7 @@ namespace UnrealMcp
 			FTSTicker::GetCoreTicker().RemoveTicker(GPieSmokeTickerHandle);
 			GPieSmokeTickerHandle.Reset();
 		}
+		ResetPieInputProbeState();
 	}
 
 	bool ParsePieSmokeArgumentsForTests(const FJsonObject& Arguments, int32& OutTimeoutSeconds, int32& OutAliveWindowSeconds, FString& OutErrorKind)
@@ -1246,6 +1861,11 @@ namespace UnrealMcp
 		const bool bValid = ResolvePieSmokeMapPath(MapPath, Resolution, OutErrorKind, OutMessage);
 		OutMatchedMap = Resolution.ObjectPath;
 		return bValid;
+	}
+
+	void SetVerifyPlayerControlsSuppressPieRequestForTests(bool bSuppress)
+	{
+		bSuppressPlayerControlsPieRequestForTests = bSuppress;
 	}
 
 	void CreateActivePieSmokeRunWithDelegatesForTests(const FString& RunId)

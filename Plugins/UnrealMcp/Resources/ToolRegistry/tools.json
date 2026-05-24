@@ -953,6 +953,332 @@
       "notes": ""
     },
     {
+      "name": "unreal.bp_add_input_axis_event_node",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_add_input_axis_event_node",
+      "title": "Add Input Axis Event Node",
+      "description": "Adds a legacy InputAxis event node to a Blueprint EventGraph. The graphName field is accepted for forward compatibility, but only EventGraph is supported in this release.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: Blueprint gameplay node write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "graphName": {
+            "type": "string",
+            "description": "Target graph name. Defaults to EventGraph; only EventGraph is supported in this release.",
+            "default": "EventGraph"
+          },
+          "axisName": {
+            "type": "string",
+            "description": "Legacy input axis mapping name."
+          },
+          "x": {
+            "type": "number",
+            "description": "Graph X position.",
+            "default": 0
+          },
+          "y": {
+            "type": "number",
+            "description": "Graph Y position.",
+            "default": 0
+          }
+        },
+        "required": [
+          "blueprintPath",
+          "axisName"
+        ]
+      },
+      "notes": "EventGraph-only for v0.28; compile/save is performed by separate Blueprint save tools."
+    },
+    {
+      "name": "unreal.bp_add_input_action_event_node",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_add_input_action_event_node",
+      "title": "Add Input Action Event Node",
+      "description": "Adds a legacy InputAction event node to a Blueprint EventGraph. The graphName field is accepted for forward compatibility, but only EventGraph is supported in this release.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: Blueprint gameplay node write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "graphName": {
+            "type": "string",
+            "description": "Target graph name. Defaults to EventGraph; only EventGraph is supported in this release.",
+            "default": "EventGraph"
+          },
+          "actionName": {
+            "type": "string",
+            "description": "Legacy input action mapping name."
+          },
+          "x": {
+            "type": "number",
+            "description": "Graph X position.",
+            "default": 0
+          },
+          "y": {
+            "type": "number",
+            "description": "Graph Y position.",
+            "default": 0
+          }
+        },
+        "required": [
+          "blueprintPath",
+          "actionName"
+        ]
+      },
+      "notes": "EventGraph-only for v0.28; compile/save is performed by separate Blueprint save tools."
+    },
+    {
+      "name": "unreal.bp_add_component",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_add_component",
+      "title": "Add Blueprint Component",
+      "description": "Adds a component to a Blueprint SimpleConstructionScript and optionally attaches it under a named parent component.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: Blueprint component authoring write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "componentClass": {
+            "type": "string",
+            "description": "Component class path, for example /Script/Engine.SpringArmComponent."
+          },
+          "componentName": {
+            "type": "string",
+            "description": "New component variable name."
+          },
+          "attachParentComponentName": {
+            "type": "string",
+            "description": "Optional SCS or native scene component name to attach under. Empty uses the Blueprint root or DefaultSceneRoot.",
+            "default": ""
+          }
+        },
+        "required": [
+          "blueprintPath",
+          "componentClass",
+          "componentName"
+        ]
+      },
+      "notes": "Compile/save is performed by separate Blueprint save tools."
+    },
+    {
+      "name": "unreal.bp_set_component_property",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_set_component_property",
+      "title": "Set Blueprint Component Property",
+      "description": "Sets an allowlisted editable property on a Blueprint component template and returns a readback value.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: bounded Blueprint component property write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "componentName": {
+            "type": "string",
+            "description": "SCS component variable name."
+          },
+          "propertyName": {
+            "type": "string",
+            "description": "Direct component template property name to set."
+          },
+          "value": {
+            "type": "string",
+            "description": "Value text imported through Unreal property serialization."
+          }
+        },
+        "required": [
+          "blueprintPath",
+          "componentName",
+          "propertyName",
+          "value"
+        ]
+      },
+      "notes": "Only direct editable scalar/object reference/math struct properties are accepted."
+    },
+    {
+      "name": "unreal.bp_set_class_default",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_set_class_default",
+      "title": "Set Blueprint Class Default",
+      "description": "Sets an allowlisted editable property on a Blueprint generated class default object and returns a readback value.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: bounded Blueprint class default write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "propertyName": {
+            "type": "string",
+            "description": "Direct class default property name to set."
+          },
+          "value": {
+            "type": "string",
+            "description": "Value text imported through Unreal property serialization."
+          }
+        },
+        "required": [
+          "blueprintPath",
+          "propertyName",
+          "value"
+        ]
+      },
+      "notes": "Only direct editable scalar/object reference/math struct properties are accepted."
+    },
+    {
+      "name": "unreal.bp_add_gameplay_node",
+      "category": "blueprint",
+      "handlerName": "unreal.bp_add_gameplay_node",
+      "title": "Add Blueprint Gameplay Node",
+      "description": "Adds one of the supported Character/Pawn gameplay helper nodes to a Blueprint EventGraph. The graphName field is accepted for forward compatibility, but only EventGraph is supported in this release.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: Blueprint gameplay node write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blueprintPath": {
+            "type": "string",
+            "description": "Blueprint asset path to edit."
+          },
+          "graphName": {
+            "type": "string",
+            "description": "Target graph name. Defaults to EventGraph; only EventGraph is supported in this release.",
+            "default": "EventGraph"
+          },
+          "nodeKind": {
+            "type": "string",
+            "description": "Gameplay helper node to add.",
+            "enum": [
+              "AddMovementInput",
+              "AddControllerYawInput",
+              "AddControllerPitchInput",
+              "GetActorForwardVector",
+              "GetActorRightVector",
+              "GetControlRotation",
+              "Jump",
+              "FloatGreaterThan"
+            ]
+          },
+          "x": {
+            "type": "number",
+            "description": "Graph X position.",
+            "default": 0
+          },
+          "y": {
+            "type": "number",
+            "description": "Graph Y position.",
+            "default": 0
+          }
+        },
+        "required": [
+          "blueprintPath",
+          "nodeKind"
+        ]
+      },
+      "notes": "EventGraph-only for v0.28; compile/save is performed by separate Blueprint save tools."
+    },
+    {
       "name": "unreal.capture_project_snapshot",
       "category": "self-extension",
       "handlerName": "unreal.capture_project_snapshot",
@@ -8047,6 +8373,54 @@
       "notes": "C++ only. Reads during PIE because it does not mutate editor or world state."
     },
     {
+      "name": "unreal.actor_set_auto_possess",
+      "category": "actors",
+      "handlerName": "unreal.actor_set_auto_possess",
+      "title": "Set Actor Auto Possess",
+      "description": "Sets a Pawn actor's Auto Possess Player setting in the current editor world and returns readback evidence.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: current-level actor gameplay setup write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "actorName": {
+            "type": "string",
+            "description": "Actor label, object name, or unique actor path to edit."
+          },
+          "autoPossessPlayer": {
+            "type": "string",
+            "description": "AutoPossessPlayer value to set on the Pawn.",
+            "default": "Player0",
+            "enum": [
+              "Disabled",
+              "Player0",
+              "Player1",
+              "Player2",
+              "Player3"
+            ]
+          }
+        },
+        "required": [
+          "actorName"
+        ]
+      },
+      "notes": "Only Pawn actors expose AutoPossessPlayer."
+    },
+    {
       "name": "unreal.automation_list",
       "category": "verification",
       "handlerName": "unreal.automation_list",
@@ -8660,6 +9034,106 @@
       "notes": "Existence and possession verifier only: no input injection and no movement-delta assertion. A private BeginPIE wait helper is used when startIfNeeded=true."
     },
     {
+      "name": "unreal.pie_input_probe",
+      "category": "verification",
+      "handlerName": "unreal.pie_input_probe",
+      "title": "Probe PIE Input Movement",
+      "description": "Starts or polls an asynchronous PIE input probe that injects one gameplay input profile on the core ticker and reports movement or rotation deltas.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.28 runtime verification probe for real PIE movement or look deltas without editor tick pumping.",
+      "summaryTemplate": "Probe PIE input movement",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Start a new probe or poll an existing probe result.",
+            "enum": [
+              "start",
+              "result"
+            ]
+          },
+          "inputProfile": {
+            "type": "string",
+            "description": "Input profile to inject while action=start.",
+            "enum": [
+              "moveForward",
+              "moveBackward",
+              "moveRight",
+              "moveLeft",
+              "jump",
+              "lookYaw",
+              "lookPitch"
+            ]
+          },
+          "durationSeconds": {
+            "type": "number",
+            "description": "Sampling duration in seconds for action=start.",
+            "default": 0.5,
+            "minimum": 0.05,
+            "maximum": 5.0
+          },
+          "probeId": {
+            "type": "string",
+            "description": "Probe id returned by action=start; required when action=result."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "notes": "action=start requires an already-active PIE session and returns immediately; action=result polls the cached sampling result by probeId."
+    },
+    {
+      "name": "unreal.verify_viewport_widgets",
+      "category": "verification",
+      "handlerName": "unreal.verify_viewport_widgets",
+      "title": "Verify Viewport Widgets",
+      "description": "Lists UUserWidget instances that are currently in the PIE viewport, optionally filtered by generated widget class path.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/Verification.md",
+      "reason": "v0.28 read-only runtime verifier for on-screen PIE UMG widgets.",
+      "summaryTemplate": "Verify PIE viewport widgets",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "widgetClassFilter": {
+            "type": "string",
+            "description": "Optional exact widget generated class path filter, for example /Game/UI/WBP_TestHUD.WBP_TestHUD_C."
+          }
+        },
+        "required": []
+      },
+      "notes": "Read-only PIE inspection; returns needsPie=true when no PIE session is active."
+    },
+    {
       "name": "unreal.editor_diagnostics",
       "category": "verification",
       "handlerName": "unreal.editor_diagnostics",
@@ -8910,11 +9384,56 @@
       "notes": "C++ only. MVP maps common categories to UInputSettings, URendererSettings, and hardcoded config sections, returning KEY_NOT_FOUND for unsupported edge cases."
     },
     {
+      "name": "unreal.editor_set_map_game_mode",
+      "category": "editor",
+      "handlerName": "unreal.editor_set_map_game_mode",
+      "title": "Set Map GameMode",
+      "description": "Sets either the current world WorldSettings GameMode override or the project default GameMode and returns readback evidence.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "core",
+      "owner": "UEAtelier Core",
+      "docsPath": "README.md#tool-coverage",
+      "reason": "Explicit registry: gameplay map/project setup write tool with preflight and postcheck evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gameModeClassPath": {
+            "type": "string",
+            "description": "GameModeBase class path to set."
+          },
+          "scope": {
+            "type": "string",
+            "description": "Where to apply the GameMode.",
+            "default": "worldSettingsOverride",
+            "enum": [
+              "worldSettingsOverride",
+              "projectDefault"
+            ]
+          }
+        },
+        "required": [
+          "gameModeClassPath"
+        ]
+      },
+      "notes": "worldSettingsOverride marks the current map package dirty; projectDefault writes DefaultEngine.ini."
+    },
+    {
       "name": "unreal.configure_player_input",
       "category": "editor",
       "handlerName": "unreal.configure_player_input",
       "title": "Configure Player Input",
-      "description": "Configures standard player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics.",
+      "description": "Configures standard and arbitrary legacy player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics.",
       "exposure": "visible",
       "riskLevel": "medium",
       "requiresWrite": true,
@@ -8956,13 +9475,63 @@
           },
           "mappings": {
             "type": "object",
-            "description": "Optional overrides for the five standard player-control mappings.",
-            "additionalProperties": false,
+            "description": "Optional overrides for standard player-control mappings plus arbitrary legacy axis/action mapping names.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "description": "Legacy mapping kind. Use action for button-style events and axis for scaled continuous input.",
+                  "default": "axis",
+                  "enum": [
+                    "axis",
+                    "action"
+                  ]
+                },
+                "keys": {
+                  "type": "array",
+                  "description": "Keys to bind for this named mapping.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Input key name such as W, S, A, D, MouseX, MouseY, or SpaceBar."
+                      },
+                      "scale": {
+                        "type": "number",
+                        "description": "Axis scale for this key. Ignored for action mappings.",
+                        "default": 1
+                      }
+                    },
+                    "required": [
+                      "key"
+                    ]
+                  }
+                },
+                "inputActionPath": {
+                  "type": "string",
+                  "description": "Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."
+                }
+              },
+              "required": []
+            },
             "properties": {
               "MoveForward": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "description": "Legacy mapping kind. Use action for button-style events and axis for scaled continuous input.",
+                    "default": "axis",
+                    "enum": [
+                      "axis",
+                      "action"
+                    ]
+                  },
                   "keys": {
                     "type": "array",
                     "description": "Keys to bind for this named mapping.",
@@ -8996,6 +9565,15 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "description": "Legacy mapping kind. Use action for button-style events and axis for scaled continuous input.",
+                    "default": "axis",
+                    "enum": [
+                      "axis",
+                      "action"
+                    ]
+                  },
                   "keys": {
                     "type": "array",
                     "description": "Keys to bind for this named mapping.",
@@ -9029,6 +9607,15 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "description": "Legacy mapping kind. Use action for button-style events and axis for scaled continuous input.",
+                    "default": "axis",
+                    "enum": [
+                      "axis",
+                      "action"
+                    ]
+                  },
                   "keys": {
                     "type": "array",
                     "description": "Keys to bind for this named mapping.",
@@ -9062,6 +9649,15 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "description": "Legacy mapping kind. Use action for button-style events and axis for scaled continuous input.",
+                    "default": "axis",
+                    "enum": [
+                      "axis",
+                      "action"
+                    ]
+                  },
                   "keys": {
                     "type": "array",
                     "description": "Keys to bind for this named mapping.",
@@ -9095,6 +9691,15 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "description": "Legacy mapping kind. Use action for button-style events and axis for scaled continuous input.",
+                    "default": "axis",
+                    "enum": [
+                      "axis",
+                      "action"
+                    ]
+                  },
                   "keys": {
                     "type": "array",
                     "description": "Keys to bind for this named mapping.",

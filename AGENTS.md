@@ -16,7 +16,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: UEAtelier
-VersionName: 0.27.0
+VersionName: 0.28.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -134,8 +134,9 @@ drafts unless explicitly asked.
   Content Browser sync, save dirty packages, asset move, redirector fixup,
   dependency remap, and migration helpers.
 - Actor, Blueprint, Widget, and Material tools: readback, guarded edits,
-  creation, layout, graph/pin inspection, parameter inspection, and strict
-  schema writes.
+  creation, layout, graph/pin inspection, gameplay node/input event authoring,
+  Blueprint SCS component/default edits, map GameMode setup, actor auto-possess,
+  parameter inspection, and strict schema writes.
 - Self-extension: schema/C++ patch validation, Python user-extension scaffolds,
   `unreal.mcp_user_registry_reload`, `unreal.mcp_user_tool_smoke`, patch
   editing, dry-run apply, backups, build matrix, tests, pipeline, audit,
@@ -146,7 +147,8 @@ drafts unless explicitly asked.
   skill activity/drafts/promote, task extract/list/describe/rate/pin/promote,
   `unreal.automation_list`, `unreal.automation_run`,
   `unreal.automation_report`, `unreal.pie_smoke`,
-  `unreal.verify_player_controls`, and `unreal.editor_diagnostics`.
+  `unreal.verify_player_controls`, `unreal.pie_input_probe`,
+  `unreal.verify_viewport_widgets`, and `unreal.editor_diagnostics`.
 
 ## Tool Registry Status
 
@@ -156,7 +158,7 @@ The explicit ToolRegistry is central. Do not bypass it:
 `Tools/UnrealMcpToolRegistry/schema.json`, and
 `Schemas/UnrealMcpToolRegistry.schema.json`.
 
-At the time this file was written, the registry contained 164 entries across:
+At the time this file was written, the registry contained 174 entries across:
 actors, blueprint, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget.
 
@@ -168,8 +170,15 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.27.1 adds core player input configuration and
-existence-only player control verification; v0.27 walls core apply/pipeline off from the AI,
+Current project status: v0.28 adds eight visible core gameplay authoring tools:
+`unreal.bp_add_input_axis_event_node`,
+`unreal.bp_add_input_action_event_node`, `unreal.bp_add_component`,
+`unreal.bp_set_component_property`, `unreal.bp_set_class_default`,
+`unreal.bp_add_gameplay_node`, `unreal.editor_set_map_game_mode`, and
+`unreal.actor_set_auto_possess`, plus runtime verification tools
+`unreal.pie_input_probe` and `unreal.verify_viewport_widgets`; v0.27.1 adds
+core player input configuration, now including arbitrary legacy axis/action
+names, and existence-only player control verification; v0.27 walls core apply/pipeline off from the AI,
 makes AI self-extension the Python user-tool track only, keeps core promotion
 manual/developer-only and deferred, adds a `workflow_run` hidden-tool guard, and
 merges the three project skills into `mcp-self-extension`; v0.26 completes
@@ -183,9 +192,8 @@ v0.23 adds `cli-anything-ueatelier`; v0.22 adds `unreal.pie_smoke`; v0.21 adds
 `unreal.editor_diagnostics`; v0.20 hardens async automation runs and watchdog
 stale recovery; v0.19 completes Task Atlas Make Tool, To RAG ingestion, and
 label backfill; v0.19.1 disables Unity build for the UnrealMcp module after a
-UE 5.6 collision. `unreal.configure_fps_settings` and
-`unreal.bp_add_input_axis_event_node` remain scaffold-only pending functional
-verification.
+UE 5.6 collision. `unreal.configure_fps_settings` remains scaffold-only pending
+functional verification.
 
 Reform C v0.26 resolves the v0.25 self-extension incident by centralizing
 server-message provider prompts in
@@ -222,7 +230,8 @@ Knowledge: UnrealMcpKnowledgeBridge.h, UnrealMcpKnowledgeTools.cpp,
   UnrealMcpWorkflowTools.cpp
 Category handlers: UnrealMcpEditorTools.cpp,
   UnrealMcpEditorEngineVersionTool.cpp, UnrealMcpActorTools.cpp,
-  UnrealMcpBlueprintTools.cpp, UnrealMcpWidgetTools.cpp,
+  UnrealMcpBlueprintTools.cpp, UnrealMcpBlueprintGraphLibrary.cpp/.h,
+  UnrealMcpBlueprintComponentLibrary.cpp/.h, UnrealMcpWidgetTools.cpp,
   UnrealMcpScaffoldTools.cpp, UnrealMcpSelfExtension*.cpp,
   UnrealMcpMemoryTools.cpp, UnrealMcpSkillTools.cpp
 UI/assistant/tests: UnrealMcpChatPanel.cpp/.h,

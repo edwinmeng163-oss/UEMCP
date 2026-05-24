@@ -145,11 +145,13 @@ namespace UnrealMcp
 			KeysProperty->SetObjectField(TEXT("items"), MakePlayerInputKeySpecSchema());
 
 			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("kind"), MakeEnumStringProperty(TEXT("Legacy mapping kind. Use action for button-style events and axis for scaled continuous input."), TEXT("axis"), TArray<FString>{ TEXT("axis"), TEXT("action") }));
 			Properties->SetObjectField(TEXT("keys"), KeysProperty);
 			Properties->SetObjectField(TEXT("inputActionPath"), MakeStringProperty(TEXT("Optional Enhanced Input UInputAction asset path used when inputSystem is enhanced."), FString()));
 
 			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 			Schema->SetObjectField(TEXT("properties"), Properties);
+			Schema->SetArrayField(TEXT("required"), TArray<TSharedPtr<FJsonValue>>());
 			return Schema;
 		}
 
@@ -164,8 +166,9 @@ namespace UnrealMcp
 			Properties->SetObjectField(TEXT("Jump"), SlotSchema);
 
 			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
-			Schema->SetStringField(TEXT("description"), TEXT("Optional overrides for the five standard player-control mappings."));
+			Schema->SetStringField(TEXT("description"), TEXT("Optional overrides for standard player-control mappings plus arbitrary legacy axis/action mapping names."));
 			Schema->SetObjectField(TEXT("properties"), Properties);
+			Schema->SetObjectField(TEXT("additionalProperties"), SlotSchema);
 			return Schema;
 		}
 
@@ -193,6 +196,130 @@ namespace UnrealMcp
 			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
 			Schema->SetObjectField(TEXT("properties"), Properties);
 			return Schema;
+		}
+
+		TSharedPtr<FJsonObject> MakePieInputProbeSchema()
+		{
+			TArray<FString> Profiles = {
+				TEXT("moveForward"),
+				TEXT("moveBackward"),
+				TEXT("moveRight"),
+				TEXT("moveLeft"),
+				TEXT("jump"),
+				TEXT("lookYaw"),
+				TEXT("lookPitch")
+			};
+
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("action"), MakeEnumStringProperty(TEXT("Start a new probe or poll an existing probe result."), FString(), TArray<FString>{ TEXT("start"), TEXT("result") }));
+			Properties->SetObjectField(TEXT("inputProfile"), MakeEnumStringProperty(TEXT("Input profile to inject while action=start."), FString(), Profiles));
+			TSharedPtr<FJsonObject> DurationProperty = MakeNumberProperty(TEXT("Sampling duration in seconds for action=start."), 0.5);
+			DurationProperty->SetNumberField(TEXT("minimum"), 0.05);
+			DurationProperty->SetNumberField(TEXT("maximum"), 5.0);
+			Properties->SetObjectField(TEXT("durationSeconds"), DurationProperty);
+			Properties->SetObjectField(TEXT("probeId"), MakeStringProperty(TEXT("Probe id returned by action=start; required when action=result."), FString()));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("action") });
+		}
+
+		TSharedPtr<FJsonObject> MakeVerifyViewportWidgetsSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("widgetClassFilter"), MakeStringProperty(TEXT("Optional exact widget generated class path filter, for example /Game/UI/WBP_TestHUD.WBP_TestHUD_C."), FString()));
+			TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+			Schema->SetObjectField(TEXT("properties"), Properties);
+			Schema->SetArrayField(TEXT("required"), TArray<TSharedPtr<FJsonValue>>());
+			return Schema;
+		}
+
+		TSharedPtr<FJsonObject> MakeBlueprintEventGraphNodeSchema(const FString& NameField, const FString& NameDescription, const TArray<FString>& RequiredFields)
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+			Properties->SetObjectField(TEXT("graphName"), MakeStringProperty(TEXT("Target graph name. Defaults to EventGraph; only EventGraph is supported in this release."), TEXT("EventGraph")));
+			Properties->SetObjectField(NameField, MakeStringProperty(NameDescription, FString()));
+			Properties->SetObjectField(TEXT("x"), MakeNumberProperty(TEXT("Graph X position."), 0.0));
+			Properties->SetObjectField(TEXT("y"), MakeNumberProperty(TEXT("Graph Y position."), 0.0));
+			return MakeSchemaWithRequired(Properties, RequiredFields);
+		}
+
+		TSharedPtr<FJsonObject> MakeBlueprintAddComponentSchema()
+		{
+			TSharedPtr<FJsonObject> AttachParentProperty = MakeStringProperty(TEXT("Optional SCS or native scene component name to attach under. Empty uses the Blueprint root or DefaultSceneRoot."), FString());
+			AttachParentProperty->SetStringField(TEXT("default"), FString());
+
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+			Properties->SetObjectField(TEXT("componentClass"), MakeStringProperty(TEXT("Component class path, for example /Script/Engine.SpringArmComponent."), FString()));
+			Properties->SetObjectField(TEXT("componentName"), MakeStringProperty(TEXT("New component variable name."), FString()));
+			Properties->SetObjectField(TEXT("attachParentComponentName"), AttachParentProperty);
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("blueprintPath"), TEXT("componentClass"), TEXT("componentName") });
+		}
+
+		TSharedPtr<FJsonObject> MakeBlueprintSetComponentPropertySchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+			Properties->SetObjectField(TEXT("componentName"), MakeStringProperty(TEXT("SCS component variable name."), FString()));
+			Properties->SetObjectField(TEXT("propertyName"), MakeStringProperty(TEXT("Direct component template property name to set."), FString()));
+			Properties->SetObjectField(TEXT("value"), MakeStringProperty(TEXT("Value text imported through Unreal property serialization."), FString()));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("blueprintPath"), TEXT("componentName"), TEXT("propertyName"), TEXT("value") });
+		}
+
+		TSharedPtr<FJsonObject> MakeBlueprintSetClassDefaultSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+			Properties->SetObjectField(TEXT("propertyName"), MakeStringProperty(TEXT("Direct class default property name to set."), FString()));
+			Properties->SetObjectField(TEXT("value"), MakeStringProperty(TEXT("Value text imported through Unreal property serialization."), FString()));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("blueprintPath"), TEXT("propertyName"), TEXT("value") });
+		}
+
+		TSharedPtr<FJsonObject> MakeSetMapGameModeSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("gameModeClassPath"), MakeStringProperty(TEXT("GameModeBase class path to set."), FString()));
+			Properties->SetObjectField(TEXT("scope"), MakeEnumStringProperty(TEXT("Where to apply the GameMode."), TEXT("worldSettingsOverride"), TArray<FString>{ TEXT("worldSettingsOverride"), TEXT("projectDefault") }));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("gameModeClassPath") });
+		}
+
+		TSharedPtr<FJsonObject> MakeActorSetAutoPossessSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("actorName"), MakeStringProperty(TEXT("Actor label, actor name, or unique actor path to edit."), FString()));
+			Properties->SetObjectField(TEXT("autoPossessPlayer"), MakeEnumStringProperty(TEXT("AutoPossessPlayer value to set on the Pawn."), TEXT("Player0"), TArray<FString>{ TEXT("Disabled"), TEXT("Player0"), TEXT("Player1"), TEXT("Player2"), TEXT("Player3") }));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("actorName") });
+		}
+
+		TSharedPtr<FJsonObject> MakeBlueprintGameplayNodeSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("blueprintPath"), MakeStringProperty(TEXT("Blueprint asset path to edit."), FString()));
+			Properties->SetObjectField(TEXT("graphName"), MakeStringProperty(TEXT("Target graph name. Defaults to EventGraph; only EventGraph is supported in this release."), TEXT("EventGraph")));
+			Properties->SetObjectField(TEXT("nodeKind"), MakeEnumStringProperty(
+				TEXT("Gameplay helper node to add."),
+				FString(),
+				TArray<FString>{
+					TEXT("AddMovementInput"),
+					TEXT("AddControllerYawInput"),
+					TEXT("AddControllerPitchInput"),
+					TEXT("GetActorForwardVector"),
+					TEXT("GetActorRightVector"),
+					TEXT("GetControlRotation"),
+					TEXT("Jump"),
+					TEXT("FloatGreaterThan")
+				}));
+			Properties->SetObjectField(TEXT("x"), MakeNumberProperty(TEXT("Graph X position."), 0.0));
+			Properties->SetObjectField(TEXT("y"), MakeNumberProperty(TEXT("Graph Y position."), 0.0));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("blueprintPath"), TEXT("nodeKind") });
+		}
+
+		void ApplyV028WriteDescriptorPolicy(FUnrealMcpToolDescriptor& Descriptor)
+		{
+			Descriptor.bRequiresWrite = true;
+			Descriptor.bPreflightSupport = true;
+			Descriptor.bPostcheckSupport = true;
+			Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+			Descriptor.Reason = TEXT("Descriptor: v0.28 playable third-person Character Blueprint authoring primitive with fixed schema and readback.");
 		}
 
 		void RegisterEditorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
@@ -241,9 +368,21 @@ namespace UnrealMcp
 
 			{
 				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.editor_set_map_game_mode"),
+					TEXT("Set Map GameMode"),
+					TEXT("Sets the current map WorldSettings GameMode override or the project default GameMode and returns readback."),
+					TEXT("editor"),
+					TEXT("UnrealMcpEditorTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeSetMapGameModeSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
 					TEXT("unreal.configure_player_input"),
 					TEXT("Configure Player Input"),
-					TEXT("Configures standard player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics."),
+					TEXT("Configures standard and arbitrary legacy player-control input mappings for legacy input or an Enhanced Input mapping context, defaulting to dry-run diagnostics."),
 					TEXT("editor"),
 					TEXT("UnrealMcpPlayerInputTools.cpp"),
 					EUnrealMcpToolRisk::Medium);
@@ -441,6 +580,18 @@ namespace UnrealMcp
 					TEXT("actors"),
 					TEXT("UnrealMcpActorTools.cpp")),
 				MakeObjectSchema());
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.actor_set_auto_possess"),
+					TEXT("Set Actor Auto Possess"),
+					TEXT("Sets AutoPossessPlayer on a Pawn actor in the current editor world and returns readback."),
+					TEXT("actors"),
+					TEXT("UnrealMcpActorTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeActorSetAutoPossessSchema());
+			}
 		}
 
 		void RegisterBlueprintInspectorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
@@ -480,6 +631,84 @@ namespace UnrealMcp
 						TEXT("UnrealMcpBlueprintTools.cpp"),
 						EUnrealMcpToolRisk::ReadOnly),
 					Schema);
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_add_input_axis_event_node"),
+					TEXT("Add Input Axis Event Node"),
+					TEXT("Adds a legacy InputAxis event node to a Blueprint EventGraph; graphName is accepted for forward compatibility but only EventGraph is supported in this release."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeBlueprintEventGraphNodeSchema(
+					TEXT("axisName"),
+					TEXT("Legacy input axis mapping name."),
+					TArray<FString>{ TEXT("blueprintPath"), TEXT("axisName") }));
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_add_input_action_event_node"),
+					TEXT("Add Input Action Event Node"),
+					TEXT("Adds a legacy InputAction event node to a Blueprint EventGraph; graphName is accepted for forward compatibility but only EventGraph is supported in this release."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeBlueprintEventGraphNodeSchema(
+					TEXT("actionName"),
+					TEXT("Legacy input action mapping name."),
+					TArray<FString>{ TEXT("blueprintPath"), TEXT("actionName") }));
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_add_component"),
+					TEXT("Add Blueprint Component"),
+					TEXT("Adds a component template to a Blueprint SimpleConstructionScript and attaches scene components under a named parent or root."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeBlueprintAddComponentSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_set_component_property"),
+					TEXT("Set Blueprint Component Property"),
+					TEXT("Sets one direct allowlisted property on a Blueprint SCS component template and returns serialized readback."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeBlueprintSetComponentPropertySchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_set_class_default"),
+					TEXT("Set Blueprint Class Default"),
+					TEXT("Sets one direct allowlisted property on a Blueprint generated class default object and returns serialized readback."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeBlueprintSetClassDefaultSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.bp_add_gameplay_node"),
+					TEXT("Add Gameplay Blueprint Node"),
+					TEXT("Adds a fixed gameplay helper call node to a Blueprint EventGraph; graphName is accepted for forward compatibility but only EventGraph is supported in this release."),
+					TEXT("blueprint"),
+					TEXT("UnrealMcpBlueprintTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				ApplyV028WriteDescriptorPolicy(Descriptor);
+				Registrar.Add(Descriptor, MakeBlueprintGameplayNodeSchema());
 			}
 
 			{
@@ -1209,6 +1438,37 @@ namespace UnrealMcp
 				Descriptor.DocsPath = TEXT("Tools/UnrealMcpToolDocs/verification/verify_player_controls.md");
 				Descriptor.Reason = TEXT("Descriptor: v0.27.1 core runtime setup verifier that waits privately for BeginPIE and performs existence-only control checks.");
 				Registrar.Add(Descriptor, MakeVerifyPlayerControlsSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.pie_input_probe"),
+					TEXT("Probe PIE Input Movement"),
+					TEXT("Starts or polls an asynchronous PIE input probe that injects one gameplay input profile on the core ticker and reports movement or rotation deltas."),
+					TEXT("verification"),
+					TEXT("UnrealMcpPieSmokeTools.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresLock = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.28 runtime verification probe for real PIE movement or look deltas without editor tick pumping.");
+				Registrar.Add(Descriptor, MakePieInputProbeSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.verify_viewport_widgets"),
+					TEXT("Verify Viewport Widgets"),
+					TEXT("Lists UUserWidget instances that are currently in the PIE viewport, optionally filtered by generated widget class path."),
+					TEXT("verification"),
+					TEXT("UnrealMcpPieSmokeTools.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Core;
+				Descriptor.DocsPath = TEXT("Docs/Verification.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.28 read-only runtime verifier for on-screen PIE UMG widgets.");
+				Registrar.Add(Descriptor, MakeVerifyViewportWidgetsSchema());
 			}
 
 			{

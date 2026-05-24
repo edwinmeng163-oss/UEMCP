@@ -214,6 +214,19 @@ namespace UnrealMcp
 				: EPlayerInputMappingKind::Axis;
 		}
 
+		EPlayerInputMappingKind ParseMappingKind(const FString& RawKind, EPlayerInputMappingKind DefaultKind)
+		{
+			if (RawKind.Equals(TEXT("action"), ESearchCase::IgnoreCase))
+			{
+				return EPlayerInputMappingKind::Action;
+			}
+			if (RawKind.Equals(TEXT("axis"), ESearchCase::IgnoreCase))
+			{
+				return EPlayerInputMappingKind::Axis;
+			}
+			return DefaultKind;
+		}
+
 		void ParseCustomMappingObject(const FString& MappingName, const TSharedPtr<FJsonObject>& MappingObject, TArray<FPlayerInputMappingSpec>& Mappings)
 		{
 			if (!MappingObject.IsValid())
@@ -222,6 +235,11 @@ namespace UnrealMcp
 			}
 
 			FPlayerInputMappingSpec ParsedMapping = MakeDefaultMapping(MappingName, MappingKindForName(MappingName));
+			FString KindText;
+			if (MappingObject->TryGetStringField(TEXT("kind"), KindText))
+			{
+				ParsedMapping.Kind = ParseMappingKind(KindText.TrimStartAndEnd(), ParsedMapping.Kind);
+			}
 			MappingObject->TryGetStringField(TEXT("inputActionPath"), ParsedMapping.InputActionPath);
 			ParsedMapping.InputActionPath = ParsedMapping.InputActionPath.TrimStartAndEnd();
 
@@ -262,6 +280,7 @@ namespace UnrealMcp
 
 			if (FPlayerInputMappingSpec* Existing = FindMappingByName(Mappings, MappingName))
 			{
+				Existing->Kind = ParsedMapping.Kind;
 				if (!ParsedMapping.InputActionPath.IsEmpty())
 				{
 					Existing->InputActionPath = ParsedMapping.InputActionPath;
@@ -290,19 +309,11 @@ namespace UnrealMcp
 			const TSharedPtr<FJsonObject>* MappingsObject = nullptr;
 			if (Arguments.TryGetObjectField(TEXT("mappings"), MappingsObject) && MappingsObject && (*MappingsObject).IsValid())
 			{
-				static const TArray<FString> KnownMappingNames = {
-					TEXT("MoveForward"),
-					TEXT("MoveRight"),
-					TEXT("LookYaw"),
-					TEXT("LookPitch"),
-					TEXT("Jump")
-				};
-				for (const FString& MappingName : KnownMappingNames)
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*MappingsObject)->Values)
 				{
-					const TSharedPtr<FJsonObject>* MappingObject = nullptr;
-					if ((*MappingsObject)->TryGetObjectField(MappingName, MappingObject) && MappingObject && (*MappingObject).IsValid())
+					if (Pair.Value.IsValid() && Pair.Value->Type == EJson::Object && Pair.Value->AsObject().IsValid())
 					{
-						ParseCustomMappingObject(MappingName, *MappingObject, Mappings);
+						ParseCustomMappingObject(Pair.Key, Pair.Value->AsObject(), Mappings);
 					}
 				}
 			}

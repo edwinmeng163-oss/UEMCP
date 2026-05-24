@@ -79,6 +79,40 @@ namespace UnrealMcp
 	{
 		static constexpr int32 EditorToolDefaultListLimit = 200;
 
+		UClass* EditorToolsResolveClassPath(const FString& ClassPath, UEditorAssetSubsystem* EditorAssetSubsystem)
+		{
+			const FString TrimmedPath = ClassPath.TrimStartAndEnd();
+			if (TrimmedPath.IsEmpty())
+			{
+				return nullptr;
+			}
+
+			if (UClass* NativeClass = StaticLoadClass(UObject::StaticClass(), nullptr, *TrimmedPath))
+			{
+				return NativeClass;
+			}
+
+			if (!EditorAssetSubsystem)
+			{
+				return nullptr;
+			}
+
+			if (UClass* BlueprintClass = EditorAssetSubsystem->LoadBlueprintClass(TrimmedPath))
+			{
+				return BlueprintClass;
+			}
+
+			if (UObject* LoadedAsset = EditorAssetSubsystem->LoadAsset(TrimmedPath))
+			{
+				if (UClass* LoadedClass = Cast<UClass>(LoadedAsset))
+				{
+					return LoadedClass;
+				}
+			}
+
+			return nullptr;
+		}
+
 		struct FEditorToolAssetPath
 		{
 			FString PackageName;
@@ -973,6 +1007,104 @@ namespace UnrealMcp
 
 			const FString Message = FString::Printf(TEXT("Project setting key '%s' was not found in category '%s'."), *Key, *Category);
 			return MakeProjectSettingsError(TEXT("KEY_NOT_FOUND"), Message, Category, Key, SourceConfig);
+		}
+
+		FUnrealMcpExecutionResult ExecuteSetMapGameMode(const FString& ToolName, const FJsonObject& Arguments)
+		{
+			if (IsEditorPlaying())
+			{
+				return MakePieBlockedResult(ToolName);
+			}
+
+			FString GameModeClassPath;
+			if (!Arguments.TryGetStringField(TEXT("gameModeClassPath"), GameModeClassPath) || GameModeClassPath.TrimStartAndEnd().IsEmpty())
+			{
+				return MakeExecutionResult(TEXT("Missing required field 'gameModeClassPath'."), nullptr, true);
+			}
+			GameModeClassPath = GameModeClassPath.TrimStartAndEnd();
+
+			FString Scope = TEXT("worldSettingsOverride");
+			Arguments.TryGetStringField(TEXT("scope"), Scope);
+			Scope = Scope.TrimStartAndEnd().IsEmpty() ? TEXT("worldSettingsOverride") : Scope.TrimStartAndEnd();
+			if (!Scope.Equals(TEXT("worldSettingsOverride"), ESearchCase::CaseSensitive)
+				&& !Scope.Equals(TEXT("projectDefault"), ESearchCase::CaseSensitive))
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Unsupported scope '%s'."), *Scope), nullptr, true);
+			}
+
+			UEditorAssetSubsystem* EditorAssetSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
+			UClass* GameModeClass = EditorToolsResolveClassPath(GameModeClassPath, EditorAssetSubsystem);
+			if (!GameModeClass)
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Unable to resolve gameModeClassPath '%s'."), *GameModeClassPath), nullptr, true);
+			}
+			if (!GameModeClass->IsChildOf(AGameModeBase::StaticClass()))
+			{
+				return MakeExecutionResult(FString::Printf(TEXT("Class '%s' is not a GameModeBase class."), *GameModeClass->GetPathName()), nullptr, true);
+			}
+
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("action"), TEXT("editor_set_map_game_mode"));
+			StructuredContent->SetStringField(TEXT("scope"), Scope);
+			StructuredContent->SetStringField(TEXT("gameModeClassPath"), GameModeClassPath);
+			StructuredContent->SetStringField(TEXT("resolvedGameModeClass"), GameModeClass->GetPathName());
+
+			if (Scope == TEXT("worldSettingsOverride"))
+			{
+				UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+				if (!EditorWorld)
+				{
+					return MakeExecutionResult(TEXT("The editor world is unavailable."), StructuredContent, true);
+				}
+
+				AWorldSettings* WorldSettings = EditorWorld->GetWorldSettings();
+				if (!WorldSettings)
+				{
+					return MakeExecutionResult(TEXT("The editor world has no WorldSettings object."), StructuredContent, true);
+				}
+
+				WorldSettings->Modify();
+				WorldSettings->DefaultGameMode = GameModeClass;
+				WorldSettings->PostEditChange();
+				WorldSettings->MarkPackageDirty();
+				if (UPackage* WorldPackage = EditorWorld->GetOutermost())
+				{
+					WorldPackage->MarkPackageDirty();
+					StructuredContent->SetStringField(TEXT("mapPackage"), WorldPackage->GetName());
+				}
+
+				UClass* ReadbackClass = WorldSettings->DefaultGameMode.Get();
+				StructuredContent->SetStringField(TEXT("readbackGameModeClass"), ReadbackClass ? ReadbackClass->GetPathName() : FString());
+				StructuredContent->SetBoolField(TEXT("postcheckMatchedReadback"), ReadbackClass == GameModeClass);
+
+				return MakeExecutionResult(
+					FString::Printf(TEXT("Set WorldSettings GameMode override to %s."), *GameModeClass->GetPathName()),
+					StructuredContent,
+					ReadbackClass != GameModeClass);
+			}
+
+			if (!GConfig)
+			{
+				return MakeExecutionResult(TEXT("GConfig is unavailable."), StructuredContent, true);
+			}
+
+			const FString Section = TEXT("/Script/EngineSettings.GameMapsSettings");
+			const FString Key = TEXT("GlobalDefaultGameMode");
+			GConfig->SetString(*Section, *Key, *GameModeClass->GetPathName(), GEngineIni);
+			GConfig->Flush(false, GEngineIni);
+
+			FString ReadbackValue;
+			GConfig->GetString(*Section, *Key, ReadbackValue, GEngineIni);
+			StructuredContent->SetStringField(TEXT("sourceConfig"), TEXT("DefaultEngine.ini"));
+			StructuredContent->SetStringField(TEXT("configSection"), Section);
+			StructuredContent->SetStringField(TEXT("configKey"), Key);
+			StructuredContent->SetStringField(TEXT("readbackGameModeClass"), ReadbackValue);
+			StructuredContent->SetBoolField(TEXT("postcheckMatchedReadback"), ReadbackValue == GameModeClass->GetPathName());
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Set project default GameMode to %s."), *GameModeClass->GetPathName()),
+				StructuredContent,
+				ReadbackValue != GameModeClass->GetPathName());
 		}
 
 		FUnrealMcpExecutionResult ExecuteAssetMove(const FString& ToolName, const FJsonObject& Arguments)
@@ -2564,6 +2696,12 @@ namespace UnrealMcp
 		if (ToolName == TEXT("unreal.project_settings_get"))
 		{
 			OutResult = ExecuteProjectSettingsGet(Arguments);
+			return true;
+		}
+
+		if (ToolName == TEXT("unreal.editor_set_map_game_mode"))
+		{
+			OutResult = ExecuteSetMapGameMode(ToolName, Arguments);
 			return true;
 		}
 
