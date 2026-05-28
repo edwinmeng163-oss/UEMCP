@@ -16,7 +16,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: UEAtelier
-VersionName: 0.28.0
+VersionName: 0.29.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -63,6 +63,7 @@ Then read on demand:
 | Architecture or module split | `Docs/Architecture.md` |
 | RAG, knowledge search, recommendation | `Docs/KnowledgeRag.md`, `Tools/UnrealMcpKnowledge/README.md`, `Tools/UnrealMcpKnowledge/Evals/core_rag_eval.json` |
 | Security or path safety | `Docs/SecurityModel.md` |
+| Code file editing (read/search/preview/apply/rollback) | `Docs/CodeTools.md`, `Docs/agents-guide/code-tools.md` |
 | Self-extension, scaffolds, audit, rollback, supervisor recovery | `Docs/agents-guide/self-extension.md`, `Docs/SelfExtensionPipeline.md`, `Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md` |
 | Task Atlas lifecycle, schemas, clustering, promotion | `Docs/agents-guide/task-atlas.md`, `Docs/TaskAtlas.md` |
 | Automation tests, PIE smoke, editor diagnostics | `Docs/agents-guide/verification.md`, `Docs/Verification.md` |

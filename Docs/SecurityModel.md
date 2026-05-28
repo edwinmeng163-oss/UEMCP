@@ -74,6 +74,38 @@ editor automation, but the central assistant prompt forbids using them to modify
 plugin source under `Plugins/UnrealMcp/Source` or ToolRegistry JSON. A hard
 runtime sandbox for that Python path is deferred hardening work.
 
+## Code File Edit Safety (Code Tools)
+
+The `code` tool category (v0.29) edits code files (`.cpp`/`.h`/`.uplugin`/`.py`/...)
+under path policy, distinct from self-extension. Guarantees:
+
+- **Canonical-path classification**: every edit path is resolved (collapse `..`,
+  resolve symlinks to their target, macOS casefold, Unicode NFC) before
+  classification, and the fall-through is DENY. A symlink in a writable root pointing
+  at a forbidden target is forbidden by its target.
+- **Three writable tiers**: default-writable (`Tools/UnrealMcpPyToolSamples`,
+  `Tools/UnrealMcpPyTools`); high-risk requiring `confirmHighRisk` (`Source/**`,
+  `Plugins/*/Source/**`, `*.uplugin`, `*.uproject`, `Config/*.ini`); forbidden
+  (`Plugins/UnrealMcp/**`, `Binaries`/`Intermediate`/`Saved`/`Content`, the Engine
+  install, `*.generated.h`/`*.gen.cpp`/`*.uasset`/`*.umap`).
+- **Stale-context + byte safety**: apply requires the file's whole-file
+  `expectedSha256` to still match (TOCTOU re-checked per file immediately before each
+  write); content is read/matched/written as raw bytes, so CRLF and BOM are preserved
+  and never normalized.
+- **Backup + atomic manifest + rollback**: real apply backs up originals, writes an
+  atomic manifest (`<target>.tmp.<guid>` + rename) with an `applyState` recovery
+  marker, and is reversible via `code_rollback_change` (drift-checked, `force` to
+  override). Multi-file applies are transactional. Independent area:
+  `Saved/UnrealMcp/CodeChanges/`.
+- **Lock + assistant-scoped approval**: real apply/rollback hold the extension
+  session lock (mutex with scaffold apply / build / rollback); an autonomous-AI
+  `dryRun=false` write requires approval, while reads and dry runs do not.
+- **Core plugin off-limits**: `Plugins/UnrealMcp/**` is forbidden to Code Tools —
+  core C++ tool development stays a deliberate PM-directed hand-edit (see
+  `Tools/codex-prompt-header.md`), never an AI Code-Tools write.
+
+See `Docs/CodeTools.md` and `Docs/agents-guide/code-tools.md`.
+
 ## Tool Outcome Verification
 
 Write-capable tools build structured `preflight` results before handler execution and attach `postcheck` results after execution. Generic checks come from ToolRegistry metadata. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools additionally inspect real editor/file/workflow state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, memory key, skill file, manifest, build log, or test result actually exists as expected."

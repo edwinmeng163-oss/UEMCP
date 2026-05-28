@@ -140,7 +140,7 @@ The repository currently contains:
 
 - `UEvolve.uproject`, the root Unreal Engine 5.6 local development host for the workbench, forward-compatible with UE 5.7.
 - `open_uevolve.command`, a macOS convenience launcher that opens the root host project.
-- `Plugins/UnrealMcp`, an editor plugin for local MCP and in-editor AI/chat workflows (`VersionName: 0.28.0`).
+- `Plugins/UnrealMcp`, an editor plugin for local MCP and in-editor AI/chat workflows (`VersionName: 0.29.0`).
 - `Examples/UEvolveExample` (UE 5.6.1) and `Examples/UEvolveExample57` (UE 5.7.4), two optional C++ example projects used to validate the plugin with sample content — open whichever matches the engine you have installed.
 - Git LFS setup for Unreal binary assets.
 - Project-level README and ignore rules suitable for public GitHub hosting.
