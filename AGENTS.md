@@ -138,8 +138,9 @@ drafts unless explicitly asked.
   Blueprint SCS component/default edits, map GameMode setup, actor auto-possess,
   parameter inspection, and strict schema writes.
 - Code tools: workspace policy status, bounded file listing, file readback with
-  whole-file sha, bounded literal/regex/filename search, and v0.29 Wave A
-  path-policy foundations with preview/apply/rollback stubs.
+  whole-file sha, bounded literal/regex/filename search, and v0.29 Wave B
+  preview/apply/rollback write closure with byte-exact sha checks, backups,
+  manifests, locks, drift detection, and rollback.
 - Self-extension: schema/C++ patch validation, Python user-extension scaffolds,
   `unreal.mcp_user_registry_reload`, `unreal.mcp_user_tool_smoke`, patch
   editing, dry-run apply, backups, build matrix, tests, pipeline, audit,
@@ -173,10 +174,10 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.29 Wave A adds the `code` category with seven
+Current project status: v0.29 Wave B implements the `code` category with seven
 visible core code tools: four read-only tools
 `unreal.code_workspace_status`, `unreal.code_list_files`,
-`unreal.code_read_file`, and `unreal.code_search`, plus Wave B stubs for
+`unreal.code_read_file`, and `unreal.code_search`, plus write-closure tools
 `unreal.code_preview_change`, `unreal.code_apply_change`, and
 `unreal.code_rollback_change`; v0.28 adds eight visible core gameplay authoring tools:
 `unreal.bp_add_input_axis_event_node`,

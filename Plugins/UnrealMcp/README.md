@@ -167,6 +167,10 @@ Editor action tools:
 - `unreal.code_apply_change`
 - `unreal.code_rollback_change`
 
+The Code write tools use preview artifacts, sha preflight, byte-preserving
+backups, an extension-session lock, atomic manifests, drift checks, and
+rollback manifests under `Saved/UnrealMcp/CodeChanges/`.
+
 Developer-only core integration tools are retained for manual workflows but are
 hidden from AI-facing `tools/list`: `unreal.mcp_apply_scaffold` and
 `unreal.mcp_extension_pipeline`.

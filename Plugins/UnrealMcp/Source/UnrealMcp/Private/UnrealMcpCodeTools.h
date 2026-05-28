@@ -32,5 +32,17 @@ namespace UnrealMcp
 		TFunctionRef<bool(const FString&)> PathExists,
 		TFunctionRef<bool(const FString& Path, FString& OutTarget)> TryResolveSymlinkTarget);
 
+#if WITH_DEV_AUTOMATION_TESTS
+	struct FCodeToolsApplyTestHooks
+	{
+		TFunction<void(const FString& ProjectRelativePath)> BeforeWrite;
+		TFunction<void(const FString& ApplyState, const FString& ManifestPath)> AfterApplyManifestState;
+		TFunction<bool(const FString& EditId)> ShouldPretendBackupDirectoryExists;
+	};
+
+	void SetCodeToolsApplyTestHooks(const FCodeToolsApplyTestHooks& Hooks);
+	void ClearCodeToolsApplyTestHooks();
+#endif
+
 	bool TryExecuteCodeTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
 }

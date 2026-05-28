@@ -68,6 +68,8 @@ namespace UnrealMcp::Approval
 		if (ToolName == TEXT("unreal.mcp_apply_scaffold")) { return ERiskLevel::High; }
 		if (ToolName == TEXT("unreal.mcp_build_editor")) { return ERiskLevel::High; }
 		if (ToolName == TEXT("unreal.mcp_clean_test_artifacts")) { return ERiskLevel::High; }
+		if (ToolName == TEXT("unreal.code_apply_change")) { return ERiskLevel::High; }
+		if (ToolName == TEXT("unreal.code_rollback_change")) { return ERiskLevel::High; }
 
 		// HIGH: core docs / registry mutations
 		if (ToolName.StartsWith(TEXT("unreal.docs_"))) { return ERiskLevel::High; }
@@ -107,6 +109,71 @@ namespace UnrealMcp::Approval
 		{
 			OutReason = TEXT("non-assistant caller; approval bypassed");
 			return EDecision::Allow;
+		}
+
+		auto GetDryRunDefaultTrue = [&Arguments]()
+		{
+			bool bDryRun = true;
+			if (Arguments.IsValid() && Arguments->HasField(TEXT("dryRun")))
+			{
+				bDryRun = Arguments->GetBoolField(TEXT("dryRun"));
+			}
+			return bDryRun;
+		};
+
+		auto HasHighRiskCodePathHint = [&Arguments]()
+		{
+			if (!Arguments.IsValid())
+			{
+				return false;
+			}
+			bool bConfirmHighRisk = false;
+			Arguments->TryGetBoolField(TEXT("confirmHighRisk"), bConfirmHighRisk);
+			FString PathRisk;
+			FString RiskLevel;
+			Arguments->TryGetStringField(TEXT("pathRisk"), PathRisk);
+			Arguments->TryGetStringField(TEXT("riskLevel"), RiskLevel);
+			return bConfirmHighRisk
+				|| PathRisk.Equals(TEXT("high"), ESearchCase::IgnoreCase)
+				|| RiskLevel.Equals(TEXT("high"), ESearchCase::IgnoreCase);
+		};
+
+		if (ToolName == TEXT("unreal.code_apply_change"))
+		{
+			if (GetDryRunDefaultTrue())
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("code_apply_change dryRun=true is preview-only; allowed");
+				return EDecision::Allow;
+			}
+			if (HasHighRiskCodePathHint())
+			{
+				OutRiskLevel = ERiskLevel::High;
+				OutReason = TEXT("code_apply_change writes high-risk host path; requires approval");
+				return EDecision::RequireApproval;
+			}
+			OutRiskLevel = ERiskLevel::High;
+			OutReason = TEXT("code_apply_change dryRun=false writes user code files; requires approval");
+			return EDecision::RequireApproval;
+		}
+
+		if (ToolName == TEXT("unreal.code_rollback_change"))
+		{
+			if (GetDryRunDefaultTrue())
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("code_rollback_change dryRun=true is preview-only; allowed");
+				return EDecision::Allow;
+			}
+			if (HasHighRiskCodePathHint())
+			{
+				OutRiskLevel = ERiskLevel::High;
+				OutReason = TEXT("code_rollback_change restores high-risk host path; requires approval");
+				return EDecision::RequireApproval;
+			}
+			OutRiskLevel = ERiskLevel::High;
+			OutReason = TEXT("code_rollback_change dryRun=false restores user code files; requires approval");
+			return EDecision::RequireApproval;
 		}
 
 		if (ToolName == TEXT("unreal.mcp_apply_scaffold")

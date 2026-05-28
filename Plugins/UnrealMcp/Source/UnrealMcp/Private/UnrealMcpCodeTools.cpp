@@ -3,10 +3,17 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Internationalization/Regex.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/App.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSelfExtensionInternal.h"
 
@@ -29,6 +36,120 @@ namespace UnrealMcp
 		static constexpr int32 CodeToolsSearchHardMaxMatches = 1000;
 		static constexpr int32 CodeToolsSearchMaxFiles = 5000;
 		static constexpr int64 CodeToolsSearchMaxBytesPerFile = 2ll * 1024ll * 1024ll;
+		static constexpr int32 CodeToolsLockTtlSeconds = 900;
+		static constexpr int32 CodeToolsMaxEditIdAttempts = 5;
+
+#if WITH_DEV_AUTOMATION_TESTS
+		FCodeToolsApplyTestHooks GCodeToolsApplyTestHooks;
+#endif
+
+		struct FCodeToolsTextBytes
+		{
+			TArray<uint8> Bytes;
+			bool bValidUtf8 = false;
+		};
+
+		struct FCodeToolsEditPlan
+		{
+			FString Path;
+			FString ProjectRelativePath;
+			FString Operation;
+			FString ExpectedSha256;
+			FString ShaBefore;
+			FString ShaAfter;
+			FString BackupPath;
+			FString PathRisk;
+			FString PathReason;
+			TArray<uint8> BeforeBytes;
+			TArray<uint8> AfterBytes;
+			bool bOriginalExisted = true;
+		};
+
+		struct FCodeToolsPreviewPlan
+		{
+			FString PreviewId;
+			FString PreviewPath;
+			FString RiskLevel = TEXT("low");
+			FString UnifiedDiff;
+			bool bRequiresApproval = false;
+			bool bRequiresBuild = false;
+			bool bRequiresRestart = false;
+			TArray<FCodeToolsEditPlan> Edits;
+			TArray<TSharedPtr<FJsonValue>> PathPolicyResults;
+			TArray<TSharedPtr<FJsonValue>> ShaCheckResults;
+			TSharedPtr<FJsonObject> PreviewObject;
+		};
+
+		struct FCodeToolsRollbackPlan
+		{
+			FString EditId;
+			FString ManifestPath;
+			FString RollbackId;
+			bool bDriftDetected = false;
+			TArray<FString> DriftFiles;
+			TArray<FCodeToolsEditPlan> Edits;
+			TSharedPtr<FJsonObject> ManifestObject;
+		};
+
+		bool CodeToolsRealPathExists(const FString& Path);
+		bool CodeToolsTryResolveRealSymlinkTarget(const FString& Path, FString& OutTarget);
+
+		class FScopedCodeChangeLock
+		{
+		public:
+			explicit FScopedCodeChangeLock(const FString& ToolName)
+			{
+				const FString Owner = TEXT("Unreal MCP Code tools");
+				const FString Reason = FString::Printf(TEXT("Executing %s"), *ToolName);
+				bAcquired = TryAcquireExtensionSessionLock(Owner, Reason, CodeToolsLockTtlSeconds, false, SessionId, LockObject, FailureReason);
+				bOwnsLock = bAcquired;
+			}
+
+			~FScopedCodeChangeLock()
+			{
+				if (bOwnsLock && !SessionId.IsEmpty())
+				{
+					FString ReleaseFailure;
+					ReleaseExtensionSessionLock(SessionId, false, ReleaseFailure);
+				}
+			}
+
+			bool IsAcquired() const
+			{
+				return bAcquired;
+			}
+
+			const FString& GetSessionId() const
+			{
+				return SessionId;
+			}
+
+			FString GetFailureReason() const
+			{
+				return FailureReason;
+			}
+
+			TSharedPtr<FJsonObject> MakeStructuredContent(const FString& Action) const
+			{
+				TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+				StructuredContent->SetStringField(TEXT("action"), Action);
+				StructuredContent->SetBoolField(TEXT("locked"), bAcquired);
+				StructuredContent->SetStringField(TEXT("lockPath"), GetMcpExtensionLockPath());
+				StructuredContent->SetStringField(TEXT("sessionId"), SessionId);
+				if (LockObject.IsValid())
+				{
+					StructuredContent->SetObjectField(TEXT("lock"), LockObject);
+				}
+				return StructuredContent;
+			}
+
+		private:
+			bool bAcquired = false;
+			bool bOwnsLock = false;
+			FString SessionId;
+			FString FailureReason;
+			TSharedPtr<FJsonObject> LockObject;
+		};
 
 		FString CodeToolsNormalizeUnicodeNfcLite(const FString& Input)
 		{
@@ -485,6 +606,820 @@ namespace UnrealMcp
 				return false;
 			}
 			OutSha256 = CodeToolsSha256Bytes(OutBytes);
+			return true;
+		}
+
+		bool CodeToolsReadFileBytes(const FString& Path, TArray<uint8>& OutBytes, FString& OutSha256)
+		{
+			OutBytes.Reset();
+			OutSha256.Reset();
+			if (!FFileHelper::LoadFileToArray(OutBytes, *Path))
+			{
+				return false;
+			}
+			OutSha256 = CodeToolsSha256Bytes(OutBytes);
+			return true;
+		}
+
+		bool CodeToolsIsValidUtf8(const TArray<uint8>& Bytes)
+		{
+			int32 Index = 0;
+			if (Bytes.Num() >= 3 && Bytes[0] == 0xef && Bytes[1] == 0xbb && Bytes[2] == 0xbf)
+			{
+				Index = 3;
+			}
+			while (Index < Bytes.Num())
+			{
+				const uint8 Byte = Bytes[Index];
+				int32 ContinuationCount = 0;
+				uint32 CodePoint = 0;
+				if ((Byte & 0x80) == 0)
+				{
+					++Index;
+					continue;
+				}
+				if ((Byte & 0xe0) == 0xc0)
+				{
+					ContinuationCount = 1;
+					CodePoint = Byte & 0x1f;
+					if (CodePoint == 0)
+					{
+						return false;
+					}
+				}
+				else if ((Byte & 0xf0) == 0xe0)
+				{
+					ContinuationCount = 2;
+					CodePoint = Byte & 0x0f;
+				}
+				else if ((Byte & 0xf8) == 0xf0)
+				{
+					ContinuationCount = 3;
+					CodePoint = Byte & 0x07;
+				}
+				else
+				{
+					return false;
+				}
+
+				if (Index + ContinuationCount >= Bytes.Num())
+				{
+					return false;
+				}
+				for (int32 Offset = 1; Offset <= ContinuationCount; ++Offset)
+				{
+					const uint8 Continuation = Bytes[Index + Offset];
+					if ((Continuation & 0xc0) != 0x80)
+					{
+						return false;
+					}
+					CodePoint = (CodePoint << 6) | (Continuation & 0x3f);
+				}
+
+				if ((ContinuationCount == 1 && CodePoint < 0x80)
+					|| (ContinuationCount == 2 && CodePoint < 0x800)
+					|| (ContinuationCount == 3 && CodePoint < 0x10000)
+					|| CodePoint > 0x10ffff
+					|| (CodePoint >= 0xd800 && CodePoint <= 0xdfff))
+				{
+					return false;
+				}
+				Index += ContinuationCount + 1;
+			}
+			return true;
+		}
+
+		TArray<uint8> CodeToolsStringToUtf8Bytes(const FString& Text)
+		{
+			TArray<uint8> Bytes;
+			FTCHARToUTF8 Converter(*Text);
+			Bytes.Append(reinterpret_cast<const uint8*>(Converter.Get()), Converter.Length());
+			return Bytes;
+		}
+
+		FString CodeToolsUtf8BytesToDisplayString(const TArray<uint8>& Bytes)
+		{
+			int32 Offset = 0;
+			if (Bytes.Num() >= 3 && Bytes[0] == 0xef && Bytes[1] == 0xbb && Bytes[2] == 0xbf)
+			{
+				Offset = 3;
+			}
+			if (Offset >= Bytes.Num())
+			{
+				return FString();
+			}
+			FUTF8ToTCHAR Converter(reinterpret_cast<const ANSICHAR*>(Bytes.GetData() + Offset), Bytes.Num() - Offset);
+			return FString(Converter.Length(), Converter.Get());
+		}
+
+		bool CodeToolsFindUniqueByteMatch(
+			const TArray<uint8>& Haystack,
+			const TArray<uint8>& Needle,
+			int32& OutIndex,
+			FString& OutFailureCode,
+			FString& OutFailureReason)
+		{
+			OutIndex = INDEX_NONE;
+			if (Needle.Num() == 0)
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = TEXT("Match text must not be empty.");
+				return false;
+			}
+
+			int32 MatchCount = 0;
+			for (int32 Index = 0; Index <= Haystack.Num() - Needle.Num(); ++Index)
+			{
+				bool bMatches = true;
+				for (int32 NeedleIndex = 0; NeedleIndex < Needle.Num(); ++NeedleIndex)
+				{
+					if (Haystack[Index + NeedleIndex] != Needle[NeedleIndex])
+					{
+						bMatches = false;
+						break;
+					}
+				}
+				if (bMatches)
+				{
+					++MatchCount;
+					OutIndex = Index;
+					if (MatchCount > 1)
+					{
+						OutFailureCode = TEXT("ambiguousMatch");
+						OutFailureReason = TEXT("Match text appears more than once.");
+						return false;
+					}
+				}
+			}
+
+			if (MatchCount == 0)
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = TEXT("Match text was not found.");
+				return false;
+			}
+			return true;
+		}
+
+		bool CodeToolsApplyByteEdit(
+			const TArray<uint8>& BeforeBytes,
+			const FString& Operation,
+			const FString& OldText,
+			const FString& AnchorText,
+			const FString& NewText,
+			TArray<uint8>& OutAfterBytes,
+			FString& OutFailureCode,
+			FString& OutFailureReason)
+		{
+			const TArray<uint8> NewBytes = CodeToolsStringToUtf8Bytes(NewText);
+			OutAfterBytes = BeforeBytes;
+			if (Operation.Equals(TEXT("replace_exact"), ESearchCase::IgnoreCase))
+			{
+				const TArray<uint8> OldBytes = CodeToolsStringToUtf8Bytes(OldText);
+				int32 MatchIndex = INDEX_NONE;
+				if (!CodeToolsFindUniqueByteMatch(BeforeBytes, OldBytes, MatchIndex, OutFailureCode, OutFailureReason))
+				{
+					return false;
+				}
+				OutAfterBytes.Reset();
+				OutAfterBytes.Append(BeforeBytes.GetData(), MatchIndex);
+				OutAfterBytes.Append(NewBytes);
+				OutAfterBytes.Append(BeforeBytes.GetData() + MatchIndex + OldBytes.Num(), BeforeBytes.Num() - MatchIndex - OldBytes.Num());
+				return true;
+			}
+			if (Operation.Equals(TEXT("insert_before"), ESearchCase::IgnoreCase)
+				|| Operation.Equals(TEXT("insert_after"), ESearchCase::IgnoreCase))
+			{
+				const TArray<uint8> AnchorBytes = CodeToolsStringToUtf8Bytes(AnchorText);
+				int32 MatchIndex = INDEX_NONE;
+				if (!CodeToolsFindUniqueByteMatch(BeforeBytes, AnchorBytes, MatchIndex, OutFailureCode, OutFailureReason))
+				{
+					return false;
+				}
+				const int32 InsertIndex = Operation.Equals(TEXT("insert_after"), ESearchCase::IgnoreCase)
+					? MatchIndex + AnchorBytes.Num()
+					: MatchIndex;
+				OutAfterBytes.Reset();
+				OutAfterBytes.Append(BeforeBytes.GetData(), InsertIndex);
+				OutAfterBytes.Append(NewBytes);
+				OutAfterBytes.Append(BeforeBytes.GetData() + InsertIndex, BeforeBytes.Num() - InsertIndex);
+				return true;
+			}
+			if (Operation.Equals(TEXT("create_file"), ESearchCase::IgnoreCase))
+			{
+				OutAfterBytes = NewBytes;
+				return true;
+			}
+
+			OutFailureCode = TEXT("missingMatch");
+			OutFailureReason = FString::Printf(TEXT("Unsupported code edit operation '%s'."), *Operation);
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakeErrorObject(const FString& Code, const FString& Message)
+		{
+			TSharedPtr<FJsonObject> ErrorObject = MakeShared<FJsonObject>();
+			ErrorObject->SetStringField(TEXT("code"), Code);
+			ErrorObject->SetStringField(TEXT("message"), Message);
+			return ErrorObject;
+		}
+
+		FUnrealMcpExecutionResult CodeToolsMakeErrorResult(const FString& Code, const FString& Message)
+		{
+			return MakeExecutionResult(Message, CodeToolsMakeErrorObject(Code, Message), true);
+		}
+
+		FString CodeToolsChangesRoot()
+		{
+			return CodeToolsNormalizePath(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp/CodeChanges")));
+		}
+
+		FString CodeToolsPreviewsRoot()
+		{
+			return CodeToolsCombinePath(CodeToolsChangesRoot(), TEXT("Previews"));
+		}
+
+		FString CodeToolsBackupsRoot()
+		{
+			return CodeToolsCombinePath(CodeToolsChangesRoot(), TEXT("Backups"));
+		}
+
+		FString CodeToolsRollbacksRoot()
+		{
+			return CodeToolsCombinePath(CodeToolsChangesRoot(), TEXT("Rollbacks"));
+		}
+
+		FString CodeToolsLastChangePath()
+		{
+			return CodeToolsCombinePath(CodeToolsChangesRoot(), TEXT("LastCodeChange.json"));
+		}
+
+		bool CodeToolsIsSafeArtifactId(const FString& Id)
+		{
+			if (Id.IsEmpty() || Id.Len() > 160)
+			{
+				return false;
+			}
+			for (int32 Index = 0; Index < Id.Len(); ++Index)
+			{
+				const TCHAR Ch = Id[Index];
+				const bool bAllowed = (Ch >= TEXT('a') && Ch <= TEXT('z'))
+					|| (Ch >= TEXT('A') && Ch <= TEXT('Z'))
+					|| (Ch >= TEXT('0') && Ch <= TEXT('9'))
+					|| Ch == TEXT('_')
+					|| Ch == TEXT('-');
+				if (!bAllowed)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool CodeToolsWriteBytesAtomic(const FString& TargetPath, const TArray<uint8>& Bytes, FString& OutFailureReason)
+		{
+			const FString TargetDir = FPaths::GetPath(TargetPath);
+			if (!IFileManager::Get().MakeDirectory(*TargetDir, true))
+			{
+				OutFailureReason = FString::Printf(TEXT("Failed to create directory for '%s'."), *TargetPath);
+				return false;
+			}
+			const FString TempPath = FString::Printf(TEXT("%s.tmp.%s"), *TargetPath, *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
+			if (!FFileHelper::SaveArrayToFile(Bytes, *TempPath))
+			{
+				OutFailureReason = FString::Printf(TEXT("Failed to write temporary file '%s'."), *TempPath);
+				return false;
+			}
+			if (!FPlatformFileManager::Get().GetPlatformFile().MoveFile(*TargetPath, *TempPath))
+			{
+				IFileManager::Get().Delete(*TempPath, false, true);
+				OutFailureReason = FString::Printf(TEXT("Failed to move temporary file into '%s'."), *TargetPath);
+				return false;
+			}
+			return true;
+		}
+
+		bool CodeToolsWriteJsonObjectAtomic(const TSharedPtr<FJsonObject>& Object, const FString& TargetPath, FString& OutFailureReason)
+		{
+			if (!Object.IsValid())
+			{
+				OutFailureReason = TEXT("Cannot write an invalid JSON object.");
+				return false;
+			}
+			FString JsonText;
+			const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+				TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&JsonText);
+			if (!FJsonSerializer::Serialize(Object.ToSharedRef(), Writer))
+			{
+				OutFailureReason = TEXT("Failed to serialize JSON object.");
+				return false;
+			}
+
+			const FString TargetDir = FPaths::GetPath(TargetPath);
+			if (!IFileManager::Get().MakeDirectory(*TargetDir, true))
+			{
+				OutFailureReason = FString::Printf(TEXT("Failed to create directory for '%s'."), *TargetPath);
+				return false;
+			}
+			const FString TempPath = FString::Printf(TEXT("%s.tmp.%s"), *TargetPath, *FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
+			if (!FFileHelper::SaveStringToFile(JsonText, *TempPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+			{
+				OutFailureReason = FString::Printf(TEXT("Failed to write temporary JSON file '%s'."), *TempPath);
+				return false;
+			}
+			if (!IFileManager::Get().Move(*TargetPath, *TempPath, true, true))
+			{
+				IFileManager::Get().Delete(*TempPath, false, true);
+				OutFailureReason = FString::Printf(TEXT("Failed to atomically replace JSON file '%s'."), *TargetPath);
+				return false;
+			}
+			return true;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakePathPolicyObject(const FString& Path, const FCodePathPolicy& Policy)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("path"), Path);
+			Object->SetStringField(TEXT("resolvedPath"), Policy.CanonicalPath);
+			Object->SetStringField(TEXT("classification"), LexToString(Policy.Classification));
+			Object->SetStringField(TEXT("reason"), Policy.Reason);
+			return Object;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakeShaCheckObject(const FString& Path, const FString& Expected, const FString& Current, bool bMatch)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("path"), Path);
+			Object->SetStringField(TEXT("expected"), Expected);
+			Object->SetStringField(TEXT("current"), Current);
+			Object->SetBoolField(TEXT("match"), bMatch);
+			return Object;
+		}
+
+		bool CodeToolsPathNeedsBuild(const FString& Path)
+		{
+			const FString Ext = CodeToolsPathExtension(Path);
+			return Ext.Equals(TEXT(".h"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".hpp"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".cpp"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".inl"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".ipp"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".Build.cs"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".Target.cs"), ESearchCase::IgnoreCase);
+		}
+
+		bool CodeToolsPathNeedsRestart(const FString& Path)
+		{
+			const FString Ext = CodeToolsPathExtension(Path);
+			return Ext.Equals(TEXT(".Build.cs"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".Target.cs"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".uplugin"), ESearchCase::IgnoreCase)
+				|| Ext.Equals(TEXT(".uproject"), ESearchCase::IgnoreCase);
+		}
+
+		FString CodeToolsJsonValueToComparableString(const TSharedPtr<FJsonValue>& Value)
+		{
+			TSharedPtr<FJsonObject> Wrapper = MakeShared<FJsonObject>();
+			Wrapper->SetField(TEXT("value"), Value);
+			FString JsonText;
+			const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+				TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&JsonText);
+			FJsonSerializer::Serialize(Wrapper.ToSharedRef(), Writer);
+			return JsonText;
+		}
+
+		bool CodeToolsParseJsonBytes(const TArray<uint8>& Bytes, TSharedPtr<FJsonObject>& OutObject)
+		{
+			OutObject.Reset();
+			const FString Text = CodeToolsUtf8BytesToDisplayString(Bytes);
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+			return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
+		}
+
+		bool CodeToolsIsEngineAssociationOnlyUprojectChange(const TArray<uint8>& BeforeBytes, const TArray<uint8>& AfterBytes)
+		{
+			TSharedPtr<FJsonObject> BeforeObject;
+			TSharedPtr<FJsonObject> AfterObject;
+			if (!CodeToolsParseJsonBytes(BeforeBytes, BeforeObject) || !CodeToolsParseJsonBytes(AfterBytes, AfterObject))
+			{
+				return false;
+			}
+
+			TSet<FString> Keys;
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : BeforeObject->Values)
+			{
+				Keys.Add(Pair.Key);
+			}
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : AfterObject->Values)
+			{
+				Keys.Add(Pair.Key);
+			}
+
+			bool bEngineAssociationChanged = false;
+			for (const FString& Key : Keys)
+			{
+				const TSharedPtr<FJsonValue>* BeforeValue = BeforeObject->Values.Find(Key);
+				const TSharedPtr<FJsonValue>* AfterValue = AfterObject->Values.Find(Key);
+				const FString BeforeText = BeforeValue ? CodeToolsJsonValueToComparableString(*BeforeValue) : TEXT("<missing>");
+				const FString AfterText = AfterValue ? CodeToolsJsonValueToComparableString(*AfterValue) : TEXT("<missing>");
+				if (BeforeText == AfterText)
+				{
+					continue;
+				}
+				if (Key.Equals(TEXT("EngineAssociation"), ESearchCase::CaseSensitive))
+				{
+					bEngineAssociationChanged = true;
+					continue;
+				}
+				return false;
+			}
+			return bEngineAssociationChanged;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakeTouchedFileObject(const FCodeToolsEditPlan& Edit, bool bForPreview)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("path"), Edit.ProjectRelativePath);
+			Object->SetStringField(TEXT("projectRelativePath"), Edit.ProjectRelativePath);
+			Object->SetStringField(TEXT("sourcePath"), Edit.Path);
+			Object->SetStringField(TEXT("operation"), Edit.Operation);
+			Object->SetStringField(TEXT("shaBefore"), Edit.ShaBefore);
+			Object->SetStringField(TEXT("shaAfter"), Edit.ShaAfter);
+			Object->SetBoolField(TEXT("originalExisted"), Edit.bOriginalExisted);
+			if (!Edit.BackupPath.IsEmpty())
+			{
+				Object->SetStringField(TEXT("backupPath"), Edit.BackupPath);
+			}
+			if (bForPreview)
+			{
+				Object->SetStringField(TEXT("expectedNewSha256"), Edit.ShaAfter);
+				Object->SetStringField(TEXT("pathRisk"), Edit.PathRisk);
+				Object->SetStringField(TEXT("pathPolicyReason"), Edit.PathReason);
+			}
+			return Object;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> CodeToolsMakeTouchedFileArray(const TArray<FCodeToolsEditPlan>& Edits, bool bForPreview)
+		{
+			TArray<TSharedPtr<FJsonValue>> Values;
+			for (const FCodeToolsEditPlan& Edit : Edits)
+			{
+				Values.Add(MakeShared<FJsonValueObject>(CodeToolsMakeTouchedFileObject(Edit, bForPreview)));
+			}
+			return Values;
+		}
+
+		FString CodeToolsMakeUnifiedDiff(const TArray<FCodeToolsEditPlan>& Edits)
+		{
+			FString Diff;
+			for (const FCodeToolsEditPlan& Edit : Edits)
+			{
+				if (!Diff.IsEmpty())
+				{
+					Diff += TEXT("\n");
+				}
+				Diff += FString::Printf(
+					TEXT("--- %s\n+++ %s\n@@ byte-exact %s sha %s -> %s @@\n"),
+					Edit.bOriginalExisted ? *FString::Printf(TEXT("a/%s"), *Edit.ProjectRelativePath) : TEXT("/dev/null"),
+					*FString::Printf(TEXT("b/%s"), *Edit.ProjectRelativePath),
+					*Edit.Operation,
+					*Edit.ShaBefore,
+					*Edit.ShaAfter);
+
+				TArray<FString> BeforeLines;
+				TArray<FString> AfterLines;
+				CodeToolsUtf8BytesToDisplayString(Edit.BeforeBytes).ParseIntoArrayLines(BeforeLines, false);
+				CodeToolsUtf8BytesToDisplayString(Edit.AfterBytes).ParseIntoArrayLines(AfterLines, false);
+				const int32 MaxDisplayLines = 80;
+				const int32 BeforeCount = FMath::Min(BeforeLines.Num(), MaxDisplayLines);
+				for (int32 Index = 0; Index < BeforeCount; ++Index)
+				{
+					Diff += FString::Printf(TEXT("-%s\n"), *BeforeLines[Index]);
+				}
+				if (BeforeLines.Num() > MaxDisplayLines)
+				{
+					Diff += TEXT("-... truncated ...\n");
+				}
+				const int32 AfterCount = FMath::Min(AfterLines.Num(), MaxDisplayLines);
+				for (int32 Index = 0; Index < AfterCount; ++Index)
+				{
+					Diff += FString::Printf(TEXT("+%s\n"), *AfterLines[Index]);
+				}
+				if (AfterLines.Num() > MaxDisplayLines)
+				{
+					Diff += TEXT("+... truncated ...\n");
+				}
+			}
+			return Diff;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakeManifestObject(
+			const FString& Action,
+			const FString& EditId,
+			const FString& PreviewId,
+			const FString& ApplyState,
+			const FString& SessionId,
+			const TArray<FCodeToolsEditPlan>& Edits,
+			const FString& PathRisk,
+			bool bDryRun,
+			bool bRequiresBuild,
+			bool bRequiresRestart,
+			bool bForcedOverDrift)
+		{
+			TSharedPtr<FJsonObject> Manifest = MakeShared<FJsonObject>();
+			Manifest->SetNumberField(TEXT("schemaVersion"), 1);
+			Manifest->SetStringField(TEXT("action"), Action);
+			Manifest->SetStringField(TEXT("editId"), EditId);
+			Manifest->SetStringField(TEXT("previewId"), PreviewId);
+			Manifest->SetStringField(TEXT("timestampUtc"), FDateTime::UtcNow().ToIso8601());
+			Manifest->SetStringField(TEXT("sessionId"), SessionId);
+			Manifest->SetStringField(TEXT("applyState"), ApplyState);
+			Manifest->SetArrayField(TEXT("touchedFiles"), CodeToolsMakeTouchedFileArray(Edits, false));
+			Manifest->SetStringField(TEXT("pathRisk"), PathRisk);
+			Manifest->SetBoolField(TEXT("dryRun"), bDryRun);
+			Manifest->SetBoolField(TEXT("requiresBuild"), bRequiresBuild);
+			Manifest->SetBoolField(TEXT("requiresRestart"), bRequiresRestart);
+			if (bForcedOverDrift)
+			{
+				Manifest->SetBoolField(TEXT("forcedOverDrift"), true);
+			}
+			TSharedPtr<FJsonObject> Correlation = MakeShared<FJsonObject>();
+			Correlation->SetStringField(TEXT("extensionLockSessionId"), SessionId);
+			Manifest->SetObjectField(TEXT("correlation"), Correlation);
+			return Manifest;
+		}
+
+		bool CodeToolsWriteApplyManifestState(
+			const FString& ManifestPath,
+			const FString& State,
+			const FString& EditId,
+			const FString& PreviewId,
+			const FString& SessionId,
+			const FCodeToolsPreviewPlan& Plan,
+			FString& OutFailureReason)
+		{
+			TSharedPtr<FJsonObject> Manifest = CodeToolsMakeManifestObject(
+				TEXT("code_apply_change"),
+				EditId,
+				PreviewId,
+				State,
+				SessionId,
+				Plan.Edits,
+				Plan.RiskLevel,
+				false,
+				Plan.bRequiresBuild,
+				Plan.bRequiresRestart,
+				false);
+			const bool bWrote = CodeToolsWriteJsonObjectAtomic(Manifest, ManifestPath, OutFailureReason);
+#if WITH_DEV_AUTOMATION_TESTS
+			if (bWrote && GCodeToolsApplyTestHooks.AfterApplyManifestState)
+			{
+				GCodeToolsApplyTestHooks.AfterApplyManifestState(State, ManifestPath);
+			}
+#endif
+			return bWrote;
+		}
+
+		bool CodeToolsBuildPreviewPlanFromEdits(
+			const TArray<TSharedPtr<FJsonValue>>& EditValues,
+			const FString& PreviewId,
+			FCodeToolsPreviewPlan& OutPlan,
+			FString& OutFailureCode,
+			FString& OutFailureReason)
+		{
+			OutPlan = FCodeToolsPreviewPlan();
+			OutPlan.PreviewId = PreviewId;
+			if (EditValues.Num() == 0)
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = TEXT("edits must contain at least one edit.");
+				return false;
+			}
+
+			const FString ProjectRoot = CodeToolsNormalizePath(FPaths::ProjectDir());
+			const FString PluginRoot = CodeToolsResolvePluginBaseDir();
+			TSet<FString> SeenPaths;
+			TArray<TSharedPtr<FJsonValue>> RequestedEditValues;
+
+			for (const TSharedPtr<FJsonValue>& EditValue : EditValues)
+			{
+				const TSharedPtr<FJsonObject> EditObject = EditValue.IsValid() ? EditValue->AsObject() : nullptr;
+				if (!EditObject.IsValid())
+				{
+					OutFailureCode = TEXT("missingMatch");
+					OutFailureReason = TEXT("Each edit must be an object.");
+					return false;
+				}
+
+				FString RawPath;
+				FString ExpectedSha;
+				FString Operation;
+				FString OldText;
+				FString NewText;
+				FString AnchorText;
+				EditObject->TryGetStringField(TEXT("path"), RawPath);
+				EditObject->TryGetStringField(TEXT("expectedSha256"), ExpectedSha);
+				EditObject->TryGetStringField(TEXT("operation"), Operation);
+				EditObject->TryGetStringField(TEXT("oldText"), OldText);
+				EditObject->TryGetStringField(TEXT("newText"), NewText);
+				EditObject->TryGetStringField(TEXT("anchorText"), AnchorText);
+				RawPath = RawPath.TrimStartAndEnd();
+				ExpectedSha = ExpectedSha.TrimStartAndEnd().ToLower();
+				Operation = Operation.TrimStartAndEnd();
+
+				if (RawPath.IsEmpty() || Operation.IsEmpty())
+				{
+					OutFailureCode = TEXT("missingMatch");
+					OutFailureReason = TEXT("Each edit requires path and operation.");
+					return false;
+				}
+				if (Operation.Equals(TEXT("replace_exact"), ESearchCase::IgnoreCase))
+				{
+					if (!EditObject->HasField(TEXT("oldText")) || !EditObject->HasField(TEXT("newText")))
+					{
+						OutFailureCode = TEXT("missingMatch");
+						OutFailureReason = TEXT("replace_exact requires oldText and newText.");
+						return false;
+					}
+				}
+				else if (Operation.Equals(TEXT("insert_before"), ESearchCase::IgnoreCase)
+					|| Operation.Equals(TEXT("insert_after"), ESearchCase::IgnoreCase))
+				{
+					if (!EditObject->HasField(TEXT("anchorText")) || !EditObject->HasField(TEXT("newText")))
+					{
+						OutFailureCode = TEXT("missingMatch");
+						OutFailureReason = TEXT("insert_before/insert_after require anchorText and newText.");
+						return false;
+					}
+				}
+				else if (Operation.Equals(TEXT("create_file"), ESearchCase::IgnoreCase))
+				{
+					if (!EditObject->HasField(TEXT("newText")))
+					{
+						OutFailureCode = TEXT("missingMatch");
+						OutFailureReason = TEXT("create_file requires newText.");
+						return false;
+					}
+				}
+				else
+				{
+					OutFailureCode = TEXT("missingMatch");
+					OutFailureReason = FString::Printf(TEXT("Unsupported operation '%s'."), *Operation);
+					return false;
+				}
+
+				const FCodePathPolicy Policy = ClassifyCodePath_Pure(
+					ProjectRoot,
+					PluginRoot,
+					RawPath,
+					[](const FString& Path) { return CodeToolsRealPathExists(Path); },
+					[](const FString& Path, FString& OutTarget) { return CodeToolsTryResolveRealSymlinkTarget(Path, OutTarget); });
+				OutPlan.PathPolicyResults.Add(MakeShared<FJsonValueObject>(CodeToolsMakePathPolicyObject(RawPath, Policy)));
+				if (Policy.Classification == ECodePathClassification::Forbidden
+					|| Policy.Classification == ECodePathClassification::OutsideProject)
+				{
+					OutFailureCode = TEXT("forbiddenPath");
+					OutFailureReason = Policy.Reason;
+					return false;
+				}
+
+				const FString ProjectRelativePath = CodeToolsProjectRelativePath(ProjectRoot, Policy.CanonicalPath);
+				if (SeenPaths.Contains(ProjectRelativePath.ToLower()))
+				{
+					OutFailureCode = TEXT("ambiguousMatch");
+					OutFailureReason = FString::Printf(TEXT("Multiple edits for the same file are not supported in one preview: %s"), *ProjectRelativePath);
+					return false;
+				}
+				SeenPaths.Add(ProjectRelativePath.ToLower());
+
+				FCodeToolsEditPlan Edit;
+				Edit.Path = Policy.CanonicalPath;
+				Edit.ProjectRelativePath = ProjectRelativePath;
+				Edit.Operation = Operation;
+				Edit.ExpectedSha256 = ExpectedSha;
+				Edit.PathRisk = Policy.Classification == ECodePathClassification::HighRisk ? TEXT("high") : TEXT("low");
+				Edit.PathReason = Policy.Reason;
+				Edit.bOriginalExisted = !Operation.Equals(TEXT("create_file"), ESearchCase::IgnoreCase);
+
+				if (Policy.Classification == ECodePathClassification::HighRisk)
+				{
+					OutPlan.RiskLevel = TEXT("high");
+					OutPlan.bRequiresApproval = true;
+				}
+				OutPlan.bRequiresBuild = OutPlan.bRequiresBuild || CodeToolsPathNeedsBuild(Edit.Path);
+				OutPlan.bRequiresRestart = OutPlan.bRequiresRestart || CodeToolsPathNeedsRestart(Edit.Path);
+
+				if (Operation.Equals(TEXT("create_file"), ESearchCase::IgnoreCase))
+				{
+					if (FPaths::FileExists(Edit.Path))
+					{
+						FString CurrentSha;
+						TArray<uint8> ExistingBytes;
+						CodeToolsReadFileBytes(Edit.Path, ExistingBytes, CurrentSha);
+						OutPlan.ShaCheckResults.Add(MakeShared<FJsonValueObject>(CodeToolsMakeShaCheckObject(RawPath, ExpectedSha, CurrentSha, false)));
+						OutFailureCode = TEXT("staleExpectedSha");
+						OutFailureReason = FString::Printf(TEXT("create_file target already exists: %s"), *ProjectRelativePath);
+						return false;
+					}
+					const FString ParentPath = CodeToolsNormalizePath(FPaths::GetPath(Edit.Path));
+					if (Policy.Classification == ECodePathClassification::HighRisk && !FPaths::DirectoryExists(ParentPath))
+					{
+						OutFailureCode = TEXT("forbiddenPath");
+						OutFailureReason = TEXT("create_file into a high-risk root requires an existing parent directory.");
+						return false;
+					}
+					Edit.ShaBefore = FString();
+					Edit.BeforeBytes.Reset();
+					if (!ExpectedSha.IsEmpty())
+					{
+						OutPlan.ShaCheckResults.Add(MakeShared<FJsonValueObject>(CodeToolsMakeShaCheckObject(RawPath, ExpectedSha, TEXT("<missing>"), false)));
+						OutFailureCode = TEXT("staleExpectedSha");
+						OutFailureReason = TEXT("create_file expectedSha256 must be empty because the target must not exist.");
+						return false;
+					}
+					OutPlan.ShaCheckResults.Add(MakeShared<FJsonValueObject>(CodeToolsMakeShaCheckObject(RawPath, ExpectedSha, TEXT("<missing>"), true)));
+				}
+				else
+				{
+					if (ExpectedSha.IsEmpty())
+					{
+						OutFailureCode = TEXT("staleExpectedSha");
+						OutFailureReason = TEXT("expectedSha256 is required for non-create edits.");
+						return false;
+					}
+					if (!CodeToolsReadFileBytes(Edit.Path, Edit.BeforeBytes, Edit.ShaBefore))
+					{
+						OutPlan.ShaCheckResults.Add(MakeShared<FJsonValueObject>(CodeToolsMakeShaCheckObject(RawPath, ExpectedSha, TEXT("<missing>"), false)));
+						OutFailureCode = TEXT("staleExpectedSha");
+						OutFailureReason = FString::Printf(TEXT("File is missing or unreadable: %s"), *ProjectRelativePath);
+						return false;
+					}
+					const bool bShaMatches = Edit.ShaBefore.Equals(ExpectedSha, ESearchCase::IgnoreCase);
+					OutPlan.ShaCheckResults.Add(MakeShared<FJsonValueObject>(CodeToolsMakeShaCheckObject(RawPath, ExpectedSha, Edit.ShaBefore, bShaMatches)));
+					if (!bShaMatches)
+					{
+						OutFailureCode = TEXT("staleExpectedSha");
+						OutFailureReason = FString::Printf(TEXT("Current sha for %s does not match expectedSha256."), *ProjectRelativePath);
+						return false;
+					}
+					if (!CodeToolsIsValidUtf8(Edit.BeforeBytes))
+					{
+						OutFailureCode = TEXT("forbiddenPath");
+						OutFailureReason = FString::Printf(TEXT("File is not valid UTF-8: %s"), *ProjectRelativePath);
+						return false;
+					}
+				}
+
+				if (!CodeToolsApplyByteEdit(Edit.BeforeBytes, Operation, OldText, AnchorText, NewText, Edit.AfterBytes, OutFailureCode, OutFailureReason))
+				{
+					OutFailureReason = FString::Printf(TEXT("%s in %s"), *OutFailureReason, *ProjectRelativePath);
+					return false;
+				}
+				Edit.ShaAfter = CodeToolsSha256Bytes(Edit.AfterBytes);
+				if (CodeToolsPathExtension(Edit.Path).Equals(TEXT(".uproject"), ESearchCase::IgnoreCase)
+					&& Edit.bOriginalExisted
+					&& CodeToolsIsEngineAssociationOnlyUprojectChange(Edit.BeforeBytes, Edit.AfterBytes))
+				{
+					OutFailureCode = TEXT("forbiddenPath");
+					OutFailureReason = TEXT("EngineAssociation-only .uproject edits must use unreal.project_version_migration.");
+					return false;
+				}
+
+				TSharedPtr<FJsonObject> StoredEdit = MakeShared<FJsonObject>();
+				StoredEdit->SetStringField(TEXT("path"), ProjectRelativePath);
+				StoredEdit->SetStringField(TEXT("expectedSha256"), ExpectedSha);
+				StoredEdit->SetStringField(TEXT("operation"), Operation);
+				if (EditObject->HasField(TEXT("oldText")))
+				{
+					StoredEdit->SetStringField(TEXT("oldText"), OldText);
+				}
+				if (EditObject->HasField(TEXT("anchorText")))
+				{
+					StoredEdit->SetStringField(TEXT("anchorText"), AnchorText);
+				}
+				if (EditObject->HasField(TEXT("newText")))
+				{
+					StoredEdit->SetStringField(TEXT("newText"), NewText);
+				}
+				RequestedEditValues.Add(MakeShared<FJsonValueObject>(StoredEdit));
+				OutPlan.Edits.Add(Edit);
+			}
+
+			OutPlan.UnifiedDiff = CodeToolsMakeUnifiedDiff(OutPlan.Edits);
+			OutPlan.PreviewPath = CodeToolsCombinePath(CodeToolsPreviewsRoot(), PreviewId + TEXT(".json"));
+			OutPlan.PreviewObject = MakeShared<FJsonObject>();
+			OutPlan.PreviewObject->SetNumberField(TEXT("schemaVersion"), 1);
+			OutPlan.PreviewObject->SetStringField(TEXT("previewId"), PreviewId);
+			OutPlan.PreviewObject->SetStringField(TEXT("timestampUtc"), FDateTime::UtcNow().ToIso8601());
+			OutPlan.PreviewObject->SetStringField(TEXT("riskLevel"), OutPlan.RiskLevel);
+			OutPlan.PreviewObject->SetBoolField(TEXT("requiresApproval"), OutPlan.bRequiresApproval);
+			OutPlan.PreviewObject->SetBoolField(TEXT("wouldRequireBuild"), OutPlan.bRequiresBuild);
+			OutPlan.PreviewObject->SetBoolField(TEXT("wouldRequireRestart"), OutPlan.bRequiresRestart);
+			OutPlan.PreviewObject->SetStringField(TEXT("unifiedDiff"), OutPlan.UnifiedDiff);
+			OutPlan.PreviewObject->SetArrayField(TEXT("requestedEdits"), RequestedEditValues);
+			OutPlan.PreviewObject->SetArrayField(TEXT("touchedFiles"), CodeToolsMakeTouchedFileArray(OutPlan.Edits, true));
+			OutPlan.PreviewObject->SetArrayField(TEXT("pathPolicyResult"), OutPlan.PathPolicyResults);
+			OutPlan.PreviewObject->SetArrayField(TEXT("shaCheckResult"), OutPlan.ShaCheckResults);
 			return true;
 		}
 
@@ -967,13 +1902,777 @@ namespace UnrealMcp
 				false);
 		}
 
-		FUnrealMcpExecutionResult CodeToolsWaveBStub(const FString& ToolName)
+		bool CodeToolsGetRequestedEditsFromPreview(
+			const TSharedPtr<FJsonObject>& PreviewObject,
+			const TArray<TSharedPtr<FJsonValue>>*& OutEditValues,
+			FString& OutPreviewId,
+			FString& OutFailureReason)
+		{
+			OutEditValues = nullptr;
+			OutPreviewId.Reset();
+			if (!PreviewObject.IsValid())
+			{
+				OutFailureReason = TEXT("Preview artifact is invalid JSON.");
+				return false;
+			}
+			PreviewObject->TryGetStringField(TEXT("previewId"), OutPreviewId);
+			if (OutPreviewId.IsEmpty() || !CodeToolsIsSafeArtifactId(OutPreviewId))
+			{
+				OutFailureReason = TEXT("Preview artifact has an invalid previewId.");
+				return false;
+			}
+			if (!PreviewObject->TryGetArrayField(TEXT("requestedEdits"), OutEditValues) || !OutEditValues)
+			{
+				OutFailureReason = TEXT("Preview artifact is missing requestedEdits.");
+				return false;
+			}
+			return true;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakePreviewResponse(const FCodeToolsPreviewPlan& Plan)
 		{
 			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
-			StructuredContent->SetStringField(TEXT("code"), TEXT("not_implemented_wave_b"));
-			StructuredContent->SetStringField(TEXT("message"), TEXT("code_* write tools land in v0.29 Wave B"));
-			StructuredContent->SetStringField(TEXT("toolName"), ToolName);
-			return MakeExecutionResult(TEXT("code_* write tools land in v0.29 Wave B"), StructuredContent, true);
+			StructuredContent->SetStringField(TEXT("previewId"), Plan.PreviewId);
+			StructuredContent->SetStringField(TEXT("previewPath"), Plan.PreviewPath);
+			StructuredContent->SetStringField(TEXT("unifiedDiff"), Plan.UnifiedDiff);
+			StructuredContent->SetArrayField(TEXT("touchedFiles"), CodeToolsMakeTouchedFileArray(Plan.Edits, true));
+			StructuredContent->SetStringField(TEXT("riskLevel"), Plan.RiskLevel);
+			StructuredContent->SetBoolField(TEXT("requiresApproval"), Plan.bRequiresApproval);
+			StructuredContent->SetBoolField(TEXT("wouldRequireBuild"), Plan.bRequiresBuild);
+			StructuredContent->SetBoolField(TEXT("wouldRequireRestart"), Plan.bRequiresRestart);
+			StructuredContent->SetArrayField(TEXT("pathPolicyResult"), Plan.PathPolicyResults);
+			StructuredContent->SetArrayField(TEXT("shaCheckResult"), Plan.ShaCheckResults);
+			return StructuredContent;
+		}
+
+		FUnrealMcpExecutionResult CodeToolsPreviewChange(const FJsonObject& Arguments)
+		{
+			const TArray<TSharedPtr<FJsonValue>>* EditValues = nullptr;
+			if (!Arguments.TryGetArrayField(TEXT("edits"), EditValues) || !EditValues)
+			{
+				return CodeToolsMakeErrorResult(TEXT("missingMatch"), TEXT("edits is required."));
+			}
+
+			const FString PreviewId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+			FCodeToolsPreviewPlan Plan;
+			FString FailureCode;
+			FString FailureReason;
+			if (!CodeToolsBuildPreviewPlanFromEdits(*EditValues, PreviewId, Plan, FailureCode, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(FailureCode, FailureReason);
+			}
+
+			if (!CodeToolsWriteJsonObjectAtomic(Plan.PreviewObject, Plan.PreviewPath, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("forbiddenPath"), FailureReason);
+			}
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Previewed %d code edit(s)."), Plan.Edits.Num()),
+				CodeToolsMakePreviewResponse(Plan),
+				false);
+		}
+
+		bool CodeToolsLoadPreviewPlan(const FString& PreviewId, FCodeToolsPreviewPlan& OutPlan, FString& OutFailureCode, FString& OutFailureReason)
+		{
+			if (!CodeToolsIsSafeArtifactId(PreviewId))
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = TEXT("previewId is invalid.");
+				return false;
+			}
+			const FString PreviewPath = CodeToolsCombinePath(CodeToolsPreviewsRoot(), PreviewId + TEXT(".json"));
+			TSharedPtr<FJsonObject> PreviewObject;
+			if (!LoadJsonObjectFromFile(PreviewPath, PreviewObject, OutFailureReason) || !PreviewObject.IsValid())
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = FString::Printf(TEXT("Preview artifact not found or unreadable: %s"), *PreviewId);
+				return false;
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* EditValues = nullptr;
+			FString StoredPreviewId;
+			if (!CodeToolsGetRequestedEditsFromPreview(PreviewObject, EditValues, StoredPreviewId, OutFailureReason))
+			{
+				OutFailureCode = TEXT("missingMatch");
+				return false;
+			}
+			if (StoredPreviewId != PreviewId)
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = TEXT("Preview artifact previewId does not match the requested previewId.");
+				return false;
+			}
+			if (!CodeToolsBuildPreviewPlanFromEdits(*EditValues, PreviewId, OutPlan, OutFailureCode, OutFailureReason))
+			{
+				return false;
+			}
+			OutPlan.PreviewPath = PreviewPath;
+			return true;
+		}
+
+		FString CodeToolsSanitizeArtifactName(FString Value)
+		{
+			Value.ReplaceInline(TEXT("\\"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT("/"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT(":"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT("*"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT("?"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT("\""), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT("<"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT(">"), TEXT("_"), ESearchCase::CaseSensitive);
+			Value.ReplaceInline(TEXT("|"), TEXT("_"), ESearchCase::CaseSensitive);
+			return Value.Left(96);
+		}
+
+		FString CodeToolsGenerateEditId()
+		{
+			return FString::Printf(
+				TEXT("code-%s-%s"),
+				*FDateTime::UtcNow().ToString(TEXT("%Y%m%dT%H%M%SZ")),
+				*FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
+		}
+
+		bool CodeToolsTryCreateBackupDirectory(FString& OutEditId, FString& OutBackupDir, FString& OutFailureCode, FString& OutFailureReason)
+		{
+			for (int32 Attempt = 0; Attempt < CodeToolsMaxEditIdAttempts; ++Attempt)
+			{
+				const FString EditId = CodeToolsGenerateEditId();
+				const FString BackupDir = CodeToolsCombinePath(CodeToolsBackupsRoot(), EditId);
+				bool bPretendExists = false;
+#if WITH_DEV_AUTOMATION_TESTS
+				if (GCodeToolsApplyTestHooks.ShouldPretendBackupDirectoryExists)
+				{
+					bPretendExists = GCodeToolsApplyTestHooks.ShouldPretendBackupDirectoryExists(EditId);
+				}
+#endif
+				if (bPretendExists || FPaths::DirectoryExists(BackupDir))
+				{
+					continue;
+				}
+				if (!IFileManager::Get().MakeDirectory(*BackupDir, true))
+				{
+					OutFailureCode = TEXT("editIdCollisionExhausted");
+					OutFailureReason = FString::Printf(TEXT("Failed to create backup directory: %s"), *BackupDir);
+					return false;
+				}
+				OutEditId = EditId;
+				OutBackupDir = BackupDir;
+				return true;
+			}
+			OutFailureCode = TEXT("editIdCollisionExhausted");
+			OutFailureReason = TEXT("Failed to allocate a unique code editId after bounded retries.");
+			return false;
+		}
+
+		bool CodeToolsWriteAndVerifyBackups(TArray<FCodeToolsEditPlan>& Edits, const FString& BackupDir, FString& OutFailureReason)
+		{
+			for (int32 Index = 0; Index < Edits.Num(); ++Index)
+			{
+				FCodeToolsEditPlan& Edit = Edits[Index];
+				if (!Edit.bOriginalExisted)
+				{
+					Edit.BackupPath.Reset();
+					continue;
+				}
+				Edit.BackupPath = CodeToolsCombinePath(
+					BackupDir,
+					FString::Printf(TEXT("%03d_%s.before"), Index, *CodeToolsSanitizeArtifactName(Edit.ProjectRelativePath)));
+				if (!FFileHelper::SaveArrayToFile(Edit.BeforeBytes, *Edit.BackupPath))
+				{
+					OutFailureReason = FString::Printf(TEXT("Failed to write backup for %s."), *Edit.ProjectRelativePath);
+					return false;
+				}
+				TArray<uint8> BackupBytes;
+				FString BackupSha;
+				if (!CodeToolsReadFileBytes(Edit.BackupPath, BackupBytes, BackupSha) || BackupSha != Edit.ShaBefore)
+				{
+					OutFailureReason = FString::Printf(TEXT("Backup verification failed for %s."), *Edit.ProjectRelativePath);
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool CodeToolsRestoreEditFromBackup(const FCodeToolsEditPlan& Edit, bool bForce, FString& OutFailureReason)
+		{
+			if (!Edit.bOriginalExisted)
+			{
+				if (!FPaths::FileExists(Edit.Path))
+				{
+					return true;
+				}
+				TArray<uint8> CurrentBytes;
+				FString CurrentSha;
+				if (!CodeToolsReadFileBytes(Edit.Path, CurrentBytes, CurrentSha))
+				{
+					OutFailureReason = FString::Printf(TEXT("Failed to read created file before delete: %s"), *Edit.ProjectRelativePath);
+					return false;
+				}
+				if (!bForce && CurrentSha != Edit.ShaAfter)
+				{
+					OutFailureReason = FString::Printf(TEXT("Created file drifted before delete: %s"), *Edit.ProjectRelativePath);
+					return false;
+				}
+				if (!IFileManager::Get().Delete(*Edit.Path, false, true))
+				{
+					OutFailureReason = FString::Printf(TEXT("Failed to delete created file: %s"), *Edit.ProjectRelativePath);
+					return false;
+				}
+				return true;
+			}
+
+			TArray<uint8> BackupBytes;
+			FString BackupSha;
+			if (Edit.BackupPath.IsEmpty() || !CodeToolsReadFileBytes(Edit.BackupPath, BackupBytes, BackupSha) || BackupSha != Edit.ShaBefore)
+			{
+				OutFailureReason = FString::Printf(TEXT("Backup is missing or does not match shaBefore for %s."), *Edit.ProjectRelativePath);
+				return false;
+			}
+			if (!CodeToolsWriteBytesAtomic(Edit.Path, BackupBytes, OutFailureReason))
+			{
+				return false;
+			}
+			TArray<uint8> RestoredBytes;
+			FString RestoredSha;
+			if (!CodeToolsReadFileBytes(Edit.Path, RestoredBytes, RestoredSha) || RestoredSha != Edit.ShaBefore)
+			{
+				OutFailureReason = FString::Printf(TEXT("Restored sha does not match shaBefore for %s."), *Edit.ProjectRelativePath);
+				return false;
+			}
+			return true;
+		}
+
+		bool CodeToolsRollbackWrittenEdits(const TArray<FCodeToolsEditPlan>& WrittenEdits, FString& OutFailureReason)
+		{
+			for (int32 Index = WrittenEdits.Num() - 1; Index >= 0; --Index)
+			{
+				if (!CodeToolsRestoreEditFromBackup(WrittenEdits[Index], false, OutFailureReason))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakeApplyResponse(
+			const FCodeToolsPreviewPlan& Plan,
+			const FString& EditId,
+			const FString& ManifestPath,
+			const FString& BackupDirectory,
+			bool bDryRun,
+			int32 AppliedChangeCount)
+		{
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("editId"), EditId);
+			if (ManifestPath.IsEmpty())
+			{
+				StructuredContent->SetField(TEXT("manifestPath"), MakeShared<FJsonValueNull>());
+			}
+			else
+			{
+				StructuredContent->SetStringField(TEXT("manifestPath"), ManifestPath);
+			}
+			if (BackupDirectory.IsEmpty())
+			{
+				StructuredContent->SetField(TEXT("backupDirectory"), MakeShared<FJsonValueNull>());
+			}
+			else
+			{
+				StructuredContent->SetStringField(TEXT("backupDirectory"), BackupDirectory);
+			}
+			StructuredContent->SetArrayField(TEXT("touchedFiles"), CodeToolsMakeTouchedFileArray(Plan.Edits, false));
+			StructuredContent->SetBoolField(TEXT("buildRecommended"), Plan.bRequiresBuild);
+			StructuredContent->SetBoolField(TEXT("restartRecommended"), Plan.bRequiresRestart);
+			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
+			StructuredContent->SetNumberField(TEXT("appliedChangeCount"), AppliedChangeCount);
+			return StructuredContent;
+		}
+
+		FUnrealMcpExecutionResult CodeToolsApplyChange(const FJsonObject& Arguments)
+		{
+			FString PreviewId;
+			Arguments.TryGetStringField(TEXT("previewId"), PreviewId);
+			PreviewId = PreviewId.TrimStartAndEnd();
+			if (PreviewId.IsEmpty())
+			{
+				return CodeToolsMakeErrorResult(TEXT("missingMatch"), TEXT("previewId is required."));
+			}
+
+			bool bDryRun = true;
+			bool bConfirmHighRisk = false;
+			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
+			Arguments.TryGetBoolField(TEXT("confirmHighRisk"), bConfirmHighRisk);
+
+			FCodeToolsPreviewPlan Plan;
+			FString FailureCode;
+			FString FailureReason;
+			if (!CodeToolsLoadPreviewPlan(PreviewId, Plan, FailureCode, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(FailureCode, FailureReason);
+			}
+			if (Plan.bRequiresApproval && !bConfirmHighRisk)
+			{
+				return CodeToolsMakeErrorResult(TEXT("highRiskConfirmationRequired"), TEXT("confirmHighRisk=true is required for high-risk code paths."));
+			}
+
+			if (bDryRun)
+			{
+				TSharedPtr<FJsonObject> StructuredContent = CodeToolsMakeApplyResponse(Plan, FString(), FString(), FString(), true, 0);
+				TSharedPtr<FJsonObject> LockAvailability = MakeShared<FJsonObject>();
+				LockAvailability->SetBoolField(TEXT("currentlyHeld"), FPaths::FileExists(GetMcpExtensionLockPath()));
+				LockAvailability->SetStringField(TEXT("note"), TEXT("Dry-run does not acquire the lock; this availability check is informational and cannot guarantee later availability."));
+				StructuredContent->SetObjectField(TEXT("lockAvailability"), LockAvailability);
+				return MakeExecutionResult(
+					FString::Printf(TEXT("Dry run: would apply %d code edit(s)."), Plan.Edits.Num()),
+					StructuredContent,
+					false);
+			}
+
+			FScopedCodeChangeLock ScopedLock(TEXT("unreal.code_apply_change"));
+			if (!ScopedLock.IsAcquired())
+			{
+				return MakeExecutionResult(
+					ScopedLock.GetFailureReason(),
+					ScopedLock.MakeStructuredContent(TEXT("code_change_lock_failed")),
+					true);
+			}
+
+			FString EditId;
+			FString BackupDir;
+			if (!CodeToolsTryCreateBackupDirectory(EditId, BackupDir, FailureCode, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(FailureCode, FailureReason);
+			}
+
+			FString ManifestPath = CodeToolsCombinePath(BackupDir, TEXT("Manifest.json"));
+			for (int32 Index = 0; Index < Plan.Edits.Num(); ++Index)
+			{
+				FCodeToolsEditPlan& Edit = Plan.Edits[Index];
+				Edit.BackupPath = Edit.bOriginalExisted
+					? CodeToolsCombinePath(BackupDir, FString::Printf(TEXT("%03d_%s.before"), Index, *CodeToolsSanitizeArtifactName(Edit.ProjectRelativePath)))
+					: FString();
+			}
+
+			if (!CodeToolsWriteApplyManifestState(ManifestPath, TEXT("started"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+			if (!CodeToolsWriteAndVerifyBackups(Plan.Edits, BackupDir, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+			if (!CodeToolsWriteApplyManifestState(ManifestPath, TEXT("backupComplete"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+
+			TArray<FCodeToolsEditPlan> WrittenEdits;
+			for (const FCodeToolsEditPlan& Edit : Plan.Edits)
+			{
+#if WITH_DEV_AUTOMATION_TESTS
+				if (GCodeToolsApplyTestHooks.BeforeWrite)
+				{
+					GCodeToolsApplyTestHooks.BeforeWrite(Edit.ProjectRelativePath);
+				}
+#endif
+				if (Edit.bOriginalExisted)
+				{
+					TArray<uint8> CurrentBytes;
+					FString CurrentSha;
+					if (!CodeToolsReadFileBytes(Edit.Path, CurrentBytes, CurrentSha) || CurrentSha != Edit.ShaBefore)
+					{
+						FString RollbackFailure;
+						const bool bRolledBack = CodeToolsRollbackWrittenEdits(WrittenEdits, RollbackFailure);
+						CodeToolsWriteApplyManifestState(ManifestPath, TEXT("rolledBack"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason);
+						return CodeToolsMakeErrorResult(
+							TEXT("transactionRolledBack"),
+							bRolledBack
+								? FString::Printf(TEXT("TOCTOU sha check failed before writing %s; already-written files were rolled back."), *Edit.ProjectRelativePath)
+								: FString::Printf(TEXT("TOCTOU sha check failed before writing %s; rollback failed: %s"), *Edit.ProjectRelativePath, *RollbackFailure));
+					}
+				}
+				else
+				{
+					if (FPaths::FileExists(Edit.Path))
+					{
+						FString RollbackFailure;
+						const bool bRolledBack = CodeToolsRollbackWrittenEdits(WrittenEdits, RollbackFailure);
+						CodeToolsWriteApplyManifestState(ManifestPath, TEXT("rolledBack"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason);
+						return CodeToolsMakeErrorResult(
+							TEXT("transactionRolledBack"),
+							bRolledBack
+								? FString::Printf(TEXT("create_file target appeared before writing %s; already-written files were rolled back."), *Edit.ProjectRelativePath)
+								: FString::Printf(TEXT("create_file target appeared before writing %s; rollback failed: %s"), *Edit.ProjectRelativePath, *RollbackFailure));
+					}
+					const FString ParentDir = FPaths::GetPath(Edit.Path);
+					if (!IFileManager::Get().MakeDirectory(*ParentDir, true))
+					{
+						FString RollbackFailure;
+						const bool bRolledBack = CodeToolsRollbackWrittenEdits(WrittenEdits, RollbackFailure);
+						CodeToolsWriteApplyManifestState(ManifestPath, TEXT("rolledBack"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason);
+						return CodeToolsMakeErrorResult(
+							TEXT("transactionRolledBack"),
+							bRolledBack
+								? FString::Printf(TEXT("Failed to create parent directory for %s; already-written files were rolled back."), *Edit.ProjectRelativePath)
+								: FString::Printf(TEXT("Failed to create parent directory for %s; rollback failed: %s"), *Edit.ProjectRelativePath, *RollbackFailure));
+					}
+				}
+
+				if (!CodeToolsWriteBytesAtomic(Edit.Path, Edit.AfterBytes, FailureReason))
+				{
+					FString RollbackFailure;
+					TArray<FCodeToolsEditPlan> RollbackTargets = WrittenEdits;
+					if (FPaths::FileExists(Edit.Path))
+					{
+						RollbackTargets.Add(Edit);
+					}
+					const bool bRolledBack = CodeToolsRollbackWrittenEdits(RollbackTargets, RollbackFailure);
+					CodeToolsWriteApplyManifestState(ManifestPath, TEXT("rolledBack"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason);
+					return CodeToolsMakeErrorResult(
+						TEXT("transactionRolledBack"),
+						bRolledBack
+							? FString::Printf(TEXT("Write failed for %s; transaction was rolled back."), *Edit.ProjectRelativePath)
+							: FString::Printf(TEXT("Write failed for %s; rollback failed: %s"), *Edit.ProjectRelativePath, *RollbackFailure));
+				}
+				WrittenEdits.Add(Edit);
+			}
+
+			if (!CodeToolsWriteApplyManifestState(ManifestPath, TEXT("writeComplete"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason))
+			{
+				FString RollbackFailure;
+				CodeToolsRollbackWrittenEdits(WrittenEdits, RollbackFailure);
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+
+			for (const FCodeToolsEditPlan& Edit : Plan.Edits)
+			{
+				TArray<uint8> AfterBytes;
+				FString AfterSha;
+				if (!CodeToolsReadFileBytes(Edit.Path, AfterBytes, AfterSha) || AfterSha != Edit.ShaAfter)
+				{
+					FString RollbackFailure;
+					const bool bRolledBack = CodeToolsRollbackWrittenEdits(WrittenEdits, RollbackFailure);
+					CodeToolsWriteApplyManifestState(ManifestPath, TEXT("rolledBack"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason);
+					return CodeToolsMakeErrorResult(
+						TEXT("transactionRolledBack"),
+						bRolledBack
+							? FString::Printf(TEXT("Post-write sha verification failed for %s; transaction was rolled back."), *Edit.ProjectRelativePath)
+							: FString::Printf(TEXT("Post-write sha verification failed for %s; rollback failed: %s"), *Edit.ProjectRelativePath, *RollbackFailure));
+				}
+			}
+
+			if (!CodeToolsWriteApplyManifestState(ManifestPath, TEXT("verified"), EditId, PreviewId, ScopedLock.GetSessionId(), Plan, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+			TSharedPtr<FJsonObject> VerifiedManifest = CodeToolsMakeManifestObject(
+				TEXT("code_apply_change"),
+				EditId,
+				PreviewId,
+				TEXT("verified"),
+				ScopedLock.GetSessionId(),
+				Plan.Edits,
+				Plan.RiskLevel,
+				false,
+				Plan.bRequiresBuild,
+				Plan.bRequiresRestart,
+				false);
+			if (!CodeToolsWriteJsonObjectAtomic(VerifiedManifest, CodeToolsLastChangePath(), FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Applied %d code edit(s)."), Plan.Edits.Num()),
+				CodeToolsMakeApplyResponse(Plan, EditId, ManifestPath, BackupDir, false, Plan.Edits.Num()),
+				false);
+		}
+
+		bool CodeToolsResolveRollbackManifestPath(const FJsonObject& Arguments, FString& OutManifestPath, FString& OutFailureReason)
+		{
+			FString ManifestPath;
+			FString EditId;
+			Arguments.TryGetStringField(TEXT("manifestPath"), ManifestPath);
+			Arguments.TryGetStringField(TEXT("editId"), EditId);
+			ManifestPath = ManifestPath.TrimStartAndEnd();
+			EditId = EditId.TrimStartAndEnd();
+			if (!ManifestPath.IsEmpty())
+			{
+				const FString ProjectRoot = CodeToolsNormalizePath(FPaths::ProjectDir());
+				OutManifestPath = FPaths::IsRelative(ManifestPath)
+					? CodeToolsCombinePath(ProjectRoot, ManifestPath)
+					: CodeToolsNormalizePath(ManifestPath);
+				if (!CodeToolsPathEqualsOrChild(OutManifestPath, CodeToolsChangesRoot()))
+				{
+					OutFailureReason = TEXT("manifestPath must resolve under Saved/UnrealMcp/CodeChanges.");
+					return false;
+				}
+				return true;
+			}
+			if (!EditId.IsEmpty())
+			{
+				if (!CodeToolsIsSafeArtifactId(EditId))
+				{
+					OutFailureReason = TEXT("editId is invalid.");
+					return false;
+				}
+				OutManifestPath = CodeToolsCombinePath(CodeToolsBackupsRoot(), FPaths::Combine(EditId, TEXT("Manifest.json")));
+				return true;
+			}
+			OutFailureReason = TEXT("Provide editId or manifestPath.");
+			return false;
+		}
+
+		bool CodeToolsReadManifestEdits(const TSharedPtr<FJsonObject>& Manifest, TArray<FCodeToolsEditPlan>& OutEdits, FString& OutFailureReason)
+		{
+			OutEdits.Reset();
+			const TArray<TSharedPtr<FJsonValue>>* TouchedFiles = nullptr;
+			if (!Manifest.IsValid() || !Manifest->TryGetArrayField(TEXT("touchedFiles"), TouchedFiles) || !TouchedFiles)
+			{
+				OutFailureReason = TEXT("Manifest is missing touchedFiles.");
+				return false;
+			}
+			for (const TSharedPtr<FJsonValue>& Value : *TouchedFiles)
+			{
+				const TSharedPtr<FJsonObject> Object = Value.IsValid() ? Value->AsObject() : nullptr;
+				if (!Object.IsValid())
+				{
+					OutFailureReason = TEXT("Manifest touchedFiles contains a non-object entry.");
+					return false;
+				}
+				FCodeToolsEditPlan Edit;
+				Object->TryGetStringField(TEXT("sourcePath"), Edit.Path);
+				Object->TryGetStringField(TEXT("projectRelativePath"), Edit.ProjectRelativePath);
+				Object->TryGetStringField(TEXT("backupPath"), Edit.BackupPath);
+				Object->TryGetStringField(TEXT("shaBefore"), Edit.ShaBefore);
+				Object->TryGetStringField(TEXT("shaAfter"), Edit.ShaAfter);
+				Object->TryGetStringField(TEXT("operation"), Edit.Operation);
+				Object->TryGetBoolField(TEXT("originalExisted"), Edit.bOriginalExisted);
+				if (Edit.Path.IsEmpty() || Edit.ProjectRelativePath.IsEmpty())
+				{
+					OutFailureReason = TEXT("Manifest touched file is missing sourcePath or projectRelativePath.");
+					return false;
+				}
+				OutEdits.Add(Edit);
+			}
+			return true;
+		}
+
+		bool CodeToolsBuildRollbackPlan(const FJsonObject& Arguments, FCodeToolsRollbackPlan& OutPlan, bool bForce, FString& OutFailureCode, FString& OutFailureReason)
+		{
+			OutPlan = FCodeToolsRollbackPlan();
+			if (!CodeToolsResolveRollbackManifestPath(Arguments, OutPlan.ManifestPath, OutFailureReason))
+			{
+				OutFailureCode = TEXT("missingMatch");
+				return false;
+			}
+			if (!LoadJsonObjectFromFile(OutPlan.ManifestPath, OutPlan.ManifestObject, OutFailureReason) || !OutPlan.ManifestObject.IsValid())
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = FString::Printf(TEXT("Manifest not found or unreadable: %s"), *OutPlan.ManifestPath);
+				return false;
+			}
+			OutPlan.ManifestObject->TryGetStringField(TEXT("editId"), OutPlan.EditId);
+			if (OutPlan.EditId.IsEmpty())
+			{
+				OutFailureCode = TEXT("missingMatch");
+				OutFailureReason = TEXT("Manifest is missing editId.");
+				return false;
+			}
+			if (!CodeToolsReadManifestEdits(OutPlan.ManifestObject, OutPlan.Edits, OutFailureReason))
+			{
+				OutFailureCode = TEXT("missingMatch");
+				return false;
+			}
+
+			FString ApplyState;
+			OutPlan.ManifestObject->TryGetStringField(TEXT("applyState"), ApplyState);
+			for (const FCodeToolsEditPlan& Edit : OutPlan.Edits)
+			{
+				const bool bPreWriteState = ApplyState.Equals(TEXT("started"), ESearchCase::IgnoreCase)
+					|| ApplyState.Equals(TEXT("backupComplete"), ESearchCase::IgnoreCase);
+				if (Edit.bOriginalExisted)
+				{
+					TArray<uint8> CurrentBytes;
+					FString CurrentSha;
+					if (!CodeToolsReadFileBytes(Edit.Path, CurrentBytes, CurrentSha))
+					{
+						OutPlan.bDriftDetected = true;
+						OutPlan.DriftFiles.Add(Edit.ProjectRelativePath);
+						continue;
+					}
+					const bool bAcceptable = bPreWriteState
+						? (CurrentSha == Edit.ShaBefore || CurrentSha == Edit.ShaAfter)
+						: (CurrentSha == Edit.ShaAfter);
+					if (!bAcceptable)
+					{
+						OutPlan.bDriftDetected = true;
+						OutPlan.DriftFiles.Add(Edit.ProjectRelativePath);
+					}
+				}
+				else
+				{
+					if (!FPaths::FileExists(Edit.Path))
+					{
+						if (!bPreWriteState)
+						{
+							OutPlan.bDriftDetected = true;
+							OutPlan.DriftFiles.Add(Edit.ProjectRelativePath);
+						}
+						continue;
+					}
+					TArray<uint8> CurrentBytes;
+					FString CurrentSha;
+					if (!CodeToolsReadFileBytes(Edit.Path, CurrentBytes, CurrentSha) || CurrentSha != Edit.ShaAfter)
+					{
+						OutPlan.bDriftDetected = true;
+						OutPlan.DriftFiles.Add(Edit.ProjectRelativePath);
+					}
+				}
+			}
+			if (OutPlan.bDriftDetected && !bForce)
+			{
+				OutFailureCode = TEXT("driftDetected");
+				OutFailureReason = TEXT("Rollback target drifted from the applied sha; pass force=true to restore over drift.");
+				return false;
+			}
+			OutPlan.RollbackId = FString::Printf(
+				TEXT("rollback-%s-%s"),
+				*FDateTime::UtcNow().ToString(TEXT("%Y%m%dT%H%M%SZ")),
+				*FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens));
+			return true;
+		}
+
+		TSharedPtr<FJsonObject> CodeToolsMakeRollbackResponse(
+			const FCodeToolsRollbackPlan& Plan,
+			const FString& RollbackManifestPath,
+			bool bDryRun,
+			bool bForcedOverDrift,
+			const TArray<TSharedPtr<FJsonValue>>& RestoredFiles)
+		{
+			TArray<TSharedPtr<FJsonValue>> DriftValues;
+			for (const FString& DriftFile : Plan.DriftFiles)
+			{
+				DriftValues.Add(MakeShared<FJsonValueString>(DriftFile));
+			}
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("rollbackId"), Plan.RollbackId);
+			StructuredContent->SetArrayField(TEXT("restoredFiles"), RestoredFiles);
+			if (RollbackManifestPath.IsEmpty())
+			{
+				StructuredContent->SetField(TEXT("rollbackManifestPath"), MakeShared<FJsonValueNull>());
+			}
+			else
+			{
+				StructuredContent->SetStringField(TEXT("rollbackManifestPath"), RollbackManifestPath);
+			}
+			StructuredContent->SetBoolField(TEXT("driftDetected"), Plan.bDriftDetected);
+			StructuredContent->SetArrayField(TEXT("driftFiles"), DriftValues);
+			StructuredContent->SetBoolField(TEXT("dryRun"), bDryRun);
+			if (bForcedOverDrift)
+			{
+				StructuredContent->SetBoolField(TEXT("forcedOverDrift"), true);
+			}
+			return StructuredContent;
+		}
+
+		FUnrealMcpExecutionResult CodeToolsRollbackChange(const FJsonObject& Arguments)
+		{
+			bool bDryRun = true;
+			bool bForce = false;
+			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
+			Arguments.TryGetBoolField(TEXT("force"), bForce);
+
+			FCodeToolsRollbackPlan Plan;
+			FString FailureCode;
+			FString FailureReason;
+			if (!CodeToolsBuildRollbackPlan(Arguments, Plan, bForce, FailureCode, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(FailureCode, FailureReason);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> RestoredFiles;
+			for (const FCodeToolsEditPlan& Edit : Plan.Edits)
+			{
+				TSharedPtr<FJsonObject> FileObject = MakeShared<FJsonObject>();
+				FileObject->SetStringField(TEXT("path"), Edit.ProjectRelativePath);
+				FileObject->SetStringField(TEXT("shaBefore"), Edit.ShaAfter);
+				FileObject->SetStringField(TEXT("shaAfter"), Edit.ShaBefore);
+				FileObject->SetStringField(TEXT("operation"), Edit.Operation);
+				FileObject->SetBoolField(TEXT("originalExisted"), Edit.bOriginalExisted);
+				RestoredFiles.Add(MakeShared<FJsonValueObject>(FileObject));
+			}
+
+			if (bDryRun)
+			{
+				return MakeExecutionResult(
+					FString::Printf(TEXT("Dry run: would roll back %d code file(s)."), Plan.Edits.Num()),
+					CodeToolsMakeRollbackResponse(Plan, FString(), true, false, RestoredFiles),
+					false);
+			}
+
+			FScopedCodeChangeLock ScopedLock(TEXT("unreal.code_rollback_change"));
+			if (!ScopedLock.IsAcquired())
+			{
+				return MakeExecutionResult(
+					ScopedLock.GetFailureReason(),
+					ScopedLock.MakeStructuredContent(TEXT("code_change_lock_failed")),
+					true);
+			}
+			if (!CodeToolsBuildRollbackPlan(Arguments, Plan, bForce, FailureCode, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(FailureCode, FailureReason);
+			}
+
+			for (const FCodeToolsEditPlan& Edit : Plan.Edits)
+			{
+				if (!CodeToolsRestoreEditFromBackup(Edit, bForce, FailureReason))
+				{
+					return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+				}
+			}
+
+			TSharedPtr<FJsonObject> OriginalManifest = Plan.ManifestObject;
+			FString PreviewId;
+			FString PathRisk = TEXT("low");
+			bool bRequiresBuild = false;
+			bool bRequiresRestart = false;
+			if (OriginalManifest.IsValid())
+			{
+				OriginalManifest->TryGetStringField(TEXT("previewId"), PreviewId);
+				OriginalManifest->TryGetStringField(TEXT("pathRisk"), PathRisk);
+				OriginalManifest->TryGetBoolField(TEXT("requiresBuild"), bRequiresBuild);
+				OriginalManifest->TryGetBoolField(TEXT("requiresRestart"), bRequiresRestart);
+			}
+
+			const FString RollbackManifestPath = CodeToolsCombinePath(CodeToolsRollbacksRoot(), Plan.RollbackId + TEXT(".json"));
+			TSharedPtr<FJsonObject> RollbackManifest = CodeToolsMakeManifestObject(
+				TEXT("code_rollback_change"),
+				Plan.EditId,
+				PreviewId,
+				TEXT("verified"),
+				ScopedLock.GetSessionId(),
+				Plan.Edits,
+				PathRisk,
+				false,
+				bRequiresBuild,
+				bRequiresRestart,
+				bForce && Plan.bDriftDetected);
+			RollbackManifest->SetStringField(TEXT("rollbackId"), Plan.RollbackId);
+			RollbackManifest->SetStringField(TEXT("rolledBackManifestPath"), Plan.ManifestPath);
+			if (!CodeToolsWriteJsonObjectAtomic(RollbackManifest, RollbackManifestPath, FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+			if (!CodeToolsWriteJsonObjectAtomic(RollbackManifest, CodeToolsLastChangePath(), FailureReason))
+			{
+				return CodeToolsMakeErrorResult(TEXT("transactionRolledBack"), FailureReason);
+			}
+
+			return MakeExecutionResult(
+				FString::Printf(TEXT("Rolled back %d code file(s)."), Plan.Edits.Num()),
+				CodeToolsMakeRollbackResponse(Plan, RollbackManifestPath, false, bForce && Plan.bDriftDetected, RestoredFiles),
+				false);
 		}
 	}
 
@@ -1088,6 +2787,18 @@ namespace UnrealMcp
 		return CodeToolsMakePolicy(ECodePathClassification::Forbidden, CandidatePath, TEXT("Path is not under an allowed writable root."));
 	}
 
+#if WITH_DEV_AUTOMATION_TESTS
+	void SetCodeToolsApplyTestHooks(const FCodeToolsApplyTestHooks& Hooks)
+	{
+		GCodeToolsApplyTestHooks = Hooks;
+	}
+
+	void ClearCodeToolsApplyTestHooks()
+	{
+		GCodeToolsApplyTestHooks = FCodeToolsApplyTestHooks();
+	}
+#endif
+
 	bool TryExecuteCodeTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
 	{
 		if (ToolName == TEXT("unreal.code_workspace_status"))
@@ -1112,17 +2823,17 @@ namespace UnrealMcp
 		}
 		if (ToolName == TEXT("unreal.code_preview_change"))
 		{
-			OutResult = CodeToolsWaveBStub(ToolName);
+			OutResult = CodeToolsPreviewChange(Arguments);
 			return true;
 		}
 		if (ToolName == TEXT("unreal.code_apply_change"))
 		{
-			OutResult = CodeToolsWaveBStub(ToolName);
+			OutResult = CodeToolsApplyChange(Arguments);
 			return true;
 		}
 		if (ToolName == TEXT("unreal.code_rollback_change"))
 		{
-			OutResult = CodeToolsWaveBStub(ToolName);
+			OutResult = CodeToolsRollbackChange(Arguments);
 			return true;
 		}
 		return false;
