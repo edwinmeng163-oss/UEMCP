@@ -31,6 +31,8 @@ inspect -> search -> read -> preview change -> apply change -> build -> fix comp
 - 不编辑 Engine 安装目录。
 - 不默认编辑 UEAtelier 核心插件源码。
 - 不绕过现有 `mcp_apply_scaffold` 核心 self-extension 管线。
+- 不解决 §10.3「隔离的非核心 C++ 工具」架构张力（2026-05-29 决定：detach 出 v0.29，推到 v0.30+ 或 UE 5.8 cycle）。
+- 不做 `cpp_extension_tool`（同上，推后）；v0.29 是独立的代码文件 edit 闭环，不作为 `cpp_extension_tool` 的前置依赖。
 
 ## 4. 首版工具边界
 
@@ -532,4 +534,6 @@ Core Code Tools: safe code file read/search/patch/apply/rollback for UE project 
 - 永远不默认编辑 UEAtelier 核心插件源码。
 - 写入必须 preview -> apply -> manifest -> rollback。
 
-这条路线与后续 `cpp_extension_tool` 是前后关系：先让 UEAtelier 能安全编辑代码文件，再用这组工具生成和维护 UE5.8 ToolsetRegistry 风格的隔离 C++ extension plugin。
+**Scope 决策（2026-05-29，PM + R0 critique 后）**：v0.29 只做这一件事——把代码文件 edit 工具的核心闭环补完（read → search → preview → apply → rollback → build loop）。§10.3「隔离的非核心 C++ 工具」张力、`cpp_extension_tool`、以及「用 Code Tools 生成 UE5.8 ToolsetRegistry 风格隔离 C++ extension plugin」这层 framing，全部 detach 出 v0.29，推到 v0.30+ 或 UE 5.8 cycle 再单独立项。
+
+这样做的理由：R0 critique（Hermes，session `20260529_030816_68f808`）的 Q1 判定 plan 原 §14 的「前后关系」framing 并不消解 §10.3 张力、只是把它往后拖；与其拖着一个悬而未决的架构承诺，不如直接把 v0.29 收敛成一个自洽、可独立验收的工具闭环。Code Tools 本身就是有价值的可交付物（安全地读/搜/补丁/应用/回滚 UE 项目和用户隔离插件的代码文件），不需要绑定任何后续 C++ extension 路线才能成立。
