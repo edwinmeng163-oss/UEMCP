@@ -28,6 +28,7 @@ TESTS_PATH = ROOT / "Tools" / "UnrealMcpTests"
 KNOWN_CATEGORIES = {
     "actors",
     "blueprint",
+    "code",
     "editor",
     "material",
     "memory",

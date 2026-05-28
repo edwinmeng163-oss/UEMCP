@@ -20,6 +20,10 @@ Read-only and context tools:
 - `unreal.actor_get_transform`
 - `unreal.project_settings_get`
 - `unreal.install_doctor`
+- `unreal.code_workspace_status`
+- `unreal.code_list_files`
+- `unreal.code_read_file`
+- `unreal.code_search`
 
 Editor action tools:
 
@@ -159,6 +163,9 @@ Editor action tools:
 - `unreal.task_rate`
 - `unreal.task_pin`
 - `unreal.save_dirty_packages`
+- `unreal.code_preview_change`
+- `unreal.code_apply_change`
+- `unreal.code_rollback_change`
 
 Developer-only core integration tools are retained for manual workflows but are
 hidden from AI-facing `tools/list`: `unreal.mcp_apply_scaffold` and
@@ -309,8 +316,8 @@ The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
 tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
 v0.19 `Make Tool` scaffold draft creation.
-The plugin registry currently contains 174 registered MCP tools across actors,
-blueprint, editor, material, memory, scaffold, self-extension, skills,
+The plugin registry currently contains 181 registered MCP tools across actors,
+blueprint, code, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget categories.
 v0.27 makes AI self-extension the project-local Python user-tool path only.
 Core apply/pipeline and promotion are hidden, manual, developer-only, and

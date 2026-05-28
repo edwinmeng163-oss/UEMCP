@@ -137,6 +137,9 @@ drafts unless explicitly asked.
   creation, layout, graph/pin inspection, gameplay node/input event authoring,
   Blueprint SCS component/default edits, map GameMode setup, actor auto-possess,
   parameter inspection, and strict schema writes.
+- Code tools: workspace policy status, bounded file listing, file readback with
+  whole-file sha, bounded literal/regex/filename search, and v0.29 Wave A
+  path-policy foundations with preview/apply/rollback stubs.
 - Self-extension: schema/C++ patch validation, Python user-extension scaffolds,
   `unreal.mcp_user_registry_reload`, `unreal.mcp_user_tool_smoke`, patch
   editing, dry-run apply, backups, build matrix, tests, pipeline, audit,
@@ -158,9 +161,9 @@ The explicit ToolRegistry is central. Do not bypass it:
 `Tools/UnrealMcpToolRegistry/schema.json`, and
 `Schemas/UnrealMcpToolRegistry.schema.json`.
 
-At the time this file was written, the registry contained 174 entries across:
-actors, blueprint, editor, material, memory, scaffold, self-extension, skills,
-task-atlas, verification, and widget.
+At the time this file was written, the registry contained 181 entries across:
+actors, blueprint, code, editor, material, memory, scaffold, self-extension,
+skills, task-atlas, verification, and widget.
 
 Recent v0.14-v0.24 project work includes Python runtime smoke,
 readback inspectors, Blueprint refactor and macro/interface tools, UBT target
@@ -170,7 +173,12 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.28 adds eight visible core gameplay authoring tools:
+Current project status: v0.29 Wave A adds the `code` category with seven
+visible core code tools: four read-only tools
+`unreal.code_workspace_status`, `unreal.code_list_files`,
+`unreal.code_read_file`, and `unreal.code_search`, plus Wave B stubs for
+`unreal.code_preview_change`, `unreal.code_apply_change`, and
+`unreal.code_rollback_change`; v0.28 adds eight visible core gameplay authoring tools:
 `unreal.bp_add_input_axis_event_node`,
 `unreal.bp_add_input_action_event_node`, `unreal.bp_add_component`,
 `unreal.bp_set_component_property`, `unreal.bp_set_class_default`,
@@ -230,6 +238,7 @@ Knowledge: UnrealMcpKnowledgeBridge.h, UnrealMcpKnowledgeTools.cpp,
   UnrealMcpWorkflowTools.cpp
 Category handlers: UnrealMcpEditorTools.cpp,
   UnrealMcpEditorEngineVersionTool.cpp, UnrealMcpActorTools.cpp,
+  UnrealMcpCodeTools.cpp/.h,
   UnrealMcpBlueprintTools.cpp, UnrealMcpBlueprintGraphLibrary.cpp/.h,
   UnrealMcpBlueprintComponentLibrary.cpp/.h, UnrealMcpWidgetTools.cpp,
   UnrealMcpScaffoldTools.cpp, UnrealMcpSelfExtension*.cpp,

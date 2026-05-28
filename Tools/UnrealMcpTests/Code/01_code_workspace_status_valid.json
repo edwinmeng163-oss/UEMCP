@@ -1,0 +1,17 @@
+{
+  "name": "code_workspace_status_valid",
+  "description": "Returns Code tools workspace policy and lock status.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 291,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.code_workspace_status",
+      "arguments": {}
+    }
+  }
+}

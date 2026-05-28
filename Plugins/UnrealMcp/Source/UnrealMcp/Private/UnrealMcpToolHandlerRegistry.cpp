@@ -22,6 +22,10 @@ namespace UnrealMcp
 			{
 				return TEXT("UnrealMcpBlueprintTools.cpp");
 			}
+			if (Category == TEXT("code"))
+			{
+				return TEXT("UnrealMcpCodeTools.cpp");
+			}
 			if (Category == TEXT("editor"))
 			{
 				return TEXT("UnrealMcpEditorTools.cpp");

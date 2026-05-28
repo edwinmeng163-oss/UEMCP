@@ -1,0 +1,25 @@
+{
+  "name": "code_search_valid",
+  "description": "Searches readable project files with bounded literal matching.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 294,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.code_search",
+      "arguments": {
+        "query": "UEAtelier",
+        "mode": "literal",
+        "scope": "project",
+        "extensions": [
+          ".md"
+        ],
+        "maxMatches": 10
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@
 #include "UnrealMcpActorTools.h"
 #include "UnrealMcpAutomationTools.h"
 #include "UnrealMcpBlueprintTools.h"
+#include "UnrealMcpCodeTools.h"
 #include "UnrealMcpDiagnosticsTools.h"
 #include "UnrealMcpEditorTools.h"
 #include "UnrealMcpMaterialInstanceTools.h"
@@ -161,6 +162,13 @@ FUnrealMcpExecutionResult FUnrealMcpModule::ExecuteToolInternal(const FString& T
 	else if (Category == TEXT("blueprint"))
 	{
 		if (UnrealMcp::TryExecuteBlueprintTool(ToolName, Arguments, CategoryResult))
+		{
+			return CategoryResult;
+		}
+	}
+	else if (Category == TEXT("code"))
+	{
+		if (UnrealMcp::TryExecuteCodeTool(ToolName, Arguments, CategoryResult))
 		{
 			return CategoryResult;
 		}

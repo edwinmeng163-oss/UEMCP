@@ -1,0 +1,24 @@
+{
+  "name": "code_list_files_valid",
+  "description": "Lists a bounded set of readable project code files.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 292,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.code_list_files",
+      "arguments": {
+        "scope": "project",
+        "extensions": [
+          ".md",
+          ".json"
+        ],
+        "maxResults": 25
+      }
+    }
+  }
+}

@@ -313,6 +313,111 @@ namespace UnrealMcp
 			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("blueprintPath"), TEXT("nodeKind") });
 		}
 
+		TSharedPtr<FJsonObject> MakeCodeStringArrayProperty(const FString& Description)
+		{
+			TSharedPtr<FJsonObject> Property = MakeShared<FJsonObject>();
+			Property->SetStringField(TEXT("type"), TEXT("array"));
+			Property->SetStringField(TEXT("description"), Description);
+			TSharedPtr<FJsonObject> Items = MakeShared<FJsonObject>();
+			Items->SetStringField(TEXT("type"), TEXT("string"));
+			Property->SetObjectField(TEXT("items"), Items);
+			return Property;
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeScopeProperty()
+		{
+			return MakeEnumStringProperty(
+				TEXT("Readable code scope to scan."),
+				TEXT("project"),
+				TArray<FString>{ TEXT("project"), TEXT("source"), TEXT("plugins"), TEXT("user_tools"), TEXT("python_tools") });
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeWorkspaceStatusSchema()
+		{
+			return MakeSchemaWithRequired(MakeShared<FJsonObject>(), TArray<FString>());
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeListFilesSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("scope"), MakeCodeScopeProperty());
+			Properties->SetObjectField(TEXT("extensions"), MakeCodeStringArrayProperty(TEXT("Optional extension filter, for example .cpp or .py.")));
+			Properties->SetObjectField(TEXT("glob"), MakeStringProperty(TEXT("Optional project-relative wildcard filter."), FString()));
+			Properties->SetObjectField(TEXT("maxResults"), MakeNumberProperty(TEXT("Maximum returned file records. Default 500, hard cap 2000."), 500.0));
+			return MakeSchemaWithRequired(Properties, TArray<FString>());
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeReadFileSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("path"), MakeStringProperty(TEXT("Project-relative code file path to read."), FString()));
+			Properties->SetObjectField(TEXT("startLine"), MakeNumberProperty(TEXT("1-based line number to start reading from."), 1.0));
+			Properties->SetObjectField(TEXT("lineCount"), MakeNumberProperty(TEXT("Optional number of lines to return."), 0.0));
+			Properties->SetObjectField(TEXT("maxChars"), MakeNumberProperty(TEXT("Maximum returned characters. Default 100000, hard cap 500000."), 100000.0));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("path") });
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeSearchSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("query"), MakeStringProperty(TEXT("Search query."), FString()));
+			Properties->SetObjectField(TEXT("mode"), MakeEnumStringProperty(TEXT("Search mode."), TEXT("literal"), TArray<FString>{ TEXT("literal"), TEXT("regex"), TEXT("filename") }));
+			Properties->SetObjectField(TEXT("scope"), MakeCodeScopeProperty());
+			Properties->SetObjectField(TEXT("extensions"), MakeCodeStringArrayProperty(TEXT("Optional extension filter, for example .cpp or .py.")));
+			Properties->SetObjectField(TEXT("contextLines"), MakeNumberProperty(TEXT("Context lines around content matches. Default 2, hard cap 10."), 2.0));
+			Properties->SetObjectField(TEXT("maxMatches"), MakeNumberProperty(TEXT("Maximum returned matches. Default 200, hard cap 1000."), 200.0));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("query") });
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeEditSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("path"), MakeStringProperty(TEXT("Project-relative file path to edit."), FString()));
+			Properties->SetObjectField(TEXT("expectedSha256"), MakeStringProperty(TEXT("Expected whole-file sha256 from code_read_file."), FString()));
+			Properties->SetObjectField(TEXT("operation"), MakeEnumStringProperty(TEXT("Structured edit operation."), FString(), TArray<FString>{ TEXT("replace_exact"), TEXT("insert_before"), TEXT("insert_after"), TEXT("create_file") }));
+			Properties->SetObjectField(TEXT("oldText"), MakeStringProperty(TEXT("Exact existing text for replace_exact."), FString()));
+			Properties->SetObjectField(TEXT("newText"), MakeStringProperty(TEXT("New text to insert, replace, or create."), FString()));
+			Properties->SetObjectField(TEXT("anchorText"), MakeStringProperty(TEXT("Exact anchor text for insert_before or insert_after."), FString()));
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("path"), TEXT("expectedSha256"), TEXT("operation") });
+		}
+
+		TSharedPtr<FJsonObject> MakeCodePreviewChangeSchema()
+		{
+			TSharedPtr<FJsonObject> EditsProperty = MakeShared<FJsonObject>();
+			EditsProperty->SetStringField(TEXT("type"), TEXT("array"));
+			EditsProperty->SetStringField(TEXT("description"), TEXT("Structured text edits to preview."));
+			EditsProperty->SetObjectField(TEXT("items"), MakeCodeEditSchema());
+
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("edits"), EditsProperty);
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("edits") });
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeExpectedShaMapSchema()
+		{
+			return MakeSchemaWithRequired(MakeShared<FJsonObject>(), TArray<FString>());
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeApplyChangeSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("previewId"), MakeStringProperty(TEXT("Preview id returned by unreal.code_preview_change."), FString()));
+			Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Re-validate without writing user files. Defaults to true."), true));
+			Properties->SetObjectField(TEXT("confirmHighRisk"), MakeBoolProperty(TEXT("Required for high-risk paths on real apply."), false));
+			Properties->SetObjectField(TEXT("expectedSha256PerFile"), MakeCodeExpectedShaMapSchema());
+			return MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("previewId") });
+		}
+
+		TSharedPtr<FJsonObject> MakeCodeRollbackChangeSchema()
+		{
+			TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+			Properties->SetObjectField(TEXT("editId"), MakeStringProperty(TEXT("Code edit id to roll back."), FString()));
+			Properties->SetObjectField(TEXT("manifestPath"), MakeStringProperty(TEXT("Project-local code edit manifest path to roll back."), FString()));
+			Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("Preview rollback without writing files. Defaults to true."), true));
+			Properties->SetObjectField(TEXT("force"), MakeBoolProperty(TEXT("Proceed over drift when a real rollback is requested."), false));
+			return MakeSchemaWithRequired(Properties, TArray<FString>());
+		}
+
 		void ApplyV028WriteDescriptorPolicy(FUnrealMcpToolDescriptor& Descriptor)
 		{
 			Descriptor.bRequiresWrite = true;
@@ -523,6 +628,104 @@ namespace UnrealMcp
 					TEXT("editor"),
 					TEXT("UnrealMcpEditorTools.cpp")),
 				MakeObjectSchema());
+		}
+
+		void RegisterCodeMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
+		{
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_workspace_status"),
+					TEXT("Code Workspace Status"),
+					TEXT("Returns Code tool workspace roots, path policy, extension allowlists, latest manifest, and extension lock status."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"));
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools read-only workspace policy status.");
+				Registrar.Add(Descriptor, MakeCodeWorkspaceStatusSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_list_files"),
+					TEXT("List Code Files"),
+					TEXT("Lists readable project code files within bounded scopes while excluding runtime, generated, Saved, and Content directories."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"));
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools read-only file discovery.");
+				Registrar.Add(Descriptor, MakeCodeListFilesSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_read_file"),
+					TEXT("Read Code File"),
+					TEXT("Reads a bounded slice of a readable project code file and returns the whole-file sha256 for later edit validation."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"));
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools read-only file readback with whole-file sha.");
+				Registrar.Add(Descriptor, MakeCodeReadFileSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_search"),
+					TEXT("Search Code"),
+					TEXT("Searches readable project code files using bounded literal, regex, or filename matching."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"));
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools bounded in-tree code search.");
+				Registrar.Add(Descriptor, MakeCodeSearchSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_preview_change"),
+					TEXT("Preview Code Change"),
+					TEXT("Previews structured project code edits with sha and path-policy checks; full implementation lands in v0.29 Wave B."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"),
+					EUnrealMcpToolRisk::Low);
+				Descriptor.bPreflightSupport = true;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools preview entrypoint, Wave A stubbed handler.");
+				Registrar.Add(Descriptor, MakeCodePreviewChangeSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_apply_change"),
+					TEXT("Apply Code Change"),
+					TEXT("Applies a previously previewed code change with dry-run, backup, lock, and postcheck semantics; full implementation lands in v0.29 Wave B."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools apply entrypoint, Wave A stubbed handler.");
+				Registrar.Add(Descriptor, MakeCodeApplyChangeSchema());
+			}
+
+			{
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.code_rollback_change"),
+					TEXT("Rollback Code Change"),
+					TEXT("Rolls back a code edit manifest with dry-run, drift detection, lock, and postcheck semantics; full implementation lands in v0.29 Wave B."),
+					TEXT("code"),
+					TEXT("UnrealMcpCodeTools.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.Reason = TEXT("Descriptor: v0.29 Code tools rollback entrypoint, Wave A stubbed handler.");
+				Registrar.Add(Descriptor, MakeCodeRollbackChangeSchema());
+			}
 		}
 
 		void RegisterActorMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
@@ -2060,6 +2263,7 @@ namespace UnrealMcp
 			RegisterEditorMcpToolDescriptors(Registrar);
 			RegisterActorMcpToolDescriptors(Registrar);
 			RegisterBlueprintInspectorMcpToolDescriptors(Registrar);
+			RegisterCodeMcpToolDescriptors(Registrar);
 			RegisterWidgetInspectorMcpToolDescriptors(Registrar);
 			RegisterWidgetEditMcpToolDescriptors(Registrar);
 			RegisterMaterialInstanceMcpToolDescriptors(Registrar);

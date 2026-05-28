@@ -64,6 +64,7 @@
             "enum": [
               "actors",
               "blueprint",
+              "code",
               "editor",
               "material",
               "memory",

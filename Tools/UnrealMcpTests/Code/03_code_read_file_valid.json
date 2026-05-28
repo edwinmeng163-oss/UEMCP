@@ -1,0 +1,22 @@
+{
+  "name": "code_read_file_valid",
+  "description": "Reads a bounded slice of a known project code-adjacent file.",
+  "category": "happy_path",
+  "expectToolListed": true,
+  "executeTool": true,
+  "expectToolCallError": false,
+  "request": {
+    "jsonrpc": "2.0",
+    "id": 293,
+    "method": "tools/call",
+    "params": {
+      "name": "unreal.code_read_file",
+      "arguments": {
+        "path": "README.md",
+        "startLine": 1,
+        "lineCount": 20,
+        "maxChars": 8000
+      }
+    }
+  }
+}
