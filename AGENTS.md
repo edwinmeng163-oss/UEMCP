@@ -232,7 +232,8 @@ Tool metadata: UnrealMcpToolDefinitions.cpp, UnrealMcpToolDescriptor.h,
   UnrealMcpToolRegistrar.cpp/.h, UnrealMcpToolRegistry.cpp/.h,
   UnrealMcpToolHandlerRegistry.cpp/.h, UnrealMcpToolDispatcher.cpp
 Execution: UnrealMcpToolExecutionGuard.cpp/.h, UnrealMcp*OutcomeVerifier.cpp,
-  UnrealMcpSession.h, UnrealMcpActivityLog.h
+  UnrealMcpSession.h, UnrealMcpActivityLog.h, UnrealMcpCallToolPolicy.cpp/.h,
+  UnrealMcpCallToolLibrary.cpp/.h
 Task/verification: UnrealMcpTaskAtlasTools.cpp/.h,
   UnrealMcpTaskLabelBackfillTool.cpp/.h, UnrealMcpAutomationTools.cpp/.h,
   UnrealMcpPieSmokeTools.cpp/.h, UnrealMcpDiagnosticsTools.cpp/.h
