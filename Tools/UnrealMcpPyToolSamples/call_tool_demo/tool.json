@@ -1,0 +1,31 @@
+{
+  "name": "user.call_tool_demo",
+  "category": "editor",
+  "title": "Call Tool Demo",
+  "description": "Sample Python user tool that calls safe core Unreal MCP tools through the injected call_tool helper.",
+  "exposure": "visible",
+  "riskLevel": "read_only",
+  "implementationTrack": "python",
+  "sample": true,
+  "pythonHandlerSha256": "9b9f338d42694a5f42bfc1fb28881655347441095689e5d514250bbfecc0d362",
+  "importAllowlist": [],
+  "requiresWrite": false,
+  "requiresBuild": false,
+  "requiresExternalProcess": false,
+  "requiresRestart": false,
+  "requiresProjectMemory": false,
+  "requiresLock": false,
+  "dryRunSupport": false,
+  "preflightSupport": false,
+  "postcheckSupport": true,
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {},
+    "required": []
+  },
+  "owner": "UEAtelier Sample",
+  "docsPath": "Tools/UnrealMcpPyToolSamples/call_tool_demo/main.py",
+  "reason": "Committed sample for composing core tools from the project-local Python user-tool track; not part of the canonical core registry.",
+  "notes": "Sample only. Copy this directory to <ProjectDir>/Tools/UnrealMcpPyTools/call_tool_demo/ and run unreal.mcp_user_registry_reload before calling user.call_tool_demo."
+}

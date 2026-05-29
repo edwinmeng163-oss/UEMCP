@@ -106,6 +106,26 @@ under path policy, distinct from self-extension. Guarantees:
 
 See `Docs/CodeTools.md` and `Docs/agents-guide/code-tools.md`.
 
+## Python `call_tool` Safety
+
+Python user tools receive injected `call_tool` and `call_tool_raw` helpers for
+composing visible core `unreal.*` tools. The helpers route through
+`unreal.UnrealMcpCallTool.call_tool`, so every call crosses the same fail-closed
+policy before it reaches `ExecuteToolFromEditorUI`.
+
+The policy has three outcomes: direct allow for read-safe core tools, forced
+`dryRun=true` for dry-run-capable writes, and deny for hidden, dynamic,
+workflow, user-registry, nested, or otherwise unsafe targets. The current policy
+matrix is 61 allow, 26 force-dry-run, and 82 deny across visible tools.
+
+`call_tool` has a depth limit of 1 and rejects `user.*` targets. A Python user
+tool can call a core C++ tool, but it cannot call another user Python tool or
+trigger recursive wrapper execution. The AssistantRun approval seam is
+policy-only on this path: Python does not elicit approval, so targets that cannot
+run safely as direct allow or forced dry run fail closed.
+
+See `Docs/CallTool.md` and `Docs/agents-guide/call-tool.md`.
+
 ## Tool Outcome Verification
 
 Write-capable tools build structured `preflight` results before handler execution and attach `postcheck` results after execution. Generic checks come from ToolRegistry metadata. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools additionally inspect real editor/file/workflow state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, memory key, skill file, manifest, build log, or test result actually exists as expected."

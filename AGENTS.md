@@ -64,6 +64,7 @@ Then read on demand:
 | RAG, knowledge search, recommendation | `Docs/KnowledgeRag.md`, `Tools/UnrealMcpKnowledge/README.md`, `Tools/UnrealMcpKnowledge/Evals/core_rag_eval.json` |
 | Security or path safety | `Docs/SecurityModel.md` |
 | Code file editing (read/search/preview/apply/rollback) | `Docs/CodeTools.md`, `Docs/agents-guide/code-tools.md` |
+| Python user-tool composition with core tools | `Docs/CallTool.md`, `Docs/agents-guide/call-tool.md`, `Docs/SecurityModel.md` |
 | Self-extension, scaffolds, audit, rollback, supervisor recovery | `Docs/agents-guide/self-extension.md`, `Docs/SelfExtensionPipeline.md`, `Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md` |
 | Task Atlas lifecycle, schemas, clustering, promotion | `Docs/agents-guide/task-atlas.md`, `Docs/TaskAtlas.md` |
 | Automation tests, PIE smoke, editor diagnostics | `Docs/agents-guide/verification.md`, `Docs/Verification.md` |
@@ -96,7 +97,7 @@ Important versioned paths:
 ```text
 README.md, AGENTS.md, UEvolve.uproject, open_uevolve.command
 Docs/agents-guide/
-Docs/Architecture.md, Docs/KnowledgeRag.md, Docs/SecurityModel.md
+Docs/Architecture.md, Docs/CallTool.md, Docs/KnowledgeRag.md, Docs/SecurityModel.md
 Docs/SelfExtensionPipeline.md, Docs/TaskAtlas.md, Docs/Verification.md
 Docs/WindowsCompatibilityLessons.md, Docs/WindowsPackaging.md
 Plugins/UnrealMcp/UnrealMcp.uplugin
@@ -106,7 +107,7 @@ Plugins/UnrealMcp/Source/UnrealMcp/
 Schemas/
 Tools/UEAtelierCli/
 Tools/UnrealMcpCodexBridge/, Tools/UnrealMcpKnowledge/
-Tools/UnrealMcpSkills/, Tools/UnrealMcpTests/
+Tools/UnrealMcpPyToolSamples/, Tools/UnrealMcpSkills/, Tools/UnrealMcpTests/
 Tools/UnrealMcpToolRegistry/, Tools/UnrealMcpToolScaffoldStarters/
 Tools/UnrealMcpToolDocs/
 Tools/UnrealMcpSupervisorTemplates/
@@ -147,6 +148,10 @@ drafts unless explicitly asked.
   editing, dry-run apply, backups, build matrix, tests, pipeline, audit,
   rollback, locks, error classification, supervisor install, and reviewed
   package export/import.
+- Python user-tool composition: registered user tools receive injected
+  `call_tool` / `call_tool_raw` helpers that route through the UFUNCTION
+  `unreal.UnrealMcpCallTool.call_tool` into visible core `unreal.*` tools with
+  allow / force-dry-run / deny policy, depth=1, and `user.*` targets forbidden.
 - RAG/recommendation, memory, skills, Task Atlas, and verification:
   knowledge index/search/eval, tool/workflow recommend, project memory CRUD,
   skill activity/drafts/promote, task extract/list/describe/rate/pin/promote,
@@ -175,7 +180,10 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.29 Wave B implements the `code` category with seven
+Current project status: v0.30 R2 Wave B adds Python user-tool `call_tool` /
+`call_tool_raw` builtins over `unreal.UnrealMcpCallTool.call_tool`, preserving
+the 181-tool registry count while enabling fail-closed composition of visible
+core `unreal.*` tools; v0.29 Wave B implements the `code` category with seven
 visible core code tools: four read-only tools
 `unreal.code_workspace_status`, `unreal.code_list_files`,
 `unreal.code_read_file`, and `unreal.code_search`, plus write-closure tools
@@ -233,7 +241,7 @@ Tool metadata: UnrealMcpToolDefinitions.cpp, UnrealMcpToolDescriptor.h,
   UnrealMcpToolHandlerRegistry.cpp/.h, UnrealMcpToolDispatcher.cpp
 Execution: UnrealMcpToolExecutionGuard.cpp/.h, UnrealMcp*OutcomeVerifier.cpp,
   UnrealMcpSession.h, UnrealMcpActivityLog.h, UnrealMcpCallToolPolicy.cpp/.h,
-  UnrealMcpCallToolLibrary.cpp/.h
+  UnrealMcpCallToolLibrary.cpp/.h, UnrealMcpPythonToolBridge.cpp
 Task/verification: UnrealMcpTaskAtlasTools.cpp/.h,
   UnrealMcpTaskLabelBackfillTool.cpp/.h, UnrealMcpAutomationTools.cpp/.h,
   UnrealMcpPieSmokeTools.cpp/.h, UnrealMcpDiagnosticsTools.cpp/.h
@@ -249,6 +257,7 @@ Category handlers: UnrealMcpEditorTools.cpp,
 UI/assistant/tests: UnrealMcpChatPanel.cpp/.h,
   UnrealMcpWorkbenchPanel.cpp/.h, STaskAtlasWindow.cpp/.h,
   UnrealMcpEditorTabs.cpp, UnrealMcpAssistantRun.cpp/.h, Private/Tests/*.cpp
+  including Private/Tests/UnrealMcpCallToolLibraryTests.cpp
 ```
 
 Prefer cautious single-category edits. The largest files remain ChatPanel,
