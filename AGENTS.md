@@ -155,6 +155,7 @@ drafts unless explicitly asked.
 - RAG/recommendation, memory, skills, Task Atlas, and verification:
   knowledge index/search/eval, tool/workflow recommend, project memory CRUD,
   skill activity/drafts/promote, task extract/list/describe/rate/pin/promote,
+  schema v2 ordered Task Atlas stepRefs with captured-args replay eligibility,
   `unreal.automation_list`, `unreal.automation_run`,
   `unreal.automation_report`, `unreal.pie_smoke`,
   `unreal.verify_player_controls`, `unreal.pie_input_probe`,
@@ -180,11 +181,17 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.30 R2 Wave C makes Task Atlas `Make Tool` generate
-skeleton composite Python user tools directly under the user registry from
-visible core `unreal.*` critical-path steps, writing closed `tool.json`
-schemas, `pythonHandlerSha256`, `smokeArgs`, then running user-registry reload
-and smoke while preserving the 181-tool core registry count; v0.30 R2 Wave B
+Current project status: v0.31 Stage 2 Wave C upgrades Task Atlas task JSON to
+schema v2 with ordered non-deduped `stepRefs` linked to ActivityLog `eventId`
+and captured-args metadata, adds `replayEligibility` / unavailable-reason
+classification from call-tool policy, and makes Task Atlas `Make Tool` label
+generated composites as preview-only or skeleton/partial/blocked while keeping
+real captured-argument replay deferred; v0.30 R2 Wave C makes Task Atlas
+`Make Tool` generate skeleton composite Python user tools directly under the
+user registry from visible core `unreal.*` critical-path steps, writing closed
+`tool.json` schemas, `pythonHandlerSha256`, `smokeArgs`, then running
+user-registry reload and smoke while preserving the 181-tool core registry
+count; v0.30 R2 Wave B
 adds Python user-tool `call_tool` / `call_tool_raw` builtins over
 `unreal.UnrealMcpCallTool.call_tool`, enabling fail-closed composition of
 visible core `unreal.*` tools; v0.29 Wave B implements the `code` category with

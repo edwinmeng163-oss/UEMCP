@@ -23,6 +23,8 @@ public:
 		FString Label;
 		FString Rating;
 		FString TEndUtc;
+		FString ReplayEligibility;
+		FString ReplayUnavailableReason;
 		bool bPinned = false;
 		TArray<FString> CriticalPath;
 		TSharedPtr<FJsonObject> Json;

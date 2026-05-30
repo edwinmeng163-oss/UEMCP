@@ -12,10 +12,13 @@ namespace UnrealMcp
 	struct FTaskAtlasEventRecord
 	{
 		FString SessionId;
+		FString EventId;
 		FString TimestampUtc;
 		FDateTime Timestamp;
 		FString EventKind;
 		FString ToolName;
+		FString CaptureStatus;
+		FString CaptureRef;
 		bool bIsError = false;
 		FString Content;
 		bool bCompletionMarker = false;
@@ -41,5 +44,9 @@ namespace UnrealMcp
 	};
 
 	TArray<FTaskAtlasTaskRecord> ClusterTaskAtlasEventsForTests(const TArray<FTaskAtlasEventRecord>& Events, double GapSeconds = TaskAtlasClusterGapSeconds);
+#if WITH_DEV_AUTOMATION_TESTS
+	bool ParseTaskAtlasActivityLineForTests(const FString& Line, FTaskAtlasEventRecord& OutEvent);
+	TSharedPtr<FJsonObject> BuildTaskAtlasTaskJsonForTests(const TArray<FTaskAtlasEventRecord>& Events, double GapSeconds = TaskAtlasClusterGapSeconds);
+#endif
 	bool TryExecuteTaskAtlasTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult);
 }

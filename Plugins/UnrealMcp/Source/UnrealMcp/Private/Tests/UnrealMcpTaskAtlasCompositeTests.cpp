@@ -24,6 +24,8 @@ namespace UnrealMcp::TaskAtlasComposite
 		const FString& Title,
 		const FString& Description,
 		const FString& TaskId,
+		const FString& ReplayEligibility,
+		const FString& ReplayUnavailableReason,
 		const TArray<FString>& CriticalPath,
 		const TSet<FString>& VisibleCoreToolNames,
 		FString& OutToolName,
@@ -112,6 +114,8 @@ bool FUnrealMcpTaskAtlasCompositeGenerationTest::RunTest(const FString& Paramete
 		TEXT("Task Atlas Composite Test"),
 		TEXT("Composite skeleton generated from Task Atlas automation fixture."),
 		TEXT("task-atlas-composite-test"),
+		TEXT("preview_ready"),
+		FString(),
 		CriticalPath,
 		VisibleCoreToolsForFixture(),
 		ToolName,
@@ -151,6 +155,12 @@ bool FUnrealMcpTaskAtlasCompositeGenerationTest::RunTest(const FString& Paramete
 	FString DeclaredSha;
 	ToolJson->TryGetStringField(TEXT("pythonHandlerSha256"), DeclaredSha);
 	TestEqual(TEXT("tool.json sha matches main.py"), DeclaredSha, MainPySha256);
+	FString CompositeKind;
+	ToolJson->TryGetStringField(TEXT("compositeKind"), CompositeKind);
+	TestEqual(TEXT("preview-ready composite kind"), CompositeKind, TEXT("preview"));
+	FString ReplayStatus;
+	ToolJson->TryGetStringField(TEXT("replayStatus"), ReplayStatus);
+	TestEqual(TEXT("preview-ready replay status"), ReplayStatus, TEXT("preview_only"));
 	TestTrue(TEXT("smokeArgs exists"), ToolJson->HasTypedField<EJson::Object>(TEXT("smokeArgs")));
 	const TSharedPtr<FJsonObject>* SmokeArgsObject = nullptr;
 	if (ToolJson->TryGetObjectField(TEXT("smokeArgs"), SmokeArgsObject) && SmokeArgsObject && (*SmokeArgsObject).IsValid())

@@ -1,9 +1,11 @@
 #include "UnrealMcpTaskAtlasTools.h"
 
 #include "UnrealMcpActivityLog.h"
+#include "UnrealMcpCallToolPolicy.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSession.h"
 #include "UnrealMcpTaskLabelBackfillTool.h"
+#include "UnrealMcpToolRegistry.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -39,6 +41,15 @@ namespace UnrealMcp
 			double LabelConfidence = 0.0;
 			bool bHasLabel = false;
 			bool bHasLabelConfidence = false;
+		};
+
+		struct FTaskAtlasStepRefs
+		{
+			TArray<TSharedPtr<FJsonValue>> Values;
+			int32 Total = 0;
+			bool bTruncated = false;
+			FString ReplayEligibility = TEXT("skeleton_pre_capture");
+			FString ReplayUnavailableReason;
 		};
 
 		FString GetTaskRoot()
@@ -393,10 +404,177 @@ namespace UnrealMcp
 			return Values;
 		}
 
+		const TCHAR* TaskAtlasDecisionToString(ECallToolDecision Decision)
+		{
+			switch (Decision)
+			{
+			case ECallToolDecision::Allow:
+				return TEXT("allow");
+			case ECallToolDecision::ForceDryRun:
+				return TEXT("force_dry_run");
+			case ECallToolDecision::Deny:
+			default:
+				return TEXT("deny");
+			}
+		}
+
+		FCallToolTargetFacts MakeTaskAtlasStepPolicyFacts(const FString& ToolName)
+		{
+			FCallToolTargetFacts Facts;
+			if (const FToolRegistryEntry* Entry = FindToolRegistryEntry(ToolName))
+			{
+				Facts.bVisible = Entry->Exposure == EToolExposure::Visible;
+			}
+			Facts.SourceKind = ResolveToolSourceKind(ToolName);
+			const FToolPolicy Policy = GetToolPolicy(ToolName);
+			Facts.RiskLevel = Policy.RiskLevel;
+			Facts.bRequiresLock = Policy.bRequiresLock;
+			Facts.bRequiresWrite = Policy.bRequiresWrite;
+			Facts.bRequiresRestart = Policy.bRequiresRestart;
+			Facts.bRequiresExternalProcess = Policy.bRequiresExternalProcess;
+			Facts.bRequiresBuild = Policy.bRequiresBuild;
+			Facts.bDryRunSupport = Policy.bDryRunSupport;
+			Facts.bIsWorkflowRun = ToolName == TEXT("unreal.workflow_run");
+			Facts.Depth = 0;
+			return Facts;
+		}
+
+		bool IsTaskAtlasStepEvent(const FTaskAtlasEventRecord& Event)
+		{
+			return Event.EventKind == TEXT("tool_call") && !Event.ToolName.TrimStartAndEnd().IsEmpty();
+		}
+
+		bool HasReplayableCapture(const FTaskAtlasEventRecord& Event)
+		{
+			const FString CaptureStatus = Event.CaptureStatus.TrimStartAndEnd().ToLower();
+			return !Event.CaptureRef.TrimStartAndEnd().IsEmpty()
+				&& (CaptureStatus == TEXT("captured") || CaptureStatus == TEXT("redacted"));
+		}
+
+		FString MakeMissingCaptureReason(const FTaskAtlasEventRecord& Event, int32 Ordinal)
+		{
+			const FString ToolName = Event.ToolName.TrimStartAndEnd().IsEmpty() ? FString(TEXT("(unknown tool)")) : Event.ToolName.TrimStartAndEnd();
+			if (Event.CaptureRef.TrimStartAndEnd().IsEmpty())
+			{
+				return FString::Printf(TEXT("step %d (%s) is missing captureRef"), Ordinal, *ToolName);
+			}
+			return FString::Printf(TEXT("step %d (%s) has non-replayable captureStatus '%s'"), Ordinal, *ToolName, *Event.CaptureStatus.TrimStartAndEnd());
+		}
+
+		FTaskAtlasStepRefs MakeStepRefArray(const TArray<FTaskAtlasEventRecord>& Events)
+		{
+			TArray<const FTaskAtlasEventRecord*> StepEvents;
+			for (const FTaskAtlasEventRecord& Event : Events)
+			{
+				if (IsTaskAtlasStepEvent(Event))
+				{
+					StepEvents.Add(&Event);
+				}
+			}
+
+			FTaskAtlasStepRefs Result;
+			Result.Total = StepEvents.Num();
+			Result.bTruncated = Result.Total > MaxTaskEventRefs;
+			const int32 Count = FMath::Min(Result.Total, MaxTaskEventRefs);
+			Result.Values.Reserve(Count);
+
+			bool bSawCaptured = false;
+			bool bSawMissingCapture = false;
+			bool bSawDeny = false;
+			FString FirstMissingCaptureReason;
+			FString FirstDenyReason;
+
+			for (int32 Index = 0; Index < Result.Total; ++Index)
+			{
+				const FTaskAtlasEventRecord& Event = *StepEvents[Index];
+				const FCallToolPolicyResult PolicyResult = ClassifyCallToolTarget_Pure(MakeTaskAtlasStepPolicyFacts(Event.ToolName));
+				const FString PolicyClass = TaskAtlasDecisionToString(PolicyResult.Decision);
+				const bool bHasCapture = HasReplayableCapture(Event);
+				if (bHasCapture)
+				{
+					bSawCaptured = true;
+				}
+				else
+				{
+					bSawMissingCapture = true;
+					if (FirstMissingCaptureReason.IsEmpty())
+					{
+						FirstMissingCaptureReason = MakeMissingCaptureReason(Event, Index);
+					}
+				}
+				if (PolicyResult.Decision == ECallToolDecision::Deny)
+				{
+					bSawDeny = true;
+					if (FirstDenyReason.IsEmpty())
+					{
+						FirstDenyReason = FString::Printf(
+							TEXT("step %d (%s) is blocked by call_tool policy: %s"),
+							Index,
+							*Event.ToolName,
+							PolicyResult.Reason.IsEmpty() ? TEXT("deny") : *PolicyResult.Reason);
+					}
+				}
+
+				if (Index >= Count)
+				{
+					continue;
+				}
+
+				TSharedPtr<FJsonObject> RefObject = MakeShared<FJsonObject>();
+				RefObject->SetNumberField(TEXT("ordinal"), Index);
+				RefObject->SetStringField(TEXT("eventId"), Event.EventId);
+				RefObject->SetStringField(TEXT("sessionId"), Event.SessionId);
+				RefObject->SetStringField(TEXT("tool"), Event.ToolName);
+				RefObject->SetStringField(TEXT("ts"), Event.TimestampUtc);
+				RefObject->SetBoolField(TEXT("isError"), Event.bIsError);
+				RefObject->SetStringField(TEXT("captureStatus"), Event.CaptureStatus);
+				if (!Event.CaptureRef.TrimStartAndEnd().IsEmpty())
+				{
+					RefObject->SetStringField(TEXT("captureRef"), Event.CaptureRef);
+				}
+				RefObject->SetStringField(TEXT("policyClassAtCapture"), PolicyClass);
+				Result.Values.Add(MakeShared<FJsonValueObject>(RefObject));
+			}
+
+			if (Result.Total == 0)
+			{
+				Result.ReplayEligibility = TEXT("skeleton_pre_capture");
+				Result.ReplayUnavailableReason = TEXT("no tool_call steps were recorded");
+			}
+			else if (bSawDeny)
+			{
+				Result.ReplayEligibility = TEXT("blocked");
+				Result.ReplayUnavailableReason = FirstDenyReason;
+			}
+			else if (Result.bTruncated)
+			{
+				Result.ReplayEligibility = TEXT("partial");
+				Result.ReplayUnavailableReason = FString::Printf(TEXT("stepRefs are truncated at %d of %d steps"), MaxTaskEventRefs, Result.Total);
+			}
+			else if (!bSawCaptured)
+			{
+				Result.ReplayEligibility = TEXT("skeleton_pre_capture");
+				Result.ReplayUnavailableReason = TEXT("no captured tool arguments were recorded for this task");
+			}
+			else if (bSawMissingCapture)
+			{
+				Result.ReplayEligibility = TEXT("partial");
+				Result.ReplayUnavailableReason = FirstMissingCaptureReason;
+			}
+			else
+			{
+				Result.ReplayEligibility = TEXT("preview_ready");
+				Result.ReplayUnavailableReason.Reset();
+			}
+
+			return Result;
+		}
+
 		TSharedPtr<FJsonObject> TaskRecordToJson(const FTaskAtlasTaskRecord& Record, const TArray<FTaskAtlasEventRecord>& Events)
 		{
+			const FTaskAtlasStepRefs StepRefs = MakeStepRefArray(Events);
 			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
-			Object->SetNumberField(TEXT("schemaVersion"), 1.0);
+			Object->SetNumberField(TEXT("schemaVersion"), 2.0);
 			Object->SetStringField(TEXT("taskId"), Record.TaskId);
 			Object->SetStringField(TEXT("label"), Record.Label);
 			Object->SetStringField(TEXT("sessionId"), Record.SessionId);
@@ -407,6 +585,11 @@ namespace UnrealMcp
 			Object->SetStringField(TEXT("tEndUtc"), Record.TEndUtc);
 			Object->SetNumberField(TEXT("eventCount"), Record.EventCount);
 			Object->SetArrayField(TEXT("eventRefs"), MakeEventRefArray(Events));
+			Object->SetArrayField(TEXT("stepRefs"), StepRefs.Values);
+			Object->SetNumberField(TEXT("stepRefTotal"), StepRefs.Total);
+			Object->SetBoolField(TEXT("stepRefsTruncated"), StepRefs.bTruncated);
+			Object->SetStringField(TEXT("replayEligibility"), StepRefs.ReplayEligibility);
+			Object->SetStringField(TEXT("replayUnavailableReason"), StepRefs.ReplayUnavailableReason);
 			if (!Record.LabelSource.IsEmpty())
 			{
 				Object->SetStringField(TEXT("labelSource"), Record.LabelSource);
@@ -537,10 +720,13 @@ namespace UnrealMcp
 			}
 
 			OutEvent.SessionId = SessionId.TrimStartAndEnd();
+			OutEvent.EventId = GetJsonStringField(Object, TEXT("eventId")).TrimStartAndEnd();
 			OutEvent.TimestampUtc = TimestampText;
 			OutEvent.Timestamp = Timestamp;
 			OutEvent.EventKind = EventKind;
 			OutEvent.ToolName = GetJsonStringField(Payload, TEXT("toolName"));
+			OutEvent.CaptureStatus = GetJsonStringField(Payload, TEXT("captureStatus")).TrimStartAndEnd();
+			OutEvent.CaptureRef = GetJsonStringField(Payload, TEXT("captureRef")).TrimStartAndEnd();
 			OutEvent.bIsError = GetJsonBoolField(Payload, TEXT("isError"), false);
 			OutEvent.Content = Content.TrimStartAndEnd();
 			OutEvent.bCompletionMarker = GetJsonBoolField(Payload, TEXT("completionMarker"), false);
@@ -1060,6 +1246,23 @@ namespace UnrealMcp
 		}
 		return Records;
 	}
+
+#if WITH_DEV_AUTOMATION_TESTS
+	bool ParseTaskAtlasActivityLineForTests(const FString& Line, FTaskAtlasEventRecord& OutEvent)
+	{
+		return TryParseActivityLine(Line, OutEvent);
+	}
+
+	TSharedPtr<FJsonObject> BuildTaskAtlasTaskJsonForTests(const TArray<FTaskAtlasEventRecord>& Events, double GapSeconds)
+	{
+		const TArray<FTaskAtlasCluster> Clusters = BuildTaskClusters(Events, GapSeconds);
+		if (Clusters.Num() == 0)
+		{
+			return nullptr;
+		}
+		return TaskRecordToJson(Clusters[0].Record, Clusters[0].Events);
+	}
+#endif
 
 	bool TryExecuteTaskAtlasTool(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
 	{

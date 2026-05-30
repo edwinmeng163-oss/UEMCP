@@ -67,6 +67,28 @@ and promotion sources. It is local-first: runtime task files live under
   `unreal.skill_distill_from_activity`; it is separate from composite
   generation.
 
+## Functional In v0.31 Stage 2 Wave C
+
+- Task files now use schema v2.0. The ActivityLog reader carries top-level
+  `eventId` plus payload `captureStatus` and `captureRef` into the task model.
+- `stepRefs` are ordered tool-call steps. They are not deduped, so repeated
+  calls to the same tool are preserved for Wave D. `criticalPath` remains the
+  deduped human summary.
+- Each `stepRefs` entry includes `ordinal`, `eventId`, `sessionId`, `tool`,
+  `ts`, `isError`, `captureStatus`, optional `captureRef`, and
+  `policyClassAtCapture` from the same call-tool policy used by Python user
+  tools.
+- `replayEligibility` is `preview_ready`, `partial`, `skeleton_pre_capture`, or
+  `blocked`. Preview-ready means every emitted step has captured or redacted
+  arguments and no step is denied by policy. Partial means at least one step is
+  missing usable captured args. Skeleton-pre-capture means no step has captured
+  args. Blocked means at least one step is denied by policy.
+- The Task Atlas window and generated `tool.json` use honest labels:
+  `compositeKind=preview|skeleton` and
+  `replayStatus=preview_only|partial|skeleton_pre_capture|blocked`.
+  Wave C still emits a skeleton `main.py`; real captured-argument replay is
+  deferred to Wave D.
+
 `unreal.task_label_backfill` accepts:
 
 ```json
@@ -104,13 +126,13 @@ task_pin_change
 
 These names and payload shapes are frozen for v0.17 through v0.19.
 
-## Frozen Task JSON
+## Current Task JSON
 
 Each task is persisted as `Saved/UnrealMcp/Tasks/<taskId>.json`:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2.0,
   "taskId": "<sessionId>-<startTsCompact>",
   "label": "string",
   "sessionId": "string",
@@ -121,6 +143,23 @@ Each task is persisted as `Saved/UnrealMcp/Tasks/<taskId>.json`:
   "tEndUtc": "ISO8601",
   "eventCount": 0,
   "eventRefs": [{"ts": "...", "tool": "...", "isError": false}],
+  "stepRefs": [
+    {
+      "ordinal": 0,
+      "eventId": "ActivityLog eventId",
+      "sessionId": "string",
+      "tool": "unreal.tool_name",
+      "ts": "ISO8601",
+      "isError": false,
+      "captureStatus": "captured|redacted|missing",
+      "captureRef": "CapturedToolArgs/<session>/<eventId>.json",
+      "policyClassAtCapture": "allow|force_dry_run|deny"
+    }
+  ],
+  "stepRefTotal": 0,
+  "stepRefsTruncated": false,
+  "replayEligibility": "preview_ready|partial|skeleton_pre_capture|blocked",
+  "replayUnavailableReason": "string",
   "userIntentText": "string|null",
   "aiSummaryText": "string|null",
   "labelSource": "llm_backfill",
@@ -128,12 +167,12 @@ Each task is persisted as `Saved/UnrealMcp/Tasks/<taskId>.json`:
 }
 ```
 
-`schemaVersion` is exactly `1`. `taskId` is deterministic from the ActivityLog
-`sessionId` plus the first task event timestamp compacted into a filename-safe
-token. The default label is the first sentence of `user_intent`; without an
-intent, it falls back to `Session YYYY-MM-DD HH:MM`. `labelSource` and
-`labelConfidence` are optional and are present when retrospective labeling has
-updated the task.
+`schemaVersion` is exactly `2.0` for regenerated tasks. `taskId` is
+deterministic from the ActivityLog `sessionId` plus the first task event
+timestamp compacted into a filename-safe token. The default label is the first
+sentence of `user_intent`; without an intent, it falls back to
+`Session YYYY-MM-DD HH:MM`. `labelSource` and `labelConfidence` are optional
+and are present when retrospective labeling has updated the task.
 
 Regeneration preserves existing `rating` and `pinned` fields unless an explicit
 `task_rating` or `task_pin_change` event updates them. When no explicit
@@ -169,3 +208,9 @@ generation. The button derives a `user.atlas_*` tool name from the workflow
 label, writes `main.py` plus `tool.json` with a matching SHA-256, reloads the
 user registry, and smoke-tests the tool. It is intentionally Python-only and
 skeleton-only; C++ composite output and captured-argument replay are deferred.
+
+v0.31 Stage 2 Wave C upgrades the task projection to schema v2.0 with ordered
+`stepRefs`, capture references, policy classification, and replay eligibility
+metadata. `Make Tool` surfaces preview-only, partial, blocked, or
+pre-capture-skeleton status, but still does not generate real captured-argument
+replay code.
