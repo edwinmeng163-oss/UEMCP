@@ -29,6 +29,7 @@ namespace UnrealMcp::CaptureRedaction
 		const TSharedPtr<FJsonObject>& Payload,
 		const FString& ToolName,
 		const FJsonObject& Arguments,
+		const FString& EventId,
 		int32 MaxValueChars = kDefaultMaxValueChars,
 		int32 MaxTotalChars = kDefaultMaxTotalChars);
 }

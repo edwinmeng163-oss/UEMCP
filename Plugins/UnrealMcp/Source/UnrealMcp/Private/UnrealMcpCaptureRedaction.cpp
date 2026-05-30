@@ -9,6 +9,8 @@
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UnrealMcpCapturedArgsStore.h"
+#include "UnrealMcpSession.h"
 
 namespace UnrealMcp::CaptureRedaction
 {
@@ -300,6 +302,7 @@ namespace UnrealMcp::CaptureRedaction
 		const TSharedPtr<FJsonObject>& Payload,
 		const FString& ToolName,
 		const FJsonObject& Arguments,
+		const FString& EventId,
 		int32 MaxValueChars,
 		int32 MaxTotalChars)
 	{
@@ -315,5 +318,22 @@ namespace UnrealMcp::CaptureRedaction
 		Payload->SetNumberField(TEXT("captureSchemaVersion"), kCaptureSchemaVersion);
 		Payload->SetStringField(TEXT("captureStatus"), Redaction.CaptureStatus);
 		Payload->SetObjectField(TEXT("redactionSummaryPublic"), Redaction.RedactionSummaryPublic.IsValid() ? Redaction.RedactionSummaryPublic : MakeShared<FJsonObject>());
+
+		FString CaptureRef;
+		FString CaptureSha256;
+		if (UnrealMcp::CapturedArgsStore::WriteCapturedArgs(
+			UnrealMcp::GetLaunchSessionId(),
+			EventId,
+			ToolName,
+			FDateTime::UtcNow().ToIso8601(),
+			Redaction,
+			CaptureRef,
+			CaptureSha256)
+			&& !CaptureRef.IsEmpty()
+			&& !CaptureSha256.IsEmpty())
+		{
+			Payload->SetStringField(TEXT("captureRef"), CaptureRef);
+			Payload->SetStringField(TEXT("captureSha256"), CaptureSha256);
+		}
 	}
 }

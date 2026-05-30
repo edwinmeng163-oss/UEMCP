@@ -120,7 +120,7 @@ Tools/unreal_mcp_supervisor.py
 Important local-only or generated paths:
 
 ```text
-Saved/UnrealMcp/, Content/, Tools/UnrealMcpToolScaffolds/
+Saved/UnrealMcp/, Saved/UnrealMcp/CapturedToolArgs/, Content/, Tools/UnrealMcpToolScaffolds/
 Tools/UnrealMcpSupervisor/, Binaries/, Intermediate/, DerivedDataCache/
 Plugins/*/Binaries/, Plugins/*/Intermediate/
 ```
@@ -246,7 +246,8 @@ Tool metadata: UnrealMcpToolDefinitions.cpp, UnrealMcpToolDescriptor.h,
 Execution: UnrealMcpToolExecutionGuard.cpp/.h, UnrealMcp*OutcomeVerifier.cpp,
   UnrealMcpSession.h, UnrealMcpActivityLog.h, UnrealMcpCallToolPolicy.cpp/.h,
   UnrealMcpCallToolLibrary.cpp/.h, UnrealMcpPythonToolBridge.cpp,
-  UnrealMcpHashUtils.cpp/.h, UnrealMcpCaptureRedaction.cpp/.h
+  UnrealMcpHashUtils.cpp/.h, UnrealMcpCaptureRedaction.cpp/.h,
+  UnrealMcpCapturedArgsStore.cpp/.h
 Task/verification: UnrealMcpTaskAtlasTools.cpp/.h,
   UnrealMcpTaskLabelBackfillTool.cpp/.h, UnrealMcpAutomationTools.cpp/.h,
   UnrealMcpPieSmokeTools.cpp/.h, UnrealMcpDiagnosticsTools.cpp/.h
@@ -264,7 +265,8 @@ UI/assistant/tests: UnrealMcpChatPanel.cpp/.h,
   UnrealMcpEditorTabs.cpp, UnrealMcpAssistantRun.cpp/.h, Private/Tests/*.cpp
   including Private/Tests/UnrealMcpCallToolLibraryTests.cpp and
   Private/Tests/UnrealMcpTaskAtlasCompositeTests.cpp and
-  Private/Tests/UnrealMcpCaptureRedactionTests.cpp
+  Private/Tests/UnrealMcpCaptureRedactionTests.cpp and
+  Private/Tests/UnrealMcpCapturedArgsStoreTests.cpp
 ```
 
 Prefer cautious single-category edits. The largest files remain ChatPanel,

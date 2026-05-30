@@ -4,6 +4,7 @@
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Misc/Guid.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UnrealMcpActivityLog.h"
@@ -438,18 +439,20 @@ private:
 
 		const FString HandlerName = UnrealMcp::ResolveToolHandlerName(ToolCall.UnrealToolName);
 		const UnrealMcp::FToolPolicy ActivityPolicy = UnrealMcp::GetToolPolicy(ToolCall.UnrealToolName);
+		const FString EventId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 		Payload->SetStringField(TEXT("toolName"), ToolCall.UnrealToolName);
 		Payload->SetStringField(TEXT("handlerName"), HandlerName);
 		Payload->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
 		Payload->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
-		UnrealMcp::CaptureRedaction::AttachCaptureMetadata(Payload, ToolCall.UnrealToolName, Arguments);
+		UnrealMcp::CaptureRedaction::AttachCaptureMetadata(Payload, ToolCall.UnrealToolName, Arguments, EventId);
 		Payload->SetBoolField(TEXT("isError"), ToolResult.bIsError);
 		Payload->SetNumberField(TEXT("textLength"), ToolResult.Text.Len());
 		Payload->SetBoolField(TEXT("hasStructuredContent"), ToolResult.StructuredContent.IsValid());
 		Payload->SetNumberField(TEXT("durationMs"), FMath::Max(0.0, (FDateTime::UtcNow() - ToolStartTimeUtc).GetTotalMilliseconds()));
 
 		UnrealMcp::FActivityLogEvent Event;
+		Event.EventId = EventId;
 		Event.EventKind = TEXT("tool_call");
 		Event.Summary = FString::Printf(TEXT("Called MCP tool %s from Chat AI: %s."), *ToolCall.UnrealToolName, ToolResult.bIsError ? TEXT("failed") : TEXT("completed")).Left(2000);
 		Event.Payload = Payload;

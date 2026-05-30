@@ -207,10 +207,12 @@ bool FUnrealMcpCaptureRedactionMatrixTest::RunTest(const FString& Parameters)
 		TSharedPtr<FJsonObject> Args = UnrealMcpCaptureRedactionTests::MakeObject();
 		Args->SetStringField(TEXT("password"), TEXT("secret-payload-value"));
 		TSharedPtr<FJsonObject> Payload = UnrealMcpCaptureRedactionTests::MakeObject();
-		AttachCaptureMetadata(Payload, TEXT("unreal.editor_status"), *Args, 4096, 65536);
+		AttachCaptureMetadata(Payload, TEXT("unreal.editor_status"), *Args, TEXT("capture-redaction-matrix-event"), 4096, 65536);
 		TestEqual(TEXT("Payload capture schema version."), UnrealMcpCaptureRedactionTests::GetIntField(Payload, TEXT("captureSchemaVersion")), 1);
 		TestEqual(TEXT("Payload capture status."), Payload->GetStringField(TEXT("captureStatus")), FString(TEXT("redacted")));
 		TestTrue(TEXT("Payload has public redaction summary."), Payload->HasTypedField<EJson::Object>(TEXT("redactionSummaryPublic")));
+		TestTrue(TEXT("Payload has private capture ref."), Payload->HasField(TEXT("captureRef")));
+		TestTrue(TEXT("Payload has private capture sha."), Payload->HasField(TEXT("captureSha256")));
 		TestFalse(TEXT("Payload does not store sanitized args."), Payload->HasField(TEXT("sanitizedArguments")));
 		TestFalse(TEXT("Payload does not store raw args."), Payload->HasField(TEXT("arguments")));
 		const FString PayloadJson = UnrealMcpCaptureRedactionTests::SerializeObject(Payload);

@@ -9,6 +9,7 @@
 #include "HttpServerRequest.h"
 #include "HttpServerResponse.h"
 #include "IHttpRouter.h"
+#include "Misc/Guid.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Templates/Atomic.h"
@@ -350,12 +351,13 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleToolsCall(const TSharedP
 
 		const FString HandlerName = UnrealMcp::ResolveToolHandlerName(ToolName);
 		const UnrealMcp::FToolPolicy ActivityPolicy = UnrealMcp::GetToolPolicy(ToolName);
+		const FString EventId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 		Payload->SetStringField(TEXT("toolName"), ToolName);
 		Payload->SetStringField(TEXT("handlerName"), HandlerName);
 		Payload->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
 		Payload->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
-		UnrealMcp::CaptureRedaction::AttachCaptureMetadata(Payload, ToolName, Arguments);
+		UnrealMcp::CaptureRedaction::AttachCaptureMetadata(Payload, ToolName, Arguments, EventId);
 		Payload->SetBoolField(TEXT("isError"), Result.bIsError);
 		Payload->SetNumberField(TEXT("textLength"), Result.Text.Len());
 		Payload->SetBoolField(TEXT("hasStructuredContent"), Result.StructuredContent.IsValid());
@@ -376,6 +378,7 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleToolsCall(const TSharedP
 		}
 
 		UnrealMcp::FActivityLogEvent Event;
+		Event.EventId = EventId;
 		Event.EventKind = TEXT("tool_call");
 		Event.Summary = FString::Printf(TEXT("Called MCP tool %s: %s."), *ToolName, Result.bIsError ? TEXT("failed") : TEXT("completed")).Left(2000);
 		Event.Payload = Payload;
