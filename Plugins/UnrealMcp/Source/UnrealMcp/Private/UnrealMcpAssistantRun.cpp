@@ -8,6 +8,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "UnrealMcpActivityLog.h"
 #include "UnrealMcpAssistantSystemPromptBuilder.h"
+#include "UnrealMcpCaptureRedaction.h"
 #include "UnrealMcpMemoryTools.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpToolRegistry.h"
@@ -442,6 +443,7 @@ private:
 		Payload->SetStringField(TEXT("handlerName"), HandlerName);
 		Payload->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
 		Payload->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
+		UnrealMcp::CaptureRedaction::AttachCaptureMetadata(Payload, ToolCall.UnrealToolName, Arguments);
 		Payload->SetBoolField(TEXT("isError"), ToolResult.bIsError);
 		Payload->SetNumberField(TEXT("textLength"), ToolResult.Text.Len());
 		Payload->SetBoolField(TEXT("hasStructuredContent"), ToolResult.StructuredContent.IsValid());

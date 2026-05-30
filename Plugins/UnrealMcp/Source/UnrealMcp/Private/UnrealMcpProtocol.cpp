@@ -13,6 +13,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Templates/Atomic.h"
 #include "UnrealMcpActivityLog.h"
+#include "UnrealMcpCaptureRedaction.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistry.h"
@@ -354,6 +355,7 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleToolsCall(const TSharedP
 		Payload->SetStringField(TEXT("handlerName"), HandlerName);
 		Payload->SetStringField(TEXT("riskLevel"), UnrealMcp::LexToString(ActivityPolicy.RiskLevel));
 		Payload->SetArrayField(TEXT("argumentKeys"), UnrealMcp::MakeJsonStringArray(ArgumentKeys));
+		UnrealMcp::CaptureRedaction::AttachCaptureMetadata(Payload, ToolName, Arguments);
 		Payload->SetBoolField(TEXT("isError"), Result.bIsError);
 		Payload->SetNumberField(TEXT("textLength"), Result.Text.Len());
 		Payload->SetBoolField(TEXT("hasStructuredContent"), Result.StructuredContent.IsValid());

@@ -8,6 +8,7 @@
 #include "HAL/CriticalSection.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
@@ -148,8 +149,12 @@ namespace UnrealMcp
 				: Event.EventKind.TrimStartAndEnd();
 
 			TSharedPtr<FJsonObject> Record = MakeShared<FJsonObject>();
+			const FString EventId = Event.EventId.TrimStartAndEnd().IsEmpty()
+				? FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower)
+				: Event.EventId.TrimStartAndEnd();
 			Record->SetStringField(TEXT("sessionId"), SessionId);
 			Record->SetStringField(TEXT("ts"), TimestampUtc);
+			Record->SetStringField(TEXT("eventId"), EventId);
 			Record->SetStringField(TEXT("eventKind"), EventKind);
 			FString EffectiveTaskLabel = Event.TaskLabel.TrimStartAndEnd();
 			if (EffectiveTaskLabel.IsEmpty())

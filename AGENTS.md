@@ -246,7 +246,7 @@ Tool metadata: UnrealMcpToolDefinitions.cpp, UnrealMcpToolDescriptor.h,
 Execution: UnrealMcpToolExecutionGuard.cpp/.h, UnrealMcp*OutcomeVerifier.cpp,
   UnrealMcpSession.h, UnrealMcpActivityLog.h, UnrealMcpCallToolPolicy.cpp/.h,
   UnrealMcpCallToolLibrary.cpp/.h, UnrealMcpPythonToolBridge.cpp,
-  UnrealMcpHashUtils.cpp/.h
+  UnrealMcpHashUtils.cpp/.h, UnrealMcpCaptureRedaction.cpp/.h
 Task/verification: UnrealMcpTaskAtlasTools.cpp/.h,
   UnrealMcpTaskLabelBackfillTool.cpp/.h, UnrealMcpAutomationTools.cpp/.h,
   UnrealMcpPieSmokeTools.cpp/.h, UnrealMcpDiagnosticsTools.cpp/.h
@@ -263,7 +263,8 @@ UI/assistant/tests: UnrealMcpChatPanel.cpp/.h,
   UnrealMcpWorkbenchPanel.cpp/.h, STaskAtlasWindow.cpp/.h,
   UnrealMcpEditorTabs.cpp, UnrealMcpAssistantRun.cpp/.h, Private/Tests/*.cpp
   including Private/Tests/UnrealMcpCallToolLibraryTests.cpp and
-  Private/Tests/UnrealMcpTaskAtlasCompositeTests.cpp
+  Private/Tests/UnrealMcpTaskAtlasCompositeTests.cpp and
+  Private/Tests/UnrealMcpCaptureRedactionTests.cpp
 ```
 
 Prefer cautious single-category edits. The largest files remain ChatPanel,

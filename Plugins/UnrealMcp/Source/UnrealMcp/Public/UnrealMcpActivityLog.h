@@ -11,6 +11,7 @@ namespace UnrealMcp
 
 	struct FActivityLogEvent
 	{
+		FString EventId;
 		FString EventKind;
 		FString Summary;
 		TSharedPtr<FJsonObject> Payload;
