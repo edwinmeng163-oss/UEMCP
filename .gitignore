@@ -67,3 +67,19 @@ Tools/UnrealMcpSupervisor/
 *.log
 *.dmp
 *.tmp
+
+# Git LFS auto-installed hooks (per-machine; project pre-commit stays tracked)
+Tools/git-hooks/post-checkout
+Tools/git-hooks/post-commit
+Tools/git-hooks/post-merge
+Tools/git-hooks/pre-push
+
+
+# Example-host local byproducts: dogfood tools, scaffold experiments, and
+# MCP/automation/PIE-generated test assets (committed example content stays tracked)
+Examples/*/Tools/
+Examples/*/Content/V028Test/
+Examples/*/Content/levels/
+Examples/*/Content/MCP/
+Examples/*/Content/__ExternalActors__/TopDown/
+Examples/*/Content/__ExternalObjects__/TopDown/
