@@ -1,8 +1,9 @@
 # Task Atlas Agent Guide
 
 Read this when work touches ActivityLog task extraction, workflow records,
-ratings, pinning, promotion to skills/RAG, Make Tool drafts, or retrospective
-labels. The canonical deep reference is [TaskAtlas](../TaskAtlas.md).
+ratings, pinning, promotion to skills/RAG, Make Tool composites, or
+retrospective labels. The canonical deep reference is
+[TaskAtlas](../TaskAtlas.md).
 
 ## Purpose
 
@@ -28,20 +29,25 @@ These files are local runtime evidence only and are not committed.
 - `unreal.task_label_backfill`: labels placeholder tasks through the configured
   Anthropic provider while preserving pinned and user-edited tasks.
 - `STaskAtlasWindow`: Chat-launched Slate view for workflows, unused tools,
-  search, tool details, pinning, To Skills, To RAG, and Make Tool.
+  search, tool details, pinning, Distill Skill, To RAG, and Make Tool.
 
 ## Lifecycle
 
 - v0.17 ships extraction, listing, details, rating, pinning, Chat hooks, and the
   Task Atlas window.
-- v0.18 ships row-specific `To Skills` and `To RAG` promotion behavior.
-- v0.19 ships `Make Tool` scaffold creation, Task Atlas markdown RAG ingestion,
-  and `unreal.task_label_backfill`.
+- v0.18 ships row-specific skills and RAG promotion behavior.
+- v0.19 shipped the original `Make Tool` scaffold creation, Task Atlas
+  markdown RAG ingestion, and `unreal.task_label_backfill`.
+- v0.30 R2 Wave C changes `Make Tool` to direct composite Python user-tool
+  generation from the task critical path.
 
-`Make Tool` creates a local draft scaffold only. It derives a
-`unreal.atlas_*` tool name from the workflow label, calls
-`unreal.scaffold_mcp_tool`, and leaves handler editing plus
-`unreal.mcp_extension_pipeline` to the user.
+`Make Tool` now derives a `user.atlas_*` tool name from the workflow label,
+filters `criticalPath` to visible core `unreal.*` tools, writes
+`Tools/UnrealMcpPyTools/<atlas_*>/main.py` plus `tool.json`, records the
+`pythonHandlerSha256`, reloads the user registry, and smoke-tests the user tool.
+It does not call `unreal.scaffold_mcp_tool`. Generated composites are skeletons:
+Task Atlas currently has tool names but not per-step argument captures, so real
+argument replay is deferred to v0.31.
 
 ## Frozen ActivityLog Events
 
@@ -110,7 +116,7 @@ or non-object JSONL records are skipped defensively.
 
 ## Promotion Actions
 
-`To Skills` calls `unreal.skill_distill_from_activity` for the selected
+`Distill Skill` calls `unreal.skill_distill_from_activity` for the selected
 workflow with its `sessionId`, deterministic slug, task label, user intent, and
 draft-writing options enabled.
 
@@ -124,8 +130,12 @@ Then it calls `unreal.knowledge_index_refresh`. v0.19 indexing ingests these
 markdown files as inline `task-atlas` KnowledgeCards so promoted workflows are
 searchable after refresh.
 
-`Make Tool` derives an `atlas_*` tool name from the workflow label and calls
-`unreal.scaffold_mcp_tool`. It does not apply, build, or test the scaffold.
+`Make Tool` derives an `atlas_*` user-tool id from the workflow label and writes
+a composite Python user tool directly to the user registry. The generated
+`main.py` calls each visible core step with `call_tool("<tool>",
+args.get("stepN_args", {}))`; the generated `tool.json` has a closed top-level
+input schema with one object property per step and a `smokeArgs` object for the
+reload/smoke path. Each step remains governed by fail-closed `call_tool` policy.
 
 ## Retrospective Label Backfill
 

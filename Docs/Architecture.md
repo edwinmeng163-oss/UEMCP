@@ -26,7 +26,7 @@ Core layers:
 
 - `SUnrealMcpChatPanel`: conversational command and AI surface.
 - `SUnrealMcpWorkbenchPanel`: thin self-extension console over existing MCP tools. It should not own self-extension business logic; it delegates to `ExecuteToolFromEditorUI` so Chat, HTTP MCP, tests, and Workbench continue sharing the same backend behavior.
-- `STaskAtlasWindow`: Chat-launched Slate workflow view backed by Task Atlas MCP tools and registry metadata. Pinning is functional; `To Skills`, `To RAG`, and `Make Tool` are visible v0.18/v0.19 placeholders.
+- `STaskAtlasWindow`: Chat-launched Slate workflow view backed by Task Atlas MCP tools and registry metadata. Pinning, `Distill Skill`, `To RAG`, and `Make Tool` are functional; `Make Tool` writes skeleton composite Python user tools to the user registry and runs reload/smoke.
 - `Tools/UnrealMcpSkills`: project-local skill instructions.
 
 ## External AI Bridge

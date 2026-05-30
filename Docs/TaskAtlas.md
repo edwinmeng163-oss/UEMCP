@@ -21,7 +21,7 @@ and promotion sources. It is local-first: runtime task files live under
 
 ## Functional In v0.18 And v0.19
 
-- `To Skills` is row-specific and calls
+- `Distill Skill` is row-specific and calls
   `unreal.skill_distill_from_activity` for the selected workflow with its
   `sessionId`, a deterministic slug derived from the task label, the task
   label as title, the user intent as goal when available, and draft-writing
@@ -33,11 +33,10 @@ and promotion sources. It is local-first: runtime task files live under
   v0.19 indexing ingests these Task Atlas markdown files as inline
   `task-atlas` KnowledgeCards so promoted workflows are searchable after the
   refresh completes.
-- `Make Tool` is row-specific and derives an `atlas_*` tool name from the
-  workflow label, then calls `unreal.scaffold_mcp_tool` to create a draft
-  self-extension scaffold seeded with the workflow's critical path context.
-  The button does not apply, build, or test the scaffold; the user still opens
-  the draft, edits the handler, and runs `unreal.mcp_extension_pipeline`.
+- `Make Tool` is row-specific and derives an `atlas_*` user-tool id from the
+  workflow label, then directly writes a composite Python user tool under
+  `Tools/UnrealMcpPyTools/<atlas_*>/`. It does not call
+  `unreal.scaffold_mcp_tool`.
 - `unreal.task_label_backfill` scans `Saved/UnrealMcp/Tasks/*.json` for
   unpinned tasks whose label is exactly `Session YYYY-MM-DD HH:MM` and whose
   `userIntentText` is empty, then asks the configured Anthropic Messages
@@ -48,6 +47,25 @@ and promotion sources. It is local-first: runtime task files live under
 - v0.19 is complete: Part A made `Make Tool` create scaffold drafts, Part B
   added Task Atlas markdown ingestion/RAG indexing, and Part C added LLM
   retrospective label backfill.
+
+## Functional In v0.30 R2 Wave C
+
+- `Make Tool` now generates a project-local composite Python user tool instead
+  of a self-extension scaffold. It filters the task `criticalPath` to visible
+  core `unreal.*` tools, writes `main.py` with a `call_tool(...)` sequence,
+  writes closed-schema `tool.json` with one `stepN_args` object per step,
+  records `pythonHandlerSha256`, includes `smokeArgs`, then calls
+  `unreal.mcp_user_registry_reload` and `unreal.mcp_user_tool_smoke`.
+- Generated composites are skeletons. Task `eventRefs` store only `{ts, tool,
+  isError}`, not per-step arguments, so real captured-argument replay is
+  deferred to v0.31. Users must fill reviewed `stepN_args` before treating the
+  composite as a real replay tool.
+- Each step still runs through Wave A/Wave B `call_tool` policy. Non-visible,
+  `user.*`, recursive, or dangerous-no-dry-run targets fail closed; dangerous
+  dry-run-capable targets are forced to dry run by the core policy.
+- The skills promotion button is labeled `Distill Skill` and still calls
+  `unreal.skill_distill_from_activity`; it is separate from composite
+  generation.
 
 `unreal.task_label_backfill` accepts:
 
@@ -140,13 +158,14 @@ Malformed, older, or non-object JSONL records are skipped defensively.
 v0.17 ships extraction, listing, details, rating, pinning, Chat hooks, and the
 Task Atlas window.
 
-v0.18 ships real `To Skills` and `To RAG` promotion behavior in the Task Atlas
+v0.18 ships real skills and RAG promotion behavior in the Task Atlas
 window.
 
-v0.19 ships all three final Task Atlas pieces: `Make Tool` scaffold creation,
-Task Atlas markdown RAG ingestion, and `unreal.task_label_backfill`.
+v0.19 shipped the original Task Atlas `Make Tool` scaffold creation, Task Atlas
+markdown RAG ingestion, and `unreal.task_label_backfill`.
 
-The `Make Tool` button creates a local draft scaffold only. It derives a
-`unreal.atlas_*` tool name from the workflow label, calls
-`unreal.scaffold_mcp_tool`, and leaves handler editing plus
-`unreal.mcp_extension_pipeline` to the user.
+v0.30 R2 Wave C changes `Make Tool` to direct composite Python user-tool
+generation. The button derives a `user.atlas_*` tool name from the workflow
+label, writes `main.py` plus `tool.json` with a matching SHA-256, reloads the
+user registry, and smoke-tests the tool. It is intentionally Python-only and
+skeleton-only; C++ composite output and captured-argument replay are deferred.

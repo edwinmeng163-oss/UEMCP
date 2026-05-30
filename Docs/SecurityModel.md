@@ -130,8 +130,13 @@ See `Docs/CallTool.md` and `Docs/agents-guide/call-tool.md`.
 
 Write-capable tools build structured `preflight` results before handler execution and attach `postcheck` results after execution. Generic checks come from ToolRegistry metadata. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools additionally inspect real editor/file/workflow state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, memory key, skill file, manifest, build log, or test result actually exists as expected."
 
-Task Atlas v0.17 does not promote tasks into skills, RAG, or new tools. The
-`To Skills`, `To RAG`, and `Make Tool` UI buttons are placeholders only.
+Task Atlas promotion is no longer placeholder-only. `Distill Skill` writes
+skill drafts through `unreal.skill_distill_from_activity`, `To RAG` writes a
+Saved/UnrealMcp knowledge source and refreshes the index, and `Make Tool`
+writes a skeleton composite Python user tool plus closed `tool.json` directly
+to the user registry before running reload/smoke. Composite steps still call
+visible core `unreal.*` tools through fail-closed `call_tool` policy; `user.*`
+targets and recursive composition remain denied.
 
 ## Remaining Hardening Work
 

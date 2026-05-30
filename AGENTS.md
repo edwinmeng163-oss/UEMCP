@@ -180,11 +180,15 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.30 R2 Wave B adds Python user-tool `call_tool` /
-`call_tool_raw` builtins over `unreal.UnrealMcpCallTool.call_tool`, preserving
-the 181-tool registry count while enabling fail-closed composition of visible
-core `unreal.*` tools; v0.29 Wave B implements the `code` category with seven
-visible core code tools: four read-only tools
+Current project status: v0.30 R2 Wave C makes Task Atlas `Make Tool` generate
+skeleton composite Python user tools directly under the user registry from
+visible core `unreal.*` critical-path steps, writing closed `tool.json`
+schemas, `pythonHandlerSha256`, `smokeArgs`, then running user-registry reload
+and smoke while preserving the 181-tool core registry count; v0.30 R2 Wave B
+adds Python user-tool `call_tool` / `call_tool_raw` builtins over
+`unreal.UnrealMcpCallTool.call_tool`, enabling fail-closed composition of
+visible core `unreal.*` tools; v0.29 Wave B implements the `code` category with
+seven visible core code tools: four read-only tools
 `unreal.code_workspace_status`, `unreal.code_list_files`,
 `unreal.code_read_file`, and `unreal.code_search`, plus write-closure tools
 `unreal.code_preview_change`, `unreal.code_apply_change`, and
@@ -208,10 +212,10 @@ taxonomy; v0.25 rewrites Codex CLI exec; v0.24 adds AI provider presets, Kimi
 docs under `Tools/UnrealMcpToolDocs/`, and progressive-disclosure agent docs;
 v0.23 adds `cli-anything-ueatelier`; v0.22 adds `unreal.pie_smoke`; v0.21 adds
 `unreal.editor_diagnostics`; v0.20 hardens async automation runs and watchdog
-stale recovery; v0.19 completes Task Atlas Make Tool, To RAG ingestion, and
-label backfill; v0.19.1 disables Unity build for the UnrealMcp module after a
-UE 5.6 collision. `unreal.configure_fps_settings` remains scaffold-only pending
-functional verification.
+stale recovery; v0.19 completes the original Task Atlas Make Tool scaffold
+path, To RAG ingestion, and label backfill; v0.19.1 disables Unity build for
+the UnrealMcp module after a UE 5.6 collision. `unreal.configure_fps_settings`
+remains scaffold-only pending functional verification.
 
 Reform C v0.26 resolves the v0.25 self-extension incident by centralizing
 server-message provider prompts in
@@ -241,7 +245,8 @@ Tool metadata: UnrealMcpToolDefinitions.cpp, UnrealMcpToolDescriptor.h,
   UnrealMcpToolHandlerRegistry.cpp/.h, UnrealMcpToolDispatcher.cpp
 Execution: UnrealMcpToolExecutionGuard.cpp/.h, UnrealMcp*OutcomeVerifier.cpp,
   UnrealMcpSession.h, UnrealMcpActivityLog.h, UnrealMcpCallToolPolicy.cpp/.h,
-  UnrealMcpCallToolLibrary.cpp/.h, UnrealMcpPythonToolBridge.cpp
+  UnrealMcpCallToolLibrary.cpp/.h, UnrealMcpPythonToolBridge.cpp,
+  UnrealMcpHashUtils.cpp/.h
 Task/verification: UnrealMcpTaskAtlasTools.cpp/.h,
   UnrealMcpTaskLabelBackfillTool.cpp/.h, UnrealMcpAutomationTools.cpp/.h,
   UnrealMcpPieSmokeTools.cpp/.h, UnrealMcpDiagnosticsTools.cpp/.h
@@ -257,7 +262,8 @@ Category handlers: UnrealMcpEditorTools.cpp,
 UI/assistant/tests: UnrealMcpChatPanel.cpp/.h,
   UnrealMcpWorkbenchPanel.cpp/.h, STaskAtlasWindow.cpp/.h,
   UnrealMcpEditorTabs.cpp, UnrealMcpAssistantRun.cpp/.h, Private/Tests/*.cpp
-  including Private/Tests/UnrealMcpCallToolLibraryTests.cpp
+  including Private/Tests/UnrealMcpCallToolLibraryTests.cpp and
+  Private/Tests/UnrealMcpTaskAtlasCompositeTests.cpp
 ```
 
 Prefer cautious single-category edits. The largest files remain ChatPanel,
