@@ -188,6 +188,7 @@ def required_file_paths(mode: str, scope: str) -> List[str]:
         "Tools/UnrealMcpToolRegistry/tools.json",
         "Tools/UnrealMcpToolRegistry/schema.json",
         "Tools/UnrealMcpPyTools/editor_python_runtime_info/main.py",
+        "Tools/UnrealMcpPyToolSamples/call_tool_demo/main.py",
         "Tools/UnrealMcpCodexBridge/package.json",
         "Tools/UnrealMcpCodexBridge/start-bridge.cmd",
         "Tools/UnrealMcpCodexBridge/start-bridge.ps1",

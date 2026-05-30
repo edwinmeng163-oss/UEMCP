@@ -254,6 +254,8 @@ if [ "$full_experience" -eq 1 ]; then
     --exclude 'Intermediate/' --exclude 'Saved/' --exclude 'DerivedDataCache/' --exclude '.DS_Store'
   rm -rf "$stage_parent/bridge-bundle-extract"
   copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffoldStarters" "$stage_tools/UnrealMcpToolScaffoldStarters" --exclude '.DS_Store' --exclude 'Saved/'
+  copy_clean_dir "$repo_root/Tools/UnrealMcpPyToolSamples" "$stage_tools/UnrealMcpPyToolSamples" \
+    --exclude '__pycache__/' --exclude '*.pyc' --exclude '.DS_Store' --exclude 'Saved/'
   copy_clean_dir "$(resolve_scaffold_source fps_bootstrap)" "$stage_tools/UnrealMcpToolScaffolds/fps_bootstrap" --exclude '.DS_Store' --exclude 'Saved/'
   copy_clean_dir "$(resolve_scaffold_source verify_input_drives_pawn)" "$stage_tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" --exclude '.DS_Store' --exclude 'Saved/'
 
@@ -320,6 +322,8 @@ else
     --exclude 'node_modules/' --exclude 'runtime/' --exclude 'Intermediate/' \
     --exclude 'Saved/' --exclude 'DerivedDataCache/' --exclude '.DS_Store'
   copy_clean_dir "$repo_root/Tools/UnrealMcpToolScaffoldStarters" "$stage_scaffold_starters" --exclude '.DS_Store' --exclude 'Saved/'
+  copy_clean_dir "$repo_root/Tools/UnrealMcpPyToolSamples" "$stage_tools/UnrealMcpPyToolSamples" \
+    --exclude '__pycache__/' --exclude '*.pyc' --exclude '.DS_Store' --exclude 'Saved/'
   copy_clean_dir "$(resolve_scaffold_source fps_bootstrap)" "$stage_tools/UnrealMcpToolScaffolds/fps_bootstrap" --exclude '.DS_Store' --exclude 'Saved/'
   copy_clean_dir "$(resolve_scaffold_source verify_input_drives_pawn)" "$stage_tools/UnrealMcpToolScaffolds/verify_input_drives_pawn" --exclude '.DS_Store' --exclude 'Saved/'
 
@@ -335,6 +339,7 @@ else
   cmp -s "$stage_tools/UnrealMcpToolRegistry/tools.json" "$canonical_registry" || die "Staging integrity failure: staged Tools registry differs from canonical registry"
   cmp -s "$stage_tools/UnrealMcpToolRegistry/schema.json" "$canonical_registry_schema" || die "Staging integrity failure: staged Tools registry schema differs from canonical schema"
   [ -f "$stage_py_tools/editor_python_runtime_info/main.py" ] || die "Staging integrity failure: missing Tools/UnrealMcpPyTools/editor_python_runtime_info/main.py"
+  [ -f "$stage_tools/UnrealMcpPyToolSamples/call_tool_demo/main.py" ] || die "Staging integrity failure: missing Tools/UnrealMcpPyToolSamples/call_tool_demo/main.py"
   [ -f "$stage_tools/UnrealMcpSkills/mcp-self-extension/SKILL.md" ] || die "Staging integrity failure: missing Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md"
   [ -f "$stage_tools/UnrealMcpKnowledge/Evals/core_rag_eval.json" ] || die "Staging integrity failure: missing Tools/UnrealMcpKnowledge/Evals/core_rag_eval.json"
   [ -f "$stage_tools/UnrealMcpTests/Core/editor_status_valid.json" ] || die "Staging integrity failure: missing Tools/UnrealMcpTests/Core/editor_status_valid.json"
