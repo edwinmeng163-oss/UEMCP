@@ -315,6 +315,7 @@ try {
             Remove-Item -LiteralPath $bridgeExtractDir -Recurse -Force
         }
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffoldStarters") (Join-Path $stageTools "UnrealMcpToolScaffoldStarters") @(".DS_Store", "Saved")
+        Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpPyToolSamples") (Join-Path $stageTools "UnrealMcpPyToolSamples") @("__pycache__", "*.pyc", ".DS_Store", "Saved")
         Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "fps_bootstrap") (Join-Path $stageTools "UnrealMcpToolScaffolds/fps_bootstrap") @(".DS_Store", "Saved")
         Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "verify_input_drives_pawn") (Join-Path $stageTools "UnrealMcpToolScaffolds/verify_input_drives_pawn") @(".DS_Store", "Saved")
 
@@ -393,6 +394,7 @@ try {
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpTests") (Join-Path $stageTools "UnrealMcpTests") @(".DS_Store", "Saved")
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpCodexBridge") (Join-Path $stageTools "UnrealMcpCodexBridge") @("node_modules", "runtime", "Intermediate", "Saved", "DerivedDataCache", ".DS_Store")
         Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpToolScaffoldStarters") $stageScaffoldStarters @(".DS_Store", "Saved")
+        Copy-CleanDirectory (Join-Path $repoRoot "Tools/UnrealMcpPyToolSamples") (Join-Path $stageTools "UnrealMcpPyToolSamples") @("__pycache__", "*.pyc", ".DS_Store", "Saved")
         Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "fps_bootstrap") (Join-Path $stageTools "UnrealMcpToolScaffolds/fps_bootstrap") @(".DS_Store", "Saved")
         Copy-CleanDirectory (Resolve-ScaffoldSource $repoRoot "verify_input_drives_pawn") (Join-Path $stageTools "UnrealMcpToolScaffolds/verify_input_drives_pawn") @(".DS_Store", "Saved")
 
@@ -419,6 +421,9 @@ try {
         Assert-PlainFile (Join-Path $stagePyTools "editor_python_runtime_info/main.py") `
             "Staging integrity failure: missing Tools/UnrealMcpPyTools/editor_python_runtime_info/main.py" `
             "Staging integrity failure: staged Python handler is a symlink"
+        Assert-PlainFile (Join-Path $stageTools "UnrealMcpPyToolSamples/call_tool_demo/main.py") `
+            "Staging integrity failure: missing Tools/UnrealMcpPyToolSamples/call_tool_demo/main.py" `
+            "Staging integrity failure: staged Python tool sample is a symlink"
         Assert-PlainFile (Join-Path $stageTools "UnrealMcpSkills/mcp-self-extension/SKILL.md") `
             "Staging integrity failure: missing Tools/UnrealMcpSkills/mcp-self-extension/SKILL.md" `
             "Staging integrity failure: staged skill file is a symlink"
