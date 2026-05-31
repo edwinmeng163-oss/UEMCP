@@ -126,6 +126,49 @@ run safely as direct allow or forced dry run fail closed.
 
 See `Docs/CallTool.md` and `Docs/agents-guide/call-tool.md`.
 
+## Captured Tool Arguments
+
+Task Atlas preview composites need reviewed defaults, but raw tool arguments
+can contain secrets, local paths, source edits, or arbitrary commands. v0.31
+Stage 2 stores only sanitized captured arguments in a private local store:
+
+```text
+Saved/UnrealMcp/CapturedToolArgs/<sessionId>/<eventId>.json
+```
+
+Capture redaction applies before anything is written:
+
+- Secret-looking field names are replaced by `<redacted:secret>`.
+- Home and project path prefixes are replaced by `<home>` and `<project>`.
+- Oversized values are omitted, and oversized total payloads are skipped.
+- High-risk argument shapes are skipped for the entire tool. The skip list is
+  `unreal.execute_python`, `unreal.execute_python_file`,
+  `unreal.execute_console_command`, `unreal.code_preview_change`,
+  `unreal.mcp_patch_scaffold_patch`, and `unreal.mcp_validate_cpp_patch`.
+
+The ActivityLog payload does not store argument values. It stores public capture
+metadata only: `captureStatus`, optional `captureRef`, optional
+`captureSha256`, and `redactionSummaryPublic`. RAG indexing remains isolated
+from captured arguments: `AddActivityLogCards` scans only
+`Saved/UnrealMcp/ActivityLog/*.jsonl`, while the private store lives outside
+that tree and outside `Saved/UnrealMcp/KnowledgeSources`. The RagCanary
+automation test guards against regressions by checking that ActivityLog output
+does not contain private captured-argument values and that ActivityLog file
+enumeration does not include `CapturedToolArgs`.
+
+Captured-argument reads are integrity checked. `captureRef` must resolve under
+`Saved/UnrealMcp/CapturedToolArgs`, must target a `.json` file, and cannot
+traverse outside the store. `ReadCapturedArgs` recomputes the JSON SHA-256 and
+rejects the read if it does not match the sidecar hash, which is the same value
+surfaced as `captureSha256` in ActivityLog metadata.
+
+Captured arguments do not make Task Atlas a real replay system. Generated
+preview composites still call through fail-closed `call_tool_raw` policy:
+read-safe steps may run, dry-run-capable writes are forced to dry run, and
+denied steps fail closed. The Task Atlas UI and generated `tool.json` label
+composites honestly as `preview_only`, `partial`, `skeleton_pre_capture`, or
+`blocked` instead of promising real replay.
+
 ## Tool Outcome Verification
 
 Write-capable tools build structured `preflight` results before handler execution and attach `postcheck` results after execution. Generic checks come from ToolRegistry metadata. Blueprint, Widget, Actor, Memory, Skill, Scaffold, and Self-extension tools additionally inspect real editor/file/workflow state before and after execution, so Chat and Workbench can distinguish "the tool returned success" from "the target asset, graph, widget, actor, transform, memory key, skill file, manifest, build log, or test result actually exists as expected."
@@ -133,10 +176,11 @@ Write-capable tools build structured `preflight` results before handler executio
 Task Atlas promotion is no longer placeholder-only. `Distill Skill` writes
 skill drafts through `unreal.skill_distill_from_activity`, `To RAG` writes a
 Saved/UnrealMcp knowledge source and refreshes the index, and `Make Tool`
-writes a skeleton composite Python user tool plus closed `tool.json` directly
-to the user registry before running reload/smoke. Composite steps still call
-visible core `unreal.*` tools through fail-closed `call_tool` policy; `user.*`
-targets and recursive composition remain denied.
+writes a preview or skeleton composite Python user tool plus closed `tool.json`
+directly to the user registry before running reload/smoke. Preview composites
+use sanitized captured arguments as reviewable defaults only. Composite steps
+still call visible core `unreal.*` tools through fail-closed `call_tool_raw`
+policy; `user.*` targets and recursive composition remain denied.
 
 ## Remaining Hardening Work
 

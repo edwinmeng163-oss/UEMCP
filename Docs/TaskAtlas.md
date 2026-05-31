@@ -56,10 +56,9 @@ and promotion sources. It is local-first: runtime task files live under
   writes closed-schema `tool.json` with one `stepN_args` object per step,
   records `pythonHandlerSha256`, includes `smokeArgs`, then calls
   `unreal.mcp_user_registry_reload` and `unreal.mcp_user_tool_smoke`.
-- Generated composites are skeletons. Task `eventRefs` store only `{ts, tool,
-  isError}`, not per-step arguments, so real captured-argument replay is
-  deferred to v0.31. Users must fill reviewed `stepN_args` before treating the
-  composite as a real replay tool.
+- v0.30 composites were skeletons. Task `eventRefs` stored only `{ts, tool,
+  isError}`, not per-step arguments, so users had to fill reviewed `stepN_args`
+  before treating the generated tool as useful workflow automation.
 - Each step still runs through Wave A/Wave B `call_tool` policy. Non-visible,
   `user.*`, recursive, or dangerous-no-dry-run targets fail closed; dangerous
   dry-run-capable targets are forced to dry run by the core policy.
@@ -67,7 +66,7 @@ and promotion sources. It is local-first: runtime task files live under
   `unreal.skill_distill_from_activity`; it is separate from composite
   generation.
 
-## Functional In v0.31 Stage 2 Wave C
+## Functional In v0.31 Stage 2 Waves A-D
 
 - Task files now use schema v2.0. The ActivityLog reader carries top-level
   `eventId` plus payload `captureStatus` and `captureRef` into the task model.
@@ -86,11 +85,13 @@ and promotion sources. It is local-first: runtime task files live under
 - The Task Atlas window and generated `tool.json` use honest labels:
   `compositeKind=preview|skeleton` and
   `replayStatus=preview_only|partial|skeleton_pre_capture|blocked`.
-- Wave D `Make Tool` reads replayable `captureRef` entries from the private
+- Wave D `Make Tool` reads usable `captureRef` entries from the private
   captured-args store with sha validation and emits preview composite code.
   Captured arguments are embedded only as JSON data constants parsed with
   `json.loads`; they are not spliced into Python logic, comments, or f-strings.
-  Steps without readable captured args remain placeholders.
+  Steps without readable captured args remain placeholders. Runtime user input
+  wins over these captured defaults, so callers can replace any preset with
+  reviewed real arguments.
 - Generated preview composites call through the same user-tool `call_tool_raw`
   policy seam, record each step's runtime `policyDecision` and `isError`, and
   include `effectiveArgsDiff` when force-dry-run changes the effective arguments
@@ -217,17 +218,18 @@ v0.30 R2 Wave C changes `Make Tool` to direct composite Python user-tool
 generation. The button derives a `user.atlas_*` tool name from the workflow
 label, writes `main.py` plus `tool.json` with a matching SHA-256, reloads the
 user registry, and smoke-tests the tool. It is intentionally Python-only and
-skeleton-only; C++ composite output and captured-argument replay are deferred.
+skeleton-only in v0.30; C++ composite output is outside the Task Atlas path.
 
 v0.31 Stage 2 Wave C upgrades the task projection to schema v2.0 with ordered
 `stepRefs`, capture references, policy classification, and replay eligibility
 metadata. `Make Tool` surfaces preview-only, partial, blocked, or
-pre-capture-skeleton status, but still does not generate real captured-argument
-replay code.
+pre-capture-skeleton status.
 
 v0.31 Stage 2 Wave D upgrades `Make Tool` to preview composite generation. It
 uses ordered `stepRefs` instead of deduped `criticalPath` when available, reads
 captured args through `UnrealMcp::CapturedArgsStore::ReadCapturedArgs`, embeds
 sanitized defaults as `json.loads` data constants, and reports per-step
-`policyDecision`, `isError`, and force-dry-run `effectiveArgsDiff`. Real replay
-remains deferred.
+`policyDecision`, `isError`, and force-dry-run `effectiveArgsDiff`. Preview
+composites remain reviewable drafts: caller-provided step arguments override
+captured defaults, write steps stay dry-run-only through policy, and blocked
+steps stop with structured evidence.

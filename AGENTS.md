@@ -182,22 +182,20 @@ smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
 the `Tools/UEAtelierCli/` CLI-Anything package.
 
-Current project status: v0.31 Stage 2 Wave D upgrades Task Atlas `Make Tool`
-from skeleton composites to preview composite generation: it uses ordered
-non-deduped `stepRefs`, reads replayable `captureRef` entries through the
-private captured-args store with sha validation, embeds sanitized defaults as
-`json.loads` data constants, and reports per-step `policyDecision`, `isError`,
-and force-dry-run `effectiveArgsDiff` while keeping real replay deferred; v0.31
-Stage 2 Wave C upgraded Task Atlas task JSON to schema v2 with ordered
-non-deduped `stepRefs` linked to ActivityLog `eventId` and captured-args
-metadata, added `replayEligibility` / unavailable-reason classification from
-call-tool policy, and made Task Atlas `Make Tool` label generated composites as
-preview-only or skeleton/partial/blocked; v0.30 R2 Wave C makes Task Atlas
-`Make Tool` generate skeleton composite Python user tools directly under the
-user registry from visible core `unreal.*` critical-path steps, writing closed
-`tool.json` schemas, `pythonHandlerSha256`, `smokeArgs`, then running
-user-registry reload and smoke while preserving the 181-tool core registry
-count; v0.30 R2 Wave B
+Current project status: v0.31 Stage 2 is complete through Wave E docs:
+ActivityLog records now carry `eventId` plus public capture metadata; tool
+arguments are redacted for secret fields, home/project paths, per-tool skip
+rules, and size caps before optional storage in private
+`Saved/UnrealMcp/CapturedToolArgs`; Task Atlas task JSON uses schema v2 ordered
+non-deduped `stepRefs` with `replayEligibility`; and `Make Tool` generates
+honest preview or skeleton composite Python user tools with sanitized captured
+defaults, per-step `policyDecision`, `isError`, and force-dry-run
+`effectiveArgsDiff` while avoiding any promise of real replay; v0.30 R2 Wave C
+makes Task Atlas `Make Tool` generate skeleton composite Python user tools
+directly under the user registry from visible core `unreal.*` critical-path
+steps, writing closed `tool.json` schemas, `pythonHandlerSha256`, `smokeArgs`,
+then running user-registry reload and smoke while preserving the 181-tool core
+registry count; v0.30 R2 Wave B
 adds Python user-tool `call_tool` / `call_tool_raw` builtins over
 `unreal.UnrealMcpCallTool.call_tool`, enabling fail-closed composition of
 visible core `unreal.*` tools; v0.29 Wave B implements the `code` category with
