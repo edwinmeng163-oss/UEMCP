@@ -33,7 +33,7 @@ and promotion sources. It is local-first: runtime task files live under
   v0.19 indexing ingests these Task Atlas markdown files as inline
   `task-atlas` KnowledgeCards so promoted workflows are searchable after the
   refresh completes.
-- `Make Tool` is row-specific and derives an `atlas_*` user-tool id from the
+- `Make Tool Set` is row-specific and derives an `atlas_*` user-tool id from the
   workflow label, then directly writes a composite Python user tool under
   `Tools/UnrealMcpPyTools/<atlas_*>/`. It does not call
   `unreal.scaffold_mcp_tool`.
@@ -50,7 +50,7 @@ and promotion sources. It is local-first: runtime task files live under
 
 ## Functional In v0.30 R2 Wave C
 
-- `Make Tool` now generates a project-local composite Python user tool instead
+- `Make Tool Set` now generates a project-local composite Python user tool instead
   of a self-extension scaffold. It filters the task `criticalPath` to visible
   core `unreal.*` tools, writes `main.py` with a `call_tool(...)` sequence,
   writes closed-schema `tool.json` with one `stepN_args` object per step,
@@ -85,7 +85,7 @@ and promotion sources. It is local-first: runtime task files live under
 - The Task Atlas window and generated `tool.json` use honest labels:
   `compositeKind=preview|skeleton` and
   `replayStatus=preview_only|partial|skeleton_pre_capture|blocked`.
-- Wave D `Make Tool` reads usable `captureRef` entries from the private
+- Wave D `Make Tool Set` reads usable `captureRef` entries from the private
   captured-args store with sha validation and emits preview composite code.
   Captured arguments are embedded only as JSON data constants parsed with
   `json.loads`; they are not spliced into Python logic, comments, or f-strings.
@@ -99,6 +99,10 @@ and promotion sources. It is local-first: runtime task files live under
 - A preview composite is still reviewable workflow draft, not real replay.
   Write-capable steps are dry-run-only through call-tool policy, and denied
   steps stop the composite with structured step evidence.
+- The Task Atlas window lists Task Atlas-generated user-registry composites in
+  `Made Tools`. It filters on `tool.json` `generator=task-atlas-composite`,
+  shows the composite kind and scaffold directory, and deletes only those
+  filtered composites after confirmation plus user-registry-root path checks.
 
 `unreal.task_label_backfill` accepts:
 
@@ -214,7 +218,7 @@ window.
 v0.19 shipped the original Task Atlas `Make Tool` scaffold creation, Task Atlas
 markdown RAG ingestion, and `unreal.task_label_backfill`.
 
-v0.30 R2 Wave C changes `Make Tool` to direct composite Python user-tool
+v0.30 R2 Wave C changes `Make Tool Set` to direct composite Python user-tool
 generation. The button derives a `user.atlas_*` tool name from the workflow
 label, writes `main.py` plus `tool.json` with a matching SHA-256, reloads the
 user registry, and smoke-tests the tool. It is intentionally Python-only and
@@ -222,10 +226,10 @@ skeleton-only in v0.30; C++ composite output is outside the Task Atlas path.
 
 v0.31 Stage 2 Wave C upgrades the task projection to schema v2.0 with ordered
 `stepRefs`, capture references, policy classification, and replay eligibility
-metadata. `Make Tool` surfaces preview-only, partial, blocked, or
+metadata. `Make Tool Set` surfaces preview-only, partial, blocked, or
 pre-capture-skeleton status.
 
-v0.31 Stage 2 Wave D upgrades `Make Tool` to preview composite generation. It
+v0.31 Stage 2 Wave D upgrades `Make Tool Set` to preview composite generation. It
 uses ordered `stepRefs` instead of deduped `criticalPath` when available, reads
 captured args through `UnrealMcp::CapturedArgsStore::ReadCapturedArgs`, embeds
 sanitized defaults as `json.loads` data constants, and reports per-step

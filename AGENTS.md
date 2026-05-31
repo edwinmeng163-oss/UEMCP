@@ -16,7 +16,7 @@ Current plugin metadata:
 ```text
 Plugins/UnrealMcp/UnrealMcp.uplugin
 FriendlyName: UEAtelier
-VersionName: 0.29.0
+VersionName: 0.31.0
 EngineVersion: 5.6.0
 Type: Editor plugin
 Required plugin: PythonScriptPlugin
@@ -187,11 +187,11 @@ ActivityLog records now carry `eventId` plus public capture metadata; tool
 arguments are redacted for secret fields, home/project paths, per-tool skip
 rules, and size caps before optional storage in private
 `Saved/UnrealMcp/CapturedToolArgs`; Task Atlas task JSON uses schema v2 ordered
-non-deduped `stepRefs` with `replayEligibility`; and `Make Tool` generates
+non-deduped `stepRefs` with `replayEligibility`; and `Make Tool Set` generates
 honest preview or skeleton composite Python user tools with sanitized captured
 defaults, per-step `policyDecision`, `isError`, and force-dry-run
 `effectiveArgsDiff` while avoiding any promise of real replay; v0.30 R2 Wave C
-makes Task Atlas `Make Tool` generate skeleton composite Python user tools
+makes Task Atlas `Make Tool Set` generate skeleton composite Python user tools
 directly under the user registry from visible core `unreal.*` critical-path
 steps, writing closed `tool.json` schemas, `pythonHandlerSha256`, `smokeArgs`,
 then running user-registry reload and smoke while preserving the 181-tool core

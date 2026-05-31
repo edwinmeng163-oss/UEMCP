@@ -10,6 +10,7 @@
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Policies/PrettyJsonPrintPolicy.h"
@@ -374,7 +375,7 @@ namespace UnrealMcp::TaskAtlasComposite
 
 		if (OutStepTools.Num() == 0)
 		{
-			OutFailureReason = TEXT("Make Tool requires at least one visible core unreal.* tool in the selected workflow critical path.");
+			OutFailureReason = TEXT("Make Tool Set requires at least one visible core unreal.* tool in the selected workflow critical path.");
 			return false;
 		}
 
@@ -1042,6 +1043,111 @@ namespace TaskAtlasWindow
 		OutPath = SourcePath;
 		return true;
 	}
+
+	bool IsTaskAtlasCompositeUserTool(const UnrealMcp::UserRegistry::FUserToolEntry& Entry, FString& OutCompositeKind)
+	{
+		OutCompositeKind.Reset();
+		if (!Entry.ToolJson.IsValid())
+		{
+			return false;
+		}
+
+		FString Generator;
+		if (!Entry.ToolJson->TryGetStringField(TEXT("generator"), Generator)
+			|| Generator != TEXT("task-atlas-composite"))
+		{
+			return false;
+		}
+
+		Entry.ToolJson->TryGetStringField(TEXT("compositeKind"), OutCompositeKind);
+		OutCompositeKind = OutCompositeKind.TrimStartAndEnd();
+		if (OutCompositeKind.IsEmpty())
+		{
+			OutCompositeKind = TEXT("unknown");
+		}
+		return true;
+	}
+
+	FString NormalizeAbsoluteDirectory(const FString& Directory)
+	{
+		if (Directory.TrimStartAndEnd().IsEmpty())
+		{
+			return FString();
+		}
+
+		FString Result = FPaths::ConvertRelativePathToFull(Directory);
+		FPaths::NormalizeFilename(Result);
+		FPaths::CollapseRelativeDirectories(Result);
+		Result.RemoveFromEnd(TEXT("/"));
+		return Result;
+	}
+
+	FString MakeRelativeDisplayPath(const FString& AbsolutePath, const FString& FallbackRoot)
+	{
+		FString ProjectDir = NormalizeAbsoluteDirectory(FPaths::ProjectDir());
+		FString RelativePath = AbsolutePath;
+		if (!ProjectDir.IsEmpty())
+		{
+			const FString ProjectPrefix = ProjectDir + TEXT("/");
+			if (AbsolutePath.StartsWith(ProjectPrefix, ESearchCase::IgnoreCase))
+			{
+				const FString ProjectBase = ProjectDir + TEXT("/");
+				if (FPaths::MakePathRelativeTo(RelativePath, *ProjectBase))
+				{
+					FPaths::NormalizeFilename(RelativePath);
+					return RelativePath;
+				}
+			}
+		}
+
+		RelativePath = AbsolutePath;
+		const FString FallbackBase = FallbackRoot + TEXT("/");
+		if (FPaths::MakePathRelativeTo(RelativePath, *FallbackBase))
+		{
+			FPaths::NormalizeFilename(RelativePath);
+			return RelativePath;
+		}
+		return AbsolutePath;
+	}
+
+	bool ResolveUserToolScaffoldDir(
+		const FString& InputScaffoldDir,
+		FString& OutScaffoldDir,
+		FString& OutRelativeScaffoldDir,
+		FString& OutFailureReason)
+	{
+		OutScaffoldDir.Reset();
+		OutRelativeScaffoldDir.Reset();
+		OutFailureReason.Reset();
+
+		const FString RootDir = NormalizeAbsoluteDirectory(UnrealMcp::UserRegistry::GetUserToolsRootDir());
+		if (RootDir.IsEmpty())
+		{
+			OutFailureReason = TEXT("User-tool registry root is empty.");
+			return false;
+		}
+
+		const FString ScaffoldDir = NormalizeAbsoluteDirectory(InputScaffoldDir);
+		if (ScaffoldDir.IsEmpty())
+		{
+			OutFailureReason = TEXT("User tool scaffold directory is empty.");
+			return false;
+		}
+
+		const FString RootPrefix = RootDir + TEXT("/");
+		if (ScaffoldDir.Equals(RootDir, ESearchCase::IgnoreCase)
+			|| !ScaffoldDir.StartsWith(RootPrefix, ESearchCase::IgnoreCase))
+		{
+			OutFailureReason = FString::Printf(
+				TEXT("Refused to delete user tool outside the registry root: %s"),
+				*ScaffoldDir);
+			return false;
+		}
+
+		OutScaffoldDir = ScaffoldDir;
+		OutRelativeScaffoldDir = MakeRelativeDisplayPath(ScaffoldDir, RootDir);
+		return true;
+	}
 }
 
 void STaskAtlasWindow::Construct(const FArguments& InArgs, FUnrealMcpModule* InOwnerModule)
@@ -1153,46 +1259,94 @@ void STaskAtlasWindow::Construct(const FArguments& InArgs, FUnrealMcpModule* InO
 				+ SSplitter::Slot()
 				.Value(0.36f)
 				[
-					SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.Padding(10.0f)
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.FillHeight(0.62f)
 					[
-						SNew(SVerticalBox)
-						+ SVerticalBox::Slot()
-						.AutoHeight()
+						SNew(SBorder)
+						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+						.Padding(10.0f)
 						[
-							SAssignNew(ToolDetailTitle, STextBlock)
-							.Text(LOCTEXT("ToolDetailTitle", "Tool Details"))
-							.Font(FAppStyle::GetFontStyle("NormalFontBold"))
-						]
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-						[
-							SAssignNew(ToolDetailMeta, STextBlock)
-							.AutoWrapText(true)
-							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-							.Text(LOCTEXT("ToolDetailMeta", "Select a tool name to inspect registry metadata."))
-						]
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-						[
-							SAssignNew(ToolDetailDescription, STextBlock)
-							.AutoWrapText(true)
-							.Text(FText::GetEmpty())
-						]
-						+ SVerticalBox::Slot()
-						.FillHeight(1.0f)
-						.Padding(0.0f, 10.0f, 0.0f, 0.0f)
-						[
-							SNew(SScrollBox)
-							+ SScrollBox::Slot()
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
 							[
-								SAssignNew(ToolDetailSchema, STextBlock)
+								SAssignNew(ToolDetailTitle, STextBlock)
+								.Text(LOCTEXT("ToolDetailTitle", "Tool Details"))
+								.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+							[
+								SAssignNew(ToolDetailMeta, STextBlock)
 								.AutoWrapText(true)
-								.Font(FAppStyle::GetFontStyle("SmallFont"))
+								.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+								.Text(LOCTEXT("ToolDetailMeta", "Select a tool name to inspect registry metadata."))
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+							[
+								SAssignNew(ToolDetailDescription, STextBlock)
+								.AutoWrapText(true)
 								.Text(FText::GetEmpty())
+							]
+							+ SVerticalBox::Slot()
+							.FillHeight(1.0f)
+							.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+							[
+								SNew(SScrollBox)
+								+ SScrollBox::Slot()
+								[
+									SAssignNew(ToolDetailSchema, STextBlock)
+									.AutoWrapText(true)
+									.Font(FAppStyle::GetFontStyle("SmallFont"))
+									.Text(FText::GetEmpty())
+								]
+							]
+						]
+					]
+					+ SVerticalBox::Slot()
+					.FillHeight(0.38f)
+					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					[
+						SNew(SBorder)
+						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+						.Padding(8.0f)
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("MadeTools", "Made Tools"))
+									.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(SButton)
+									.Text(LOCTEXT("RefreshMadeTools", "Refresh"))
+									.OnClicked(this, &STaskAtlasWindow::HandleRefreshClicked)
+								]
+							]
+							+ SVerticalBox::Slot()
+							.FillHeight(1.0f)
+							.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+							[
+								SNew(SScrollBox)
+								+ SScrollBox::Slot()
+								[
+									SAssignNew(MadeToolListBox, SVerticalBox)
+								]
 							]
 						]
 					]
@@ -1307,14 +1461,14 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 		StepTools,
 		FailureReason))
 	{
-		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Make Tool failed to generate a composite user tool.")) : FailureReason);
+		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Make Tool Set failed to generate a composite user tool.")) : FailureReason);
 		return FReply::Handled();
 	}
 
 	FString Directory;
 	if (!UnrealMcp::TaskAtlasComposite::WriteCompositeUserToolFiles(ToolId, MainPy, ToolJson, false, Directory, FailureReason))
 	{
-		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Make Tool failed to write the composite user tool.")) : FailureReason);
+		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Make Tool Set failed to write the composite user tool.")) : FailureReason);
 		return FReply::Handled();
 	}
 
@@ -1338,6 +1492,8 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 	const FUnrealMcpExecutionResult SmokeResult = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_tool_smoke"), *SmokeArguments);
 	if (SmokeResult.bIsError)
 	{
+		RefreshMadeTools();
+		RebuildLists();
 		SetStatus(FString::Printf(
 			TEXT("Composite user tool %s written at %s and reloaded (%s), but smoke failed: %s"),
 			*ToolName,
@@ -1347,6 +1503,8 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 		return FReply::Handled();
 	}
 
+	RefreshMadeTools();
+	RebuildLists();
 	SetStatus(FString::Printf(
 		TEXT("Composite user tool %s generated at %s, reloaded, and smoke-tested. %s."),
 		*ToolName,
@@ -1452,10 +1610,84 @@ FReply STaskAtlasWindow::HandleToolClicked(FString ToolName)
 	return FReply::Handled();
 }
 
+FReply STaskAtlasWindow::HandleDeleteMadeToolClicked(FString ToolName)
+{
+	if (!OwnerModule)
+	{
+		SetStatus(TEXT("Task Atlas is not connected to the module."));
+		return FReply::Handled();
+	}
+
+	UnrealMcp::UserRegistry::InitializeUserToolRegistry();
+	const UnrealMcp::UserRegistry::FUserToolEntry* Entry = UnrealMcp::UserRegistry::FindUserTool(ToolName);
+	if (!Entry)
+	{
+		SetStatus(FString::Printf(TEXT("Made tool %s was not found in the user registry."), *ToolName));
+		return FReply::Handled();
+	}
+
+	FString CompositeKind;
+	if (!TaskAtlasWindow::IsTaskAtlasCompositeUserTool(*Entry, CompositeKind))
+	{
+		SetStatus(FString::Printf(TEXT("Refused to delete %s because it is not a Task Atlas composite user tool."), *ToolName));
+		return FReply::Handled();
+	}
+
+	FString ScaffoldDir;
+	FString RelativeScaffoldDir;
+	FString FailureReason;
+	if (!TaskAtlasWindow::ResolveUserToolScaffoldDir(Entry->ScaffoldDir, ScaffoldDir, RelativeScaffoldDir, FailureReason))
+	{
+		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Refused to delete made tool because its scaffold directory is unsafe.")) : FailureReason);
+		return FReply::Handled();
+	}
+
+	const EAppReturnType::Type Response = FMessageDialog::Open(
+		EAppMsgType::YesNo,
+		FText::Format(
+			LOCTEXT("ConfirmDeleteMadeTool", "Delete Task Atlas made tool '{0}'?\n\nDirectory: {1}"),
+			FText::FromString(ToolName),
+			FText::FromString(RelativeScaffoldDir)));
+	if (Response != EAppReturnType::Yes)
+	{
+		return FReply::Handled();
+	}
+
+	const bool bDirectoryExisted = IFileManager::Get().DirectoryExists(*ScaffoldDir);
+	if (bDirectoryExisted && !IFileManager::Get().DeleteDirectory(*ScaffoldDir, false, true))
+	{
+		SetStatus(FString::Printf(TEXT("Failed to delete made tool directory for %s: %s"), *ToolName, *ScaffoldDir));
+		return FReply::Handled();
+	}
+
+	TSharedPtr<FJsonObject> ReloadArguments = MakeShared<FJsonObject>();
+	ReloadArguments->SetBoolField(TEXT("acceptChangedHashes"), true);
+	const FUnrealMcpExecutionResult ReloadResult = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_registry_reload"), *ReloadArguments);
+	if (ReloadResult.bIsError)
+	{
+		SetStatus(FString::Printf(
+			TEXT("Deleted made tool directory for %s, but registry reload failed: %s"),
+			*ToolName,
+			ReloadResult.Text.IsEmpty() ? TEXT("unreal.mcp_user_registry_reload failed.") : *ReloadResult.Text));
+		return FReply::Handled();
+	}
+
+	RefreshMadeTools();
+	RebuildLists();
+	SetStatus(FString::Printf(
+		TEXT("%s Task Atlas made tool %s (%s). Registry reload: %s"),
+		bDirectoryExisted ? TEXT("Deleted") : TEXT("Removed stale registry entry for"),
+		*ToolName,
+		*RelativeScaffoldDir,
+		ReloadResult.Text.IsEmpty() ? TEXT("ok") : *ReloadResult.Text));
+	return FReply::Handled();
+}
+
 void STaskAtlasWindow::RefreshData()
 {
 	Workflows.Reset();
 	Tools.Reset();
+	MadeTools.Reset();
 	ToolsByName.Reset();
 
 	for (const UnrealMcp::FToolRegistryEntry& Entry : UnrealMcp::GetToolRegistryEntries())
@@ -1480,6 +1712,7 @@ void STaskAtlasWindow::RefreshData()
 	{
 		return Left.Name < Right.Name;
 	});
+	RefreshMadeTools();
 
 	if (!OwnerModule)
 	{
@@ -1536,8 +1769,53 @@ void STaskAtlasWindow::RefreshData()
 		return Left.TEndUtc > Right.TEndUtc;
 	});
 
-	SetStatus(FString::Printf(TEXT("Loaded %d workflow(s) and %d visible tool(s)."), Workflows.Num(), Tools.Num()));
+	SetStatus(FString::Printf(
+		TEXT("Loaded %d workflow(s), %d visible tool(s), and %d made tool(s)."),
+		Workflows.Num(),
+		Tools.Num(),
+		MadeTools.Num()));
 	RebuildLists();
+}
+
+void STaskAtlasWindow::RefreshMadeTools()
+{
+	MadeTools.Reset();
+
+	UnrealMcp::UserRegistry::InitializeUserToolRegistry();
+	for (const UnrealMcp::UserRegistry::FUserToolEntry* Entry : UnrealMcp::UserRegistry::GetAllUserTools())
+	{
+		if (!Entry)
+		{
+			continue;
+		}
+
+		FString CompositeKind;
+		if (!TaskAtlasWindow::IsTaskAtlasCompositeUserTool(*Entry, CompositeKind))
+		{
+			continue;
+		}
+
+		FMadeToolRow Row;
+		Row.ToolName = Entry->ToolName;
+		Row.CompositeKind = CompositeKind;
+		FString FailureReason;
+		if (TaskAtlasWindow::ResolveUserToolScaffoldDir(Entry->ScaffoldDir, Row.ScaffoldDir, Row.RelativeScaffoldDir, FailureReason))
+		{
+			MadeTools.Add(Row);
+			continue;
+		}
+
+		Row.ScaffoldDir = Entry->ScaffoldDir;
+		Row.RelativeScaffoldDir = Entry->ScaffoldDir.IsEmpty()
+			? FString(TEXT("<missing scaffold dir>"))
+			: FString::Printf(TEXT("%s (outside user-tool root)"), *Entry->ScaffoldDir);
+		MadeTools.Add(Row);
+	}
+
+	MadeTools.Sort([](const FMadeToolRow& Left, const FMadeToolRow& Right)
+	{
+		return Left.ToolName < Right.ToolName;
+	});
 }
 
 void STaskAtlasWindow::RebuildLists()
@@ -1549,6 +1827,10 @@ void STaskAtlasWindow::RebuildLists()
 	if (UnusedToolListBox.IsValid())
 	{
 		UnusedToolListBox->ClearChildren();
+	}
+	if (MadeToolListBox.IsValid())
+	{
+		MadeToolListBox->ClearChildren();
 	}
 
 	TSet<FString> UsedTools;
@@ -1614,6 +1896,36 @@ void STaskAtlasWindow::RebuildLists()
 			SNew(STextBlock)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			.Text(LOCTEXT("NoUnusedTools", "No matching unused tools."))
+		];
+	}
+
+	int32 DisplayedMadeToolCount = 0;
+	for (const FMadeToolRow& Row : MadeTools)
+	{
+		if (!MadeToolMatchesSearch(Row))
+		{
+			continue;
+		}
+		++DisplayedMadeToolCount;
+		if (MadeToolListBox.IsValid())
+		{
+			MadeToolListBox->AddSlot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 5.0f)
+			[
+				BuildMadeToolRow(Row)
+			];
+		}
+	}
+
+	if (DisplayedMadeToolCount == 0 && MadeToolListBox.IsValid())
+	{
+		MadeToolListBox->AddSlot()
+		.AutoHeight()
+		[
+			SNew(STextBlock)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.Text(LOCTEXT("NoMadeTools", "No matching made tools."))
 		];
 	}
 }
@@ -1705,7 +2017,7 @@ TSharedRef<SWidget> STaskAtlasWindow::BuildWorkflowRow(const FWorkflowRow& Row)
 				+ SWrapBox::Slot()
 				[
 					SNew(SButton)
-					.Text(LOCTEXT("MakeTool", "Make Tool"))
+					.Text(LOCTEXT("MakeToolSet", "Make Tool Set"))
 					.OnClicked(this, &STaskAtlasWindow::HandleMakeToolClicked, Row)
 				]
 				+ SWrapBox::Slot()
@@ -1745,6 +2057,50 @@ TSharedRef<SWidget> STaskAtlasWindow::BuildUnusedToolRow(const FToolRow& Row)
 				SNew(STextBlock)
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				.Text(FText::FromString(FString::Printf(TEXT("[%s] [%s]"), *Row.Category, *Row.RiskLevel)))
+			]
+	];
+}
+
+TSharedRef<SWidget> STaskAtlasWindow::BuildMadeToolRow(const FMadeToolRow& Row)
+{
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(6.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FAppStyle::GetFontStyle("NormalFontBold"))
+					.Text(FText::FromString(Row.ToolName))
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.0f, 3.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Text(FText::FromString(FString::Printf(
+						TEXT("%s | %s"),
+						*Row.CompositeKind,
+						*Row.RelativeScaffoldDir)))
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("DeleteMadeTool", "Delete"))
+				.OnClicked(this, &STaskAtlasWindow::HandleDeleteMadeToolClicked, Row.ToolName)
 			]
 		];
 }
@@ -1824,6 +2180,18 @@ bool STaskAtlasWindow::ToolMatchesSearch(const FToolRow& Row) const
 		|| Row.Category.ToLower().Contains(SearchText)
 		|| Row.RiskLevel.ToLower().Contains(SearchText)
 		|| Row.Description.ToLower().Contains(SearchText);
+}
+
+bool STaskAtlasWindow::MadeToolMatchesSearch(const FMadeToolRow& Row) const
+{
+	if (SearchText.IsEmpty())
+	{
+		return true;
+	}
+
+	return Row.ToolName.ToLower().Contains(SearchText)
+		|| Row.CompositeKind.ToLower().Contains(SearchText)
+		|| Row.RelativeScaffoldDir.ToLower().Contains(SearchText);
 }
 
 void STaskAtlasWindow::SetStatus(const FString& Status)
