@@ -8,6 +8,7 @@
 #include "UnrealMcpUserToolRegistry.h"
 
 #include "Async/Async.h"
+#include "Async/Future.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/PlatformTime.h"
@@ -127,6 +128,35 @@ namespace UnrealMcp
 			return SmokeArgs;
 		}
 
+		bool UserToolSmokeExecutePythonOnGameThread(
+			const FToolHandlerRegistryEntry& HandlerEntry,
+			TSharedPtr<FJsonObject> SmokeArgs,
+			double TimeoutSeconds,
+			FUnrealMcpExecutionResult& OutExecutionResult)
+		{
+			if (IsInGameThread())
+			{
+				OutExecutionResult = UnrealMcpPythonToolBridge::ExecutePythonRegisteredTool(HandlerEntry, *SmokeArgs);
+				return true;
+			}
+
+			TSharedRef<TPromise<FUnrealMcpExecutionResult>, ESPMode::ThreadSafe> Promise = MakeShared<TPromise<FUnrealMcpExecutionResult>, ESPMode::ThreadSafe>();
+			TFuture<FUnrealMcpExecutionResult> Future = Promise->GetFuture();
+			AsyncTask(ENamedThreads::GameThread, [HandlerEntry, SmokeArgs, Promise]() mutable
+			{
+				// Defensive path only: smoke is always invoked on the game thread in practice (ExecuteToolFromEditorUI is synchronous, MCP dispatches to game thread). The shared lock is held on the calling thread while execution marshals to the game thread, so thread_local lock depth does not cover the marshalled execution. Safe because smoke runs dryRun (reload takes shared only). If a non-game-thread caller is ever added AND a composite triggers reload-apply reentrancy, move lock acquisition into the game-thread task.
+				Promise->SetValue(UnrealMcpPythonToolBridge::ExecutePythonRegisteredTool(HandlerEntry, *SmokeArgs));
+			});
+
+			if (!Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))
+			{
+				return false;
+			}
+
+			OutExecutionResult = Future.Get();
+			return true;
+		}
+
 		TSharedPtr<FJsonObject> UserToolSmokeMakeStructuredContent(
 			const FString& ToolName,
 			Extension::ELifecycleState State,
@@ -211,12 +241,8 @@ namespace UnrealMcp
 
 			FToolHandlerRegistryEntry HandlerEntry = UserToolSmokeMakeHandlerEntry(*UserToolEntry);
 			TSharedPtr<FJsonObject> SmokeArgs = UserToolSmokeMakeArguments(Arguments);
-			TFuture<FUnrealMcpExecutionResult> Future = Async(EAsyncExecution::ThreadPool, [HandlerEntry, SmokeArgs]()
-			{
-				return UnrealMcpPythonToolBridge::ExecutePythonRegisteredTool(HandlerEntry, *SmokeArgs);
-			});
-
-			if (!Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))
+			FUnrealMcpExecutionResult ExecutionResult;
+			if (!UserToolSmokeExecutePythonOnGameThread(HandlerEntry, SmokeArgs, TimeoutSeconds, ExecutionResult))
 			{
 				return MakeExecutionResult(
 					FString::Printf(TEXT("Smoke test timed out for user tool '%s' after %.2f seconds."), *ToolName, TimeoutSeconds),
@@ -224,7 +250,6 @@ namespace UnrealMcp
 					true);
 			}
 
-			const FUnrealMcpExecutionResult ExecutionResult = Future.Get();
 			const double DurationSeconds = FPlatformTime::Seconds() - StartSeconds;
 			const bool bSmokePassed = !ExecutionResult.bIsError;
 			const FString Preview = UserToolSmokeJsonPreview(ExecutionResult);

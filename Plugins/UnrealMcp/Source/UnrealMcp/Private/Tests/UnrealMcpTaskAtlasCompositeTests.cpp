@@ -9,6 +9,7 @@
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UnrealMcpCapturedArgsStore.h"
@@ -412,6 +413,18 @@ bool FUnrealMcpTaskAtlasCompositeGenerationTest::RunTest(const FString& Paramete
 				}
 			}
 		}
+	}
+
+	FJsonObject SmokeToolArguments;
+	SmokeToolArguments.SetStringField(TEXT("toolName"), CompositeToolName);
+	SmokeToolArguments.SetStringField(TEXT("dryRunArgs"), TEXT("{}"));
+	SmokeToolArguments.SetNumberField(TEXT("timeoutSeconds"), 15.0);
+	FUnrealMcpModule& Module = FModuleManager::LoadModuleChecked<FUnrealMcpModule>(TEXT("UnrealMcp"));
+	const FUnrealMcpExecutionResult SmokeToolResult = Module.ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_tool_smoke"), SmokeToolArguments);
+	TestFalse(TEXT("mcp_user_tool_smoke entrypoint succeeds for composite call_tool_raw"), SmokeToolResult.bIsError);
+	if (SmokeToolResult.bIsError)
+	{
+		AddError(SmokeToolResult.Text);
 	}
 
 	DeleteCompositeTool();
