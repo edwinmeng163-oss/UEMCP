@@ -69,6 +69,42 @@ namespace UnrealMcp
 			return HandlerEntry;
 		}
 
+		class FUserToolSmokeLockRelease
+		{
+		public:
+			explicit FUserToolSmokeLockRelease(const FString& InToolName)
+				: ToolName(InToolName)
+			{
+			}
+
+			~FUserToolSmokeLockRelease()
+			{
+				if (bSameToolLockAcquired)
+				{
+					UserToolLock::ReleaseSameToolExecution(ToolName);
+				}
+				if (bSharedLockAcquired)
+				{
+					UserToolLock::ReleaseShared();
+				}
+			}
+
+			void MarkSharedLockAcquired()
+			{
+				bSharedLockAcquired = true;
+			}
+
+			void MarkSameToolLockAcquired()
+			{
+				bSameToolLockAcquired = true;
+			}
+
+		private:
+			FString ToolName;
+			bool bSharedLockAcquired = false;
+			bool bSameToolLockAcquired = false;
+		};
+
 		TSharedPtr<FJsonObject> UserToolSmokeMakeArguments(const FJsonObject& Arguments)
 		{
 			TSharedPtr<FJsonObject> SmokeArgs = MakeShared<FJsonObject>();
@@ -152,11 +188,12 @@ namespace UnrealMcp
 					UserToolSmokeMakeStructuredContent(ToolName, Extension::ELifecycleState::SmokeFailed, false, FPlatformTime::Seconds() - StartSeconds, FString(), TEXT("timed out waiting for registry lock")),
 					true);
 			}
+			FUserToolSmokeLockRelease LockRelease(ToolName);
+			LockRelease.MarkSharedLockAcquired();
 
 			const UserRegistry::FUserToolEntry* UserToolEntry = UserRegistry::FindUserTool(ToolName);
 			if (!UserToolEntry)
 			{
-				UserToolLock::ReleaseShared();
 				return MakeExecutionResult(
 					FString::Printf(TEXT("User tool '%s' is not loaded."), *ToolName),
 					UserToolSmokeMakeStructuredContent(ToolName, Extension::ELifecycleState::SmokeFailed, false, FPlatformTime::Seconds() - StartSeconds, FString(), TEXT("user tool not loaded")),
@@ -165,21 +202,18 @@ namespace UnrealMcp
 
 			if (!UserToolLock::SerializeSameToolExecution(ToolName, TimeoutSeconds))
 			{
-				UserToolLock::ReleaseShared();
 				return MakeExecutionResult(
 					FString::Printf(TEXT("Timed out waiting to serialize user tool smoke for '%s'."), *ToolName),
 					UserToolSmokeMakeStructuredContent(ToolName, Extension::ELifecycleState::SmokeFailed, false, FPlatformTime::Seconds() - StartSeconds, FString(), TEXT("timed out waiting for same-tool execution lock")),
 					true);
 			}
+			LockRelease.MarkSameToolLockAcquired();
 
 			FToolHandlerRegistryEntry HandlerEntry = UserToolSmokeMakeHandlerEntry(*UserToolEntry);
 			TSharedPtr<FJsonObject> SmokeArgs = UserToolSmokeMakeArguments(Arguments);
-			TFuture<FUnrealMcpExecutionResult> Future = Async(EAsyncExecution::ThreadPool, [HandlerEntry, SmokeArgs, ToolName]()
+			TFuture<FUnrealMcpExecutionResult> Future = Async(EAsyncExecution::ThreadPool, [HandlerEntry, SmokeArgs]()
 			{
-				FUnrealMcpExecutionResult Result = UnrealMcpPythonToolBridge::ExecutePythonRegisteredTool(HandlerEntry, *SmokeArgs);
-				UserToolLock::ReleaseSameToolExecution(ToolName);
-				UserToolLock::ReleaseShared();
-				return Result;
+				return UnrealMcpPythonToolBridge::ExecutePythonRegisteredTool(HandlerEntry, *SmokeArgs);
 			});
 
 			if (!Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))

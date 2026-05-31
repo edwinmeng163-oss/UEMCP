@@ -502,11 +502,21 @@ bool FUnrealMcpUserToolSmoke_PassFailTest::RunTest(const FString& Parameters)
 	SmokeArgs.SetNumberField(TEXT("timeoutSeconds"), 10.0);
 	FUnrealMcpExecutionResult PassResult = UnrealMcp::UnrealMcpUserToolSmokeTool::Execute(SmokeArgs);
 	TestFalse(TEXT("smoke pass succeeds"), PassResult.bIsError);
+	TestFalse(TEXT("smoke pass releases current thread lock"), UnrealMcp::UserToolLock::IsHeldByCurrentThread());
+
+	FJsonObject ReloadArgs;
+	FUnrealMcpExecutionResult ReloadAfterSmokeResult = UnrealMcp::UnrealMcpUserRegistryReloadTool::Execute(ReloadArgs);
+	TestFalse(TEXT("reload after smoke is not denied by stale current-thread lock"), ReloadAfterSmokeResult.bIsError);
+	TestNotEqual(
+		TEXT("reload after smoke does not report reentrant denial"),
+		UserRegistryStructuredString(ReloadAfterSmokeResult, TEXT("errorCode")),
+		TEXT("user_registry_reload_reentrant_apply_denied"));
 
 	TestTrue(TEXT("smoke fail fixture writes"), UserRegistryWriteTool(ToolId, UserRegistryRaisePy, UserRegistryRaiseSha));
 	UserRegistryReload();
 	FUnrealMcpExecutionResult FailResult = UnrealMcp::UnrealMcpUserToolSmokeTool::Execute(SmokeArgs);
 	TestTrue(TEXT("smoke failure is error"), FailResult.bIsError);
+	TestFalse(TEXT("smoke failure releases current thread lock"), UnrealMcp::UserToolLock::IsHeldByCurrentThread());
 	TestTrue(TEXT("executionError populated"), FailResult.StructuredContent.IsValid() && FailResult.StructuredContent->HasField(TEXT("executionError")));
 
 	UserRegistryDeleteTestDirs();
