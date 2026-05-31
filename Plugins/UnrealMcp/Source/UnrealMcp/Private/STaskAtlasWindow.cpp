@@ -1,5 +1,6 @@
 #include "STaskAtlasWindow.h"
 
+#include "UnrealMcpCapturedArgsStore.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpHashUtils.h"
 #include "UnrealMcpToolRegistry.h"
@@ -32,6 +33,21 @@ namespace UnrealMcp::TaskAtlasComposite
 {
 	namespace
 	{
+		struct FCompositeStep
+		{
+			FString ToolName;
+			int32 Ordinal = 0;
+			FString EventId;
+			FString CaptureRef;
+			FString CaptureStatus;
+			FString PolicyClassAtCapture;
+			FString CaptureReadStatus = TEXT("not_applicable");
+			FString CaptureReadError;
+			TSharedPtr<FJsonObject> CapturedArgs;
+			bool bFromStepRef = false;
+			bool bHasCapturedArgs = false;
+		};
+
 		bool TaskAtlasCompositeIsValidToolId(const FString& ToolId, FString& OutReason)
 		{
 			if (ToolId.IsEmpty())
@@ -82,6 +98,18 @@ namespace UnrealMcp::TaskAtlasComposite
 				{
 					Result += TEXT("\\\"");
 				}
+				else if (Character == TEXT('\n'))
+				{
+					Result += TEXT("\\n");
+				}
+				else if (Character == TEXT('\r'))
+				{
+					Result += TEXT("\\r");
+				}
+				else if (Character == TEXT('\t'))
+				{
+					Result += TEXT("\\t");
+				}
 				else
 				{
 					Result.AppendChar(Character);
@@ -99,7 +127,97 @@ namespace UnrealMcp::TaskAtlasComposite
 			FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
 			return Output;
 		}
-	}
+
+		bool TaskAtlasCompositeIsReplayableCaptureStatus(const FString& CaptureStatus)
+		{
+			const FString Normalized = CaptureStatus.TrimStartAndEnd().ToLower();
+			return Normalized == TEXT("captured") || Normalized == TEXT("redacted");
+		}
+
+		void TaskAtlasCompositeReadCapturedArgs(FCompositeStep& Step)
+		{
+			if (Step.CaptureRef.TrimStartAndEnd().IsEmpty()
+				|| !TaskAtlasCompositeIsReplayableCaptureStatus(Step.CaptureStatus))
+			{
+				Step.CaptureReadStatus = TEXT("placeholder");
+				return;
+			}
+
+			TSharedPtr<FJsonObject> CapturedContent;
+			FString ReadError;
+			if (!UnrealMcp::CapturedArgsStore::ReadCapturedArgs(Step.CaptureRef, CapturedContent, ReadError))
+			{
+				Step.CaptureReadStatus = TEXT("read_failed");
+				Step.CaptureReadError = ReadError.TrimStartAndEnd();
+				return;
+			}
+
+			const TSharedPtr<FJsonObject>* SanitizedArgs = nullptr;
+			if (!CapturedContent.IsValid()
+				|| !CapturedContent->TryGetObjectField(TEXT("sanitizedArguments"), SanitizedArgs)
+				|| !SanitizedArgs
+				|| !(*SanitizedArgs).IsValid())
+			{
+				Step.CaptureReadStatus = TEXT("read_failed");
+				Step.CaptureReadError = TEXT("Captured args file is missing object field 'sanitizedArguments'.");
+				return;
+			}
+
+			Step.CapturedArgs = *SanitizedArgs;
+			Step.bHasCapturedArgs = true;
+			Step.CaptureReadStatus = TEXT("captured");
+		}
+
+		FString TaskAtlasCompositeGetStringField(const TSharedPtr<FJsonObject>& Object, const TCHAR* FieldName)
+		{
+			FString Value;
+			if (Object.IsValid())
+			{
+				Object->TryGetStringField(FieldName, Value);
+			}
+			return Value.TrimStartAndEnd();
+		}
+
+		int32 TaskAtlasCompositeGetOrdinalField(const TSharedPtr<FJsonObject>& Object, int32 DefaultOrdinal)
+		{
+			double Ordinal = static_cast<double>(DefaultOrdinal);
+			if (Object.IsValid())
+			{
+				Object->TryGetNumberField(TEXT("ordinal"), Ordinal);
+			}
+			return FMath::TruncToInt(Ordinal);
+		}
+
+		TSharedPtr<FJsonObject> TaskAtlasCompositeStepToJson(const FCompositeStep& Step)
+		{
+			TSharedPtr<FJsonObject> StepObject = MakeShared<FJsonObject>();
+			StepObject->SetNumberField(TEXT("ordinal"), Step.Ordinal);
+			StepObject->SetStringField(TEXT("tool"), Step.ToolName);
+			if (!Step.EventId.IsEmpty())
+			{
+				StepObject->SetStringField(TEXT("eventId"), Step.EventId);
+			}
+			if (!Step.CaptureStatus.IsEmpty())
+			{
+				StepObject->SetStringField(TEXT("captureStatus"), Step.CaptureStatus);
+			}
+			if (!Step.CaptureRef.IsEmpty())
+			{
+				StepObject->SetStringField(TEXT("captureRef"), Step.CaptureRef);
+			}
+			if (!Step.PolicyClassAtCapture.IsEmpty())
+			{
+				StepObject->SetStringField(TEXT("policyClassAtCapture"), Step.PolicyClassAtCapture);
+			}
+			StepObject->SetBoolField(TEXT("hasCapturedArgs"), Step.bHasCapturedArgs);
+			StepObject->SetStringField(TEXT("captureReadStatus"), Step.CaptureReadStatus);
+			if (!Step.CaptureReadError.IsEmpty())
+			{
+				StepObject->SetStringField(TEXT("captureReadError"), Step.CaptureReadError);
+			}
+			return StepObject;
+		}
+		}
 
 	FString NormalizeReplayEligibility(const FString& ReplayEligibility)
 	{
@@ -114,11 +232,6 @@ namespace UnrealMcp::TaskAtlasComposite
 		return TEXT("skeleton_pre_capture");
 	}
 
-	FString CompositeKindForReplayEligibility(const FString& ReplayEligibility)
-	{
-		return NormalizeReplayEligibility(ReplayEligibility) == TEXT("preview_ready") ? FString(TEXT("preview")) : FString(TEXT("skeleton"));
-	}
-
 	FString ReplayStatusForReplayEligibility(const FString& ReplayEligibility)
 	{
 		const FString Normalized = NormalizeReplayEligibility(ReplayEligibility);
@@ -131,19 +244,19 @@ namespace UnrealMcp::TaskAtlasComposite
 		const FString Reason = ReplayUnavailableReason.TrimStartAndEnd();
 		if (Status == TEXT("preview_only"))
 		{
-			return TEXT("preview_only: captured stepRefs are available, but Wave C still emits a skeleton main.py");
+			return TEXT("preview_only: generated a captured-argument preview composite; write-capable steps remain dry-run only");
 		}
 		if (Status == TEXT("partial"))
 		{
 			return Reason.IsEmpty()
-				? FString(TEXT("partial: generated skeleton because at least one step lacks captured arguments"))
-				: FString::Printf(TEXT("partial: generated skeleton because %s"), *Reason);
+				? FString(TEXT("partial: generated a preview composite with placeholders because at least one step lacks captured arguments"))
+				: FString::Printf(TEXT("partial: generated a preview composite with placeholders because %s"), *Reason);
 		}
 		if (Status == TEXT("blocked"))
 		{
 			return Reason.IsEmpty()
-				? FString(TEXT("blocked: generated skeleton because at least one step is denied by call_tool policy"))
-				: FString::Printf(TEXT("blocked: generated skeleton because %s"), *Reason);
+				? FString(TEXT("blocked: generated a preview composite, but at least one step is denied by call_tool policy"))
+				: FString::Printf(TEXT("blocked: generated a preview composite, but %s"), *Reason);
 		}
 		return Reason.IsEmpty()
 			? FString(TEXT("skeleton_pre_capture: generated skeleton because no captured arguments are available"))
@@ -177,6 +290,7 @@ namespace UnrealMcp::TaskAtlasComposite
 		const FString& ReplayEligibility,
 		const FString& ReplayUnavailableReason,
 		const TArray<FString>& CriticalPath,
+		const TArray<TSharedPtr<FJsonValue>>& StepRefs,
 		const TSet<FString>& VisibleCoreToolNames,
 		FString& OutToolName,
 		FString& OutMainPy,
@@ -199,19 +313,63 @@ namespace UnrealMcp::TaskAtlasComposite
 			return false;
 		}
 
-		TSet<FString> SeenTools;
-		for (const FString& RawToolName : CriticalPath)
+		TArray<FCompositeStep> Steps;
+		Steps.Reserve(StepRefs.Num() > 0 ? StepRefs.Num() : CriticalPath.Num());
+
+		for (int32 Index = 0; Index < StepRefs.Num(); ++Index)
 		{
-			const FString ToolName = RawToolName.TrimStartAndEnd();
-			if (!ToolName.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive)
-				|| !VisibleCoreToolNames.Contains(ToolName)
-				|| SeenTools.Contains(ToolName))
+			const TSharedPtr<FJsonValue>& StepValue = StepRefs[Index];
+			const TSharedPtr<FJsonObject> StepObject = StepValue.IsValid() && StepValue->Type == EJson::Object ? StepValue->AsObject() : nullptr;
+			if (!StepObject.IsValid())
 			{
 				continue;
 			}
 
-			SeenTools.Add(ToolName);
-			OutStepTools.Add(ToolName);
+			FCompositeStep Step;
+			Step.bFromStepRef = true;
+			Step.Ordinal = TaskAtlasCompositeGetOrdinalField(StepObject, Index);
+			Step.ToolName = TaskAtlasCompositeGetStringField(StepObject, TEXT("tool"));
+			Step.EventId = TaskAtlasCompositeGetStringField(StepObject, TEXT("eventId"));
+			Step.CaptureStatus = TaskAtlasCompositeGetStringField(StepObject, TEXT("captureStatus"));
+			Step.CaptureRef = TaskAtlasCompositeGetStringField(StepObject, TEXT("captureRef"));
+			Step.PolicyClassAtCapture = TaskAtlasCompositeGetStringField(StepObject, TEXT("policyClassAtCapture"));
+			if (!Step.ToolName.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive)
+				|| !VisibleCoreToolNames.Contains(Step.ToolName))
+			{
+				continue;
+			}
+
+			TaskAtlasCompositeReadCapturedArgs(Step);
+			Steps.Add(Step);
+		}
+
+		TSet<FString> SeenTools;
+		if (Steps.Num() == 0)
+		{
+			for (const FString& RawToolName : CriticalPath)
+			{
+				const FString ToolName = RawToolName.TrimStartAndEnd();
+				if (!ToolName.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive)
+					|| !VisibleCoreToolNames.Contains(ToolName)
+					|| SeenTools.Contains(ToolName))
+				{
+					continue;
+				}
+
+				SeenTools.Add(ToolName);
+				FCompositeStep Step;
+				Step.ToolName = ToolName;
+				Step.Ordinal = Steps.Num();
+				Step.CaptureReadStatus = TEXT("placeholder");
+				Steps.Add(Step);
+			}
+		}
+
+		bool bHasAnyCapturedArgs = false;
+		for (const FCompositeStep& Step : Steps)
+		{
+			OutStepTools.Add(Step.ToolName);
+			bHasAnyCapturedArgs = bHasAnyCapturedArgs || Step.bHasCapturedArgs;
 		}
 
 		if (OutStepTools.Num() == 0)
@@ -222,41 +380,130 @@ namespace UnrealMcp::TaskAtlasComposite
 
 		OutToolName = FString::Printf(TEXT("user.%s"), *ToolId);
 		const FString NormalizedReplayEligibility = NormalizeReplayEligibility(ReplayEligibility);
-		const FString CompositeKind = CompositeKindForReplayEligibility(NormalizedReplayEligibility);
+		const FString CompositeKind = bHasAnyCapturedArgs ? FString(TEXT("preview")) : FString(TEXT("skeleton"));
 		const FString ReplayStatus = ReplayStatusForReplayEligibility(NormalizedReplayEligibility);
 		const FString ReplaySummary = ReplayStatusSummary(NormalizedReplayEligibility, ReplayUnavailableReason);
 
-		OutMainPy += TEXT("# Generated by Task Atlas as a composite user tool skeleton.\n");
+		TSharedPtr<FJsonObject> CapturedDefaults = MakeShared<FJsonObject>();
+		TSharedPtr<FJsonObject> CapturedMeta = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> StepRefValues;
+		for (int32 Index = 0; Index < Steps.Num(); ++Index)
+		{
+			const FString StepKey = FString::Printf(TEXT("step%d"), Index);
+			const FCompositeStep& Step = Steps[Index];
+			if (Step.bHasCapturedArgs)
+			{
+				CapturedDefaults->SetObjectField(StepKey, Step.CapturedArgs);
+			}
+			CapturedMeta->SetObjectField(StepKey, TaskAtlasCompositeStepToJson(Step));
+			StepRefValues.Add(MakeShared<FJsonValueObject>(TaskAtlasCompositeStepToJson(Step)));
+		}
+
+		const FString CapturedDefaultsJson = JsonObjectToCondensedString(CapturedDefaults);
+		const FString CapturedMetaJson = JsonObjectToCondensedString(CapturedMeta);
+
+		OutMainPy += TEXT("# Generated by Task Atlas as a preview composite user tool.\n");
 		OutMainPy += FString::Printf(TEXT("# Replay status: %s.\n"), *ReplaySummary);
-		OutMainPy += TEXT("# Fill stepN_args with reviewed arguments; Wave C does not generate real-argument replay code.\n\n");
+		OutMainPy += TEXT("# Preview only: read-only/dry-run steps execute, and write-capable steps are forced to dryRun by call_tool policy.\n");
+		OutMainPy += TEXT("# This is not real replay; captured arguments are embedded only as JSON data defaults.\n\n");
+		OutMainPy += TEXT("import json\n\n");
+		OutMainPy += FString::Printf(TEXT("_CAPTURED_JSON = %s\n"), *TaskAtlasCompositePythonQuote(CapturedDefaultsJson));
+		OutMainPy += FString::Printf(TEXT("_CAPTURED_META_JSON = %s\n"), *TaskAtlasCompositePythonQuote(CapturedMetaJson));
+		OutMainPy += TEXT("_CAPTURED = json.loads(_CAPTURED_JSON)\n");
+		OutMainPy += TEXT("_CAPTURED_META = json.loads(_CAPTURED_META_JSON)\n");
+		OutMainPy += TEXT("_MISSING = object()\n\n");
+		OutMainPy += TEXT("def _json_copy(value):\n");
+		OutMainPy += TEXT("    return json.loads(json.dumps(value or {}))\n\n");
+		OutMainPy += TEXT("def _step_args(args, override_key, captured_key):\n");
+		OutMainPy += TEXT("    if override_key in args and args.get(override_key) is not None:\n");
+		OutMainPy += TEXT("        value = args.get(override_key)\n");
+		OutMainPy += TEXT("    else:\n");
+		OutMainPy += TEXT("        value = _CAPTURED.get(captured_key, {})\n");
+		OutMainPy += TEXT("    if not isinstance(value, dict):\n");
+		OutMainPy += TEXT("        value = {}\n");
+		OutMainPy += TEXT("    return _json_copy(value)\n\n");
+		OutMainPy += TEXT("def _effective_args(requested, result):\n");
+		OutMainPy += TEXT("    effective = _json_copy(requested)\n");
+		OutMainPy += TEXT("    meta = result.get(\"meta\", {}) if isinstance(result, dict) else {}\n");
+		OutMainPy += TEXT("    if meta.get(\"forcedDryRun\") and effective.get(\"dryRun\") is not True:\n");
+		OutMainPy += TEXT("        effective[\"dryRun\"] = True\n");
+		OutMainPy += TEXT("    return effective\n\n");
+		OutMainPy += TEXT("def _args_diff(requested, effective):\n");
+		OutMainPy += TEXT("    requested = requested or {}\n");
+		OutMainPy += TEXT("    effective = effective or {}\n");
+		OutMainPy += TEXT("    diff = {}\n");
+		OutMainPy += TEXT("    for key in sorted(set(requested.keys()) | set(effective.keys())):\n");
+		OutMainPy += TEXT("        requested_value = requested[key] if key in requested else _MISSING\n");
+		OutMainPy += TEXT("        effective_value = effective[key] if key in effective else _MISSING\n");
+		OutMainPy += TEXT("        if requested_value == effective_value:\n");
+		OutMainPy += TEXT("            continue\n");
+		OutMainPy += TEXT("        entry = {}\n");
+		OutMainPy += TEXT("        if requested_value is _MISSING:\n");
+		OutMainPy += TEXT("            entry[\"requestedMissing\"] = True\n");
+		OutMainPy += TEXT("        else:\n");
+		OutMainPy += TEXT("            entry[\"requested\"] = requested_value\n");
+		OutMainPy += TEXT("        if effective_value is _MISSING:\n");
+		OutMainPy += TEXT("            entry[\"effectiveMissing\"] = True\n");
+		OutMainPy += TEXT("        else:\n");
+		OutMainPy += TEXT("            entry[\"effective\"] = effective_value\n");
+		OutMainPy += TEXT("        diff[key] = entry\n");
+		OutMainPy += TEXT("    return diff\n\n");
+		OutMainPy += TEXT("def _record_step(tool, captured_key, result, requested, effective):\n");
+		OutMainPy += TEXT("    result = result or {}\n");
+		OutMainPy += TEXT("    meta = result.get(\"meta\", {}) if isinstance(result, dict) else {}\n");
+		OutMainPy += TEXT("    step = {\n");
+		OutMainPy += TEXT("        \"tool\": tool,\n");
+		OutMainPy += TEXT("        \"policyDecision\": meta.get(\"policyDecision\", \"unknown\"),\n");
+		OutMainPy += TEXT("        \"isError\": bool(result.get(\"isError\", True)),\n");
+		OutMainPy += TEXT("    }\n");
+		OutMainPy += TEXT("    if meta.get(\"forcedDryRun\"):\n");
+		OutMainPy += TEXT("        step[\"forcedDryRun\"] = True\n");
+		OutMainPy += TEXT("    capture = _CAPTURED_META.get(captured_key)\n");
+		OutMainPy += TEXT("    if capture:\n");
+		OutMainPy += TEXT("        step[\"capture\"] = capture\n");
+		OutMainPy += TEXT("    diff = _args_diff(requested, effective)\n");
+		OutMainPy += TEXT("    if diff:\n");
+		OutMainPy += TEXT("        step[\"effectiveArgsDiff\"] = diff\n");
+		OutMainPy += TEXT("    return step\n\n");
 		OutMainPy += TEXT("def execute(args):\n");
 		OutMainPy += TEXT("    args = args or {}\n");
 		OutMainPy += TEXT("    steps = []\n");
-		for (int32 Index = 0; Index < OutStepTools.Num(); ++Index)
+		for (int32 Index = 0; Index < Steps.Num(); ++Index)
 		{
 			const FString StepName = FString::Printf(TEXT("step%d_args"), Index);
+			const FString CapturedKey = FString::Printf(TEXT("step%d"), Index);
 			const FString StepIndex = FString::FromInt(Index);
-			const FString QuotedTool = TaskAtlasCompositePythonQuote(OutStepTools[Index]);
+			const FString QuotedTool = TaskAtlasCompositePythonQuote(Steps[Index].ToolName);
 			const FString QuotedStepName = TaskAtlasCompositePythonQuote(StepName);
-			OutMainPy += FString::Printf(TEXT("    r%d = call_tool(%s, args.get(%s, {}))\n"), Index, *QuotedTool, *QuotedStepName);
-			OutMainPy += FString::Printf(TEXT("    steps.append({\"tool\": %s, \"policy\": r%d[\"meta\"][\"policyDecision\"], \"isError\": r%d.get(\"isError\", False)})\n"), *QuotedTool, Index, Index);
+			const FString QuotedCapturedKey = TaskAtlasCompositePythonQuote(CapturedKey);
+			OutMainPy += FString::Printf(TEXT("    step%d_requested = _step_args(args, %s, %s)\n"), Index, *QuotedStepName, *QuotedCapturedKey);
+			OutMainPy += FString::Printf(TEXT("    r%d = call_tool_raw(%s, step%d_requested)\n"), Index, *QuotedTool, Index);
+			OutMainPy += FString::Printf(TEXT("    step%d_effective = _effective_args(step%d_requested, r%d)\n"), Index, Index, Index);
+			OutMainPy += FString::Printf(TEXT("    steps.append(_record_step(%s, %s, r%d, step%d_requested, step%d_effective))\n"), *QuotedTool, *QuotedCapturedKey, Index, Index, Index);
 			OutMainPy += FString::Printf(TEXT("    if r%d.get(\"isError\", False):\n"), Index);
 			OutMainPy += FString::Printf(TEXT("        return {\"isError\": True, \"text\": \"composite stopped at step %s\", \"structuredContent\": {\"steps\": steps}}\n"), *StepIndex);
 		}
-		OutMainPy += FString::Printf(TEXT("    return {\"isError\": False, \"text\": \"composite executed %d steps\", \"structuredContent\": {\"steps\": steps}}\n"), OutStepTools.Num());
+		OutMainPy += FString::Printf(TEXT("    return {\"isError\": False, \"text\": \"preview composite executed %d steps\", \"structuredContent\": {\"steps\": steps}}\n"), Steps.Num());
 
 		OutMainPySha256 = ComputePythonHandlerSha256(OutMainPy);
 
 		TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
-		for (int32 Index = 0; Index < OutStepTools.Num(); ++Index)
+		for (int32 Index = 0; Index < Steps.Num(); ++Index)
 		{
 			const FString StepName = FString::Printf(TEXT("step%d_args"), Index);
 			TSharedPtr<FJsonObject> StepSchema = MakeShared<FJsonObject>();
 			StepSchema->SetStringField(TEXT("type"), TEXT("object"));
-			StepSchema->SetStringField(TEXT("description"), FString::Printf(TEXT("Arguments forwarded to %s. Placeholder skeleton; fill reviewed real args before replay."), *OutStepTools[Index]));
+			StepSchema->SetStringField(
+				TEXT("description"),
+				Steps[Index].bHasCapturedArgs
+					? FString::Printf(TEXT("Optional override for %s. If omitted, the sanitized captured arguments for step %d are used."), *Steps[Index].ToolName, Index)
+					: FString::Printf(TEXT("Arguments forwarded to %s. Placeholder step; fill reviewed args before preview."), *Steps[Index].ToolName));
 			StepSchema->SetBoolField(TEXT("additionalProperties"), true);
 			Properties->SetObjectField(StepName, StepSchema);
-			OutSmokeArgs->SetObjectField(StepName, MakeShared<FJsonObject>());
+			if (!Steps[Index].bHasCapturedArgs)
+			{
+				OutSmokeArgs->SetObjectField(StepName, MakeShared<FJsonObject>());
+			}
 		}
 
 		TSharedPtr<FJsonObject> InputSchema = MakeShared<FJsonObject>();
@@ -286,6 +533,7 @@ namespace UnrealMcp::TaskAtlasComposite
 		ToolJson->SetStringField(TEXT("replayUnavailableReason"), ReplayUnavailableReason.TrimStartAndEnd());
 		ToolJson->SetStringField(TEXT("taskId"), TaskId.TrimStartAndEnd());
 		ToolJson->SetArrayField(TEXT("criticalPath"), CriticalPathValues);
+		ToolJson->SetArrayField(TEXT("stepRefs"), StepRefValues);
 
 		OutToolJson = TaskAtlasCompositeJsonToString(ToolJson);
 		return true;
@@ -1035,6 +1283,12 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 	TSharedPtr<FJsonObject> SmokeArgs;
 	TArray<FString> StepTools;
 	FString FailureReason;
+	TArray<TSharedPtr<FJsonValue>> StepRefs;
+	const TArray<TSharedPtr<FJsonValue>>* StepRefArray = nullptr;
+	if (Row.Json.IsValid() && Row.Json->TryGetArrayField(TEXT("stepRefs"), StepRefArray) && StepRefArray)
+	{
+		StepRefs = *StepRefArray;
+	}
 	if (!UnrealMcp::TaskAtlasComposite::BuildCompositeUserToolFiles(
 		ToolId,
 		Title,
@@ -1043,6 +1297,7 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 		ReplayEligibility,
 		Row.ReplayUnavailableReason,
 		Row.CriticalPath,
+		StepRefs,
 		VisibleCoreToolNames,
 		ToolName,
 		MainPy,

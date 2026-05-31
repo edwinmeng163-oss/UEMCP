@@ -21,6 +21,8 @@ namespace UnrealMcp::UserToolLock
 		FRWLock GUserToolRWLock;
 		FCriticalSection GPerToolGuardsLock;
 		TMap<FString, FPerToolGuard*> GPerToolGuards;
+		static thread_local int32 GCurrentThreadSharedDepth = 0;
+		static thread_local int32 GCurrentThreadExclusiveDepth = 0;
 
 		bool UserToolLockShouldKeepTrying(double StartSeconds, double TimeoutSeconds)
 		{
@@ -44,20 +46,30 @@ namespace UnrealMcp::UserToolLock
 	void AcquireExclusive()
 	{
 		GUserToolRWLock.WriteLock();
+		++GCurrentThreadExclusiveDepth;
 	}
 
 	void ReleaseExclusive()
 	{
+		if (GCurrentThreadExclusiveDepth > 0)
+		{
+			--GCurrentThreadExclusiveDepth;
+		}
 		GUserToolRWLock.WriteUnlock();
 	}
 
 	void AcquireShared()
 	{
 		GUserToolRWLock.ReadLock();
+		++GCurrentThreadSharedDepth;
 	}
 
 	void ReleaseShared()
 	{
+		if (GCurrentThreadSharedDepth > 0)
+		{
+			--GCurrentThreadSharedDepth;
+		}
 		GUserToolRWLock.ReadUnlock();
 	}
 
@@ -68,6 +80,7 @@ namespace UnrealMcp::UserToolLock
 		{
 			if (GUserToolRWLock.TryWriteLock())
 			{
+				++GCurrentThreadExclusiveDepth;
 				return true;
 			}
 			FPlatformProcess::SleepNoStats(0.005f);
@@ -84,6 +97,7 @@ namespace UnrealMcp::UserToolLock
 		{
 			if (GUserToolRWLock.TryReadLock())
 			{
+				++GCurrentThreadSharedDepth;
 				return true;
 			}
 			FPlatformProcess::SleepNoStats(0.005f);
@@ -91,6 +105,21 @@ namespace UnrealMcp::UserToolLock
 		while (UserToolLockShouldKeepTrying(StartSeconds, TimeoutSeconds));
 
 		return false;
+	}
+
+	bool IsSharedHeldByCurrentThread()
+	{
+		return GCurrentThreadSharedDepth > 0;
+	}
+
+	bool IsExclusiveHeldByCurrentThread()
+	{
+		return GCurrentThreadExclusiveDepth > 0;
+	}
+
+	bool IsHeldByCurrentThread()
+	{
+		return IsSharedHeldByCurrentThread() || IsExclusiveHeldByCurrentThread();
 	}
 
 	bool SerializeSameToolExecution(const FString& ToolName, double TimeoutSeconds)

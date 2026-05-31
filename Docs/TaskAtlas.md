@@ -72,8 +72,8 @@ and promotion sources. It is local-first: runtime task files live under
 - Task files now use schema v2.0. The ActivityLog reader carries top-level
   `eventId` plus payload `captureStatus` and `captureRef` into the task model.
 - `stepRefs` are ordered tool-call steps. They are not deduped, so repeated
-  calls to the same tool are preserved for Wave D. `criticalPath` remains the
-  deduped human summary.
+  calls to the same tool are preserved for generated composites. `criticalPath`
+  remains the deduped human summary.
 - Each `stepRefs` entry includes `ordinal`, `eventId`, `sessionId`, `tool`,
   `ts`, `isError`, `captureStatus`, optional `captureRef`, and
   `policyClassAtCapture` from the same call-tool policy used by Python user
@@ -86,8 +86,18 @@ and promotion sources. It is local-first: runtime task files live under
 - The Task Atlas window and generated `tool.json` use honest labels:
   `compositeKind=preview|skeleton` and
   `replayStatus=preview_only|partial|skeleton_pre_capture|blocked`.
-  Wave C still emits a skeleton `main.py`; real captured-argument replay is
-  deferred to Wave D.
+- Wave D `Make Tool` reads replayable `captureRef` entries from the private
+  captured-args store with sha validation and emits preview composite code.
+  Captured arguments are embedded only as JSON data constants parsed with
+  `json.loads`; they are not spliced into Python logic, comments, or f-strings.
+  Steps without readable captured args remain placeholders.
+- Generated preview composites call through the same user-tool `call_tool_raw`
+  policy seam, record each step's runtime `policyDecision` and `isError`, and
+  include `effectiveArgsDiff` when force-dry-run changes the effective arguments
+  such as adding `dryRun:true`.
+- A preview composite is still reviewable workflow draft, not real replay.
+  Write-capable steps are dry-run-only through call-tool policy, and denied
+  steps stop the composite with structured step evidence.
 
 `unreal.task_label_backfill` accepts:
 
@@ -214,3 +224,10 @@ v0.31 Stage 2 Wave C upgrades the task projection to schema v2.0 with ordered
 metadata. `Make Tool` surfaces preview-only, partial, blocked, or
 pre-capture-skeleton status, but still does not generate real captured-argument
 replay code.
+
+v0.31 Stage 2 Wave D upgrades `Make Tool` to preview composite generation. It
+uses ordered `stepRefs` instead of deduped `criticalPath` when available, reads
+captured args through `UnrealMcp::CapturedArgsStore::ReadCapturedArgs`, embeds
+sanitized defaults as `json.loads` data constants, and reports per-step
+`policyDecision`, `isError`, and force-dry-run `effectiveArgsDiff`. Real replay
+remains deferred.

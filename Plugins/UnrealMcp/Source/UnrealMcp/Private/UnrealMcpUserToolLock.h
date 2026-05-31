@@ -28,6 +28,9 @@ namespace UnrealMcp::UserToolLock
 
 	UNREALMCP_API bool TryAcquireExclusive(double TimeoutSeconds);
 	UNREALMCP_API bool TryAcquireShared(double TimeoutSeconds);
+	UNREALMCP_API bool IsSharedHeldByCurrentThread();
+	UNREALMCP_API bool IsExclusiveHeldByCurrentThread();
+	UNREALMCP_API bool IsHeldByCurrentThread();
 
 	UNREALMCP_API bool SerializeSameToolExecution(const FString& ToolName, double TimeoutSeconds);
 	UNREALMCP_API void ReleaseSameToolExecution(const FString& ToolName);

@@ -299,7 +299,7 @@ Behavior notes:
 - The conversation history is persisted at `Saved/UnrealMcp/ChatHistory.json`.
 - High-level activity recording is opt-in and starts only after `unreal.skill_recording_start`; while active, it writes local JSONL events under `Saved/UnrealMcp/ActivityLog/*.jsonl`. It records mutating MCP tool call/result metadata and a periodic editor heartbeat roughly once per minute, skips read-only/status tools, and does not store tool result text previews.
 - Task Atlas extraction writes derived local task files under `Saved/UnrealMcp/Tasks/<taskId>.json`; these files are regenerated from ActivityLog and preserve rating/pin choices plus LLM/user label metadata when no explicit user intent exists.
-- The Task Atlas window can promote a selected task to a skill draft through `unreal.skill_distill_from_activity`, write a local markdown RAG source under `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/` and refresh the knowledge index, or create a local Make Tool scaffold draft from a workflow.
+- The Task Atlas window can promote a selected task to a skill draft through `unreal.skill_distill_from_activity`, write a local markdown RAG source under `Saved/UnrealMcp/KnowledgeSources/TaskAtlas/` and refresh the knowledge index, or create a local Make Tool preview composite from ordered captured-argument stepRefs.
 - `unreal.task_label_backfill` can infer short labels for unpinned placeholder tasks through the configured Anthropic provider. It skips pinned tasks, user-edited labels, and provider-missing environments safely.
 - On the first AI turn after the panel reloads, Unreal MCP now also replays a small, compact slice of the persisted local transcript back to the model for continuity, so saved history is not just UI-only.
 - `Copy Chat` copies the full visible transcript, and `Copy Log` copies the most recent `/log` or `unreal.tail_log` output.
@@ -319,7 +319,7 @@ Open the thin self-extension console from:
 The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
 tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
-v0.19 `Make Tool` scaffold draft creation.
+`Make Tool` preview composite generation.
 The plugin registry currently contains 181 registered MCP tools across actors,
 blueprint, code, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget categories.

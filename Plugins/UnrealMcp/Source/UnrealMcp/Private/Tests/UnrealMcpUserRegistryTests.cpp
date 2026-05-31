@@ -317,10 +317,15 @@ bool FUnrealMcpUserToolLock_ReloadWhileExecuteTest::RunTest(const FString& Param
 {
 	(void)Parameters;
 	UnrealMcp::UserToolLock::AcquireShared();
+	TestTrue(TEXT("current thread sees shared lock"), UnrealMcp::UserToolLock::IsSharedHeldByCurrentThread());
+	TestTrue(TEXT("current thread sees any lock"), UnrealMcp::UserToolLock::IsHeldByCurrentThread());
 	TestFalse(TEXT("exclusive blocked by shared"), UnrealMcp::UserToolLock::TryAcquireExclusive(0.05));
 	UnrealMcp::UserToolLock::ReleaseShared();
+	TestFalse(TEXT("current thread shared released"), UnrealMcp::UserToolLock::IsSharedHeldByCurrentThread());
 	TestTrue(TEXT("exclusive succeeds after shared release"), UnrealMcp::UserToolLock::TryAcquireExclusive(0.5));
+	TestTrue(TEXT("current thread sees exclusive lock"), UnrealMcp::UserToolLock::IsExclusiveHeldByCurrentThread());
 	UnrealMcp::UserToolLock::ReleaseExclusive();
+	TestFalse(TEXT("current thread exclusive released"), UnrealMcp::UserToolLock::IsExclusiveHeldByCurrentThread());
 	return true;
 }
 
@@ -408,6 +413,68 @@ bool FUnrealMcpUserRegistry_ReloadToolStructuredContentTest::RunTest(const FStri
 		(*Lifecycle)->TryGetStringField(TEXT("state"), State);
 	}
 	TestEqual(TEXT("lifecycle state"), State, TEXT("loaded_user_python_hot"));
+
+	UserRegistryDeleteTestDirs();
+	UserRegistryReloadClean();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserRegistry_ReloadDryRunInsideSharedLockTest,
+	"UnrealMcp.UserRegistry.ReloadDryRunInsideSharedLock",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserRegistry_ReloadDryRunInsideSharedLockTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	UserRegistryDeleteTestDirs();
+	UserRegistryReloadClean();
+
+	FJsonObject Arguments;
+	Arguments.SetBoolField(TEXT("dryRun"), true);
+	FUnrealMcpExecutionResult Result;
+	{
+		UnrealMcp::UserToolLock::FSharedGuard ExistingExecutionGuard;
+		Result = UnrealMcp::UnrealMcpUserRegistryReloadTool::Execute(Arguments);
+	}
+
+	TestFalse(TEXT("dryRun reload succeeds inside shared lock"), Result.bIsError);
+	TestEqual(TEXT("dryRun action"), UserRegistryStructuredString(Result, TEXT("action")), TEXT("mcp_user_registry_reload_dry_run"));
+	bool bDryRun = false;
+	if (Result.StructuredContent.IsValid())
+	{
+		Result.StructuredContent->TryGetBoolField(TEXT("dryRun"), bDryRun);
+	}
+	TestTrue(TEXT("dryRun flag"), bDryRun);
+
+	UserRegistryDeleteTestDirs();
+	UserRegistryReloadClean();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserRegistry_ReloadApplyInsideSharedLockDeniedTest,
+	"UnrealMcp.UserRegistry.ReloadApplyInsideSharedLockDenied",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserRegistry_ReloadApplyInsideSharedLockDeniedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	UserRegistryDeleteTestDirs();
+	UserRegistryReloadClean();
+
+	FJsonObject Arguments;
+	FUnrealMcpExecutionResult Result;
+	{
+		UnrealMcp::UserToolLock::FSharedGuard ExistingExecutionGuard;
+		Result = UnrealMcp::UnrealMcpUserRegistryReloadTool::Execute(Arguments);
+	}
+
+	TestTrue(TEXT("apply reload denied inside shared lock"), Result.bIsError);
+	TestEqual(
+		TEXT("reentrant error code"),
+		UserRegistryStructuredString(Result, TEXT("errorCode")),
+		TEXT("user_registry_reload_reentrant_apply_denied"));
 
 	UserRegistryDeleteTestDirs();
 	UserRegistryReloadClean();

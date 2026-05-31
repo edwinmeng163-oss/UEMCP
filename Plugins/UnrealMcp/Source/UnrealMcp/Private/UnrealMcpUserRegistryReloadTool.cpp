@@ -48,6 +48,23 @@ namespace UnrealMcp
 			StructuredContent->SetNumberField(TEXT("rejectedCount"), ReloadResult.RejectedTools.Num());
 			StructuredContent->SetNumberField(TEXT("durationSeconds"), ReloadResult.DurationSeconds);
 		}
+
+		FUnrealMcpExecutionResult UserRegistryReloadMakeReentrantApplyDeniedResult(bool bAcceptChangedHashes)
+		{
+			TSharedPtr<FJsonObject> StructuredContent = MakeShared<FJsonObject>();
+			StructuredContent->SetStringField(TEXT("action"), TEXT("mcp_user_registry_reload"));
+			StructuredContent->SetBoolField(TEXT("dryRun"), false);
+			StructuredContent->SetBoolField(TEXT("acceptChangedHashes"), bAcceptChangedHashes);
+			StructuredContent->SetStringField(TEXT("userToolsRootDir"), UserRegistry::GetUserToolsRootDir());
+			StructuredContent->SetStringField(TEXT("errorCode"), TEXT("user_registry_reload_reentrant_apply_denied"));
+			StructuredContent->SetStringField(
+				TEXT("reason"),
+				TEXT("Cannot apply user tool registry reload while the current thread already holds the user tool registry/execution lock."));
+			return MakeExecutionResult(
+				TEXT("Denied user tool registry reload: reentrant apply would deadlock while a user tool is executing."),
+				StructuredContent,
+				true);
+		}
 	}
 
 	namespace UnrealMcpUserRegistryReloadTool
@@ -59,10 +76,29 @@ namespace UnrealMcp
 			Arguments.TryGetBoolField(TEXT("acceptChangedHashes"), bAcceptChangedHashes);
 			Arguments.TryGetBoolField(TEXT("dryRun"), bDryRun);
 
-			UserToolLock::FExclusiveGuard ReloadGuard;
-			const UserRegistry::FReloadResult ReloadResult = bDryRun
-				? UserRegistry::PreviewUserToolRegistryReload(bAcceptChangedHashes)
-				: UserRegistry::ReloadUserToolRegistry(bAcceptChangedHashes);
+			UserRegistry::FReloadResult ReloadResult;
+			if (bDryRun)
+			{
+				if (UserToolLock::IsHeldByCurrentThread())
+				{
+					ReloadResult = UserRegistry::PreviewUserToolRegistryReload(bAcceptChangedHashes);
+				}
+				else
+				{
+					UserToolLock::FSharedGuard PreviewGuard;
+					ReloadResult = UserRegistry::PreviewUserToolRegistryReload(bAcceptChangedHashes);
+				}
+			}
+			else
+			{
+				if (UserToolLock::IsHeldByCurrentThread())
+				{
+					return UserRegistryReloadMakeReentrantApplyDeniedResult(bAcceptChangedHashes);
+				}
+
+				UserToolLock::FExclusiveGuard ReloadGuard;
+				ReloadResult = UserRegistry::ReloadUserToolRegistry(bAcceptChangedHashes);
+			}
 
 			Extension::FToolLifecycle Lifecycle;
 			Lifecycle.ToolName = Extension::ControlToolUserRegistryReload;
