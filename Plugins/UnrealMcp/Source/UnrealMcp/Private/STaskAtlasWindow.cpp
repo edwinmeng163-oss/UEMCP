@@ -449,12 +449,17 @@ namespace UnrealMcp::TaskAtlasComposite
 		OutMainPy += TEXT("            entry[\"effective\"] = effective_value\n");
 		OutMainPy += TEXT("        diff[key] = entry\n");
 		OutMainPy += TEXT("    return diff\n\n");
+		OutMainPy += TEXT("def _policy_decision(result):\n");
+		OutMainPy += TEXT("    meta = result.get(\"meta\", {}) if isinstance(result, dict) else {}\n");
+		OutMainPy += TEXT("    return meta.get(\"policyDecision\", \"\")\n\n");
+		OutMainPy += TEXT("def _blocked_steps(steps):\n");
+		OutMainPy += TEXT("    return [step for step in steps if step.get(\"policyDecision\") == \"deny\"]\n\n");
 		OutMainPy += TEXT("def _record_step(tool, captured_key, result, requested, effective):\n");
 		OutMainPy += TEXT("    result = result or {}\n");
 		OutMainPy += TEXT("    meta = result.get(\"meta\", {}) if isinstance(result, dict) else {}\n");
 		OutMainPy += TEXT("    step = {\n");
 		OutMainPy += TEXT("        \"tool\": tool,\n");
-		OutMainPy += TEXT("        \"policyDecision\": meta.get(\"policyDecision\", \"unknown\"),\n");
+		OutMainPy += TEXT("        \"policyDecision\": _policy_decision(result) or \"unknown\",\n");
 		OutMainPy += TEXT("        \"isError\": bool(result.get(\"isError\", True)),\n");
 		OutMainPy += TEXT("    }\n");
 		OutMainPy += TEXT("    if meta.get(\"forcedDryRun\"):\n");
@@ -481,10 +486,16 @@ namespace UnrealMcp::TaskAtlasComposite
 			OutMainPy += FString::Printf(TEXT("    r%d = call_tool_raw(%s, step%d_requested)\n"), Index, *QuotedTool, Index);
 			OutMainPy += FString::Printf(TEXT("    step%d_effective = _effective_args(step%d_requested, r%d)\n"), Index, Index, Index);
 			OutMainPy += FString::Printf(TEXT("    steps.append(_record_step(%s, %s, r%d, step%d_requested, step%d_effective))\n"), *QuotedTool, *QuotedCapturedKey, Index, Index, Index);
-			OutMainPy += FString::Printf(TEXT("    if r%d.get(\"isError\", False):\n"), Index);
-			OutMainPy += FString::Printf(TEXT("        return {\"isError\": True, \"text\": \"composite stopped at step %s\", \"structuredContent\": {\"steps\": steps}}\n"), *StepIndex);
+			OutMainPy += FString::Printf(TEXT("    if r%d.get(\"isError\", False) and _policy_decision(r%d) != \"deny\":\n"), Index, Index);
+			OutMainPy += TEXT("        _blocked = _blocked_steps(steps)\n");
+			OutMainPy += FString::Printf(TEXT("        return {\"isError\": True, \"text\": \"composite stopped at step %s (execution error)\", \"structuredContent\": {\"steps\": steps, \"hasBlockedSteps\": bool(_blocked), \"blockedCount\": len(_blocked), \"blockedSteps\": _blocked}}\n"), *StepIndex);
 		}
-		OutMainPy += FString::Printf(TEXT("    return {\"isError\": False, \"text\": \"preview composite executed %d steps\", \"structuredContent\": {\"steps\": steps}}\n"), Steps.Num());
+		OutMainPy += TEXT("    _blocked = _blocked_steps(steps)\n");
+		OutMainPy += TEXT("    if _blocked:\n");
+		OutMainPy += FString::Printf(TEXT("        _text = \"preview composite: %d steps, \" + str(len(_blocked)) + \" blocked by policy (expected for write tools)\"\n"), Steps.Num());
+		OutMainPy += TEXT("    else:\n");
+		OutMainPy += FString::Printf(TEXT("        _text = \"preview composite executed %d steps\"\n"), Steps.Num());
+		OutMainPy += TEXT("    return {\"isError\": False, \"text\": _text, \"structuredContent\": {\"steps\": steps, \"hasBlockedSteps\": bool(_blocked), \"blockedCount\": len(_blocked), \"blockedSteps\": _blocked}}\n");
 
 		OutMainPySha256 = ComputePythonHandlerSha256(OutMainPy);
 
@@ -663,6 +674,34 @@ namespace TaskAtlasWindow
 			}
 		}
 		return Values;
+	}
+
+	int32 CountDeniedCompositeStepRefs(
+		const TArray<TSharedPtr<FJsonValue>>& StepRefs,
+		const TSet<FString>& VisibleCoreToolNames)
+	{
+		int32 Count = 0;
+		for (const TSharedPtr<FJsonValue>& StepValue : StepRefs)
+		{
+			const TSharedPtr<FJsonObject> StepObject = StepValue.IsValid() && StepValue->Type == EJson::Object ? StepValue->AsObject() : nullptr;
+			if (!StepObject.IsValid())
+			{
+				continue;
+			}
+
+			const FString ToolName = GetStringField(StepObject, TEXT("tool")).TrimStartAndEnd();
+			if (!ToolName.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive)
+				|| !VisibleCoreToolNames.Contains(ToolName))
+			{
+				continue;
+			}
+
+			if (GetStringField(StepObject, TEXT("policyClassAtCapture")).TrimStartAndEnd().ToLower() == TEXT("deny"))
+			{
+				++Count;
+			}
+		}
+		return Count;
 	}
 
 	int32 WorkflowSortRank(const STaskAtlasWindow::FWorkflowRow& Row)
@@ -1490,6 +1529,8 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 	SmokeArguments->SetStringField(TEXT("dryRunArgs"), UnrealMcp::TaskAtlasComposite::JsonObjectToCondensedString(SmokeArgs));
 	SmokeArguments->SetNumberField(TEXT("timeoutSeconds"), 15.0);
 	const FUnrealMcpExecutionResult SmokeResult = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_tool_smoke"), *SmokeArguments);
+	const int32 BlockedStepCount = TaskAtlasWindow::CountDeniedCompositeStepRefs(StepRefs, VisibleCoreToolNames);
+	const bool bGeneratedBlockedComposite = ReplayEligibility == TEXT("blocked") || BlockedStepCount > 0;
 	if (SmokeResult.bIsError)
 	{
 		RefreshMadeTools();
@@ -1505,11 +1546,21 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 
 	RefreshMadeTools();
 	RebuildLists();
+	if (bGeneratedBlockedComposite)
+	{
+		const int32 DisplayBlockedStepCount = BlockedStepCount > 0 ? BlockedStepCount : 1;
+		SetStatus(FString::Printf(
+			TEXT("Composite tool set %s generated at %s and reloaded. Note: %d step(s) are blocked by call_tool policy (write/high-risk tools cannot run via call_tool - preview only). Fill reviewed args or run manually."),
+			*ToolName,
+			*Directory,
+			DisplayBlockedStepCount));
+		return FReply::Handled();
+	}
+
 	SetStatus(FString::Printf(
-		TEXT("Composite user tool %s generated at %s, reloaded, and smoke-tested. %s."),
+		TEXT("Composite tool set %s generated at %s, reloaded, and smoke-tested OK."),
 		*ToolName,
-		*Directory,
-		*ReplaySummary));
+		*Directory));
 	return FReply::Handled();
 }
 
