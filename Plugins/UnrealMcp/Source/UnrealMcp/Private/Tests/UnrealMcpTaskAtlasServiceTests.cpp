@@ -1,10 +1,15 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HttpResultCallback.h"
+#include "HttpRouteHandle.h"
+#include "HttpServerRequest.h"
+#include "HttpServerResponse.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -14,8 +19,13 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UnrealMcpSettings.h"
 #include "UnrealMcpHashUtils.h"
+
+#define private public
 #include "UnrealMcpModule.h"
+#undef private
+
 #include "UnrealMcpTaskAtlasService.h"
 #include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolLock.h"
@@ -170,6 +180,7 @@ namespace UnrealMcpTaskAtlasServiceTests
 	const FString Chunk4PassPy = TEXT("def execute(args):\n    return {\"ok\": True, \"dryRun\": args.get(\"dryRun\", False)}\n");
 	const FString Chunk4RaisePy = TEXT("def execute(args):\n    raise RuntimeError(\"chunk4 smoke boom\")\n");
 	const FString Chunk4ToolPrefix = TEXT("atlas_chunk4_");
+	const FString Chunk8ToolPrefix = TEXT("atlas_chunk8_");
 
 	struct FChunk4Fixture
 	{
@@ -225,6 +236,20 @@ namespace UnrealMcpTaskAtlasServiceTests
 		for (const FString& DirectoryName : DirectoryNames)
 		{
 			if (DirectoryName.StartsWith(Chunk4ToolPrefix, ESearchCase::CaseSensitive))
+			{
+				IFileManager::Get().DeleteDirectory(*FPaths::Combine(Root, DirectoryName), false, true);
+			}
+		}
+	}
+
+	void DeleteChunk8RegistryTools()
+	{
+		const FString Root = RegistryUserToolsRoot();
+		TArray<FString> DirectoryNames;
+		IFileManager::Get().FindFiles(DirectoryNames, *FPaths::Combine(Root, TEXT("*")), false, true);
+		for (const FString& DirectoryName : DirectoryNames)
+		{
+			if (DirectoryName.StartsWith(Chunk8ToolPrefix, ESearchCase::CaseSensitive))
 			{
 				IFileManager::Get().DeleteDirectory(*FPaths::Combine(Root, DirectoryName), false, true);
 			}
@@ -333,6 +358,126 @@ namespace UnrealMcpTaskAtlasServiceTests
 			Result.StructuredContent->TryGetNumberField(FieldName, Value);
 		}
 		return static_cast<int32>(Value);
+	}
+
+	uint64 StructuredUint64(const FUnrealMcpExecutionResult& Result, const FString& FieldName)
+	{
+		double Value = 0.0;
+		if (Result.StructuredContent.IsValid())
+		{
+			Result.StructuredContent->TryGetNumberField(FieldName, Value);
+		}
+		return static_cast<uint64>(Value);
+	}
+
+	bool StructuredArrayContainsTool(
+		const FUnrealMcpExecutionResult& Result,
+		const FString& ArrayFieldName,
+		const FString& ToolName,
+		const FString& LoadedFieldName,
+		bool& bOutLoaded)
+	{
+		bOutLoaded = false;
+		if (!Result.StructuredContent.IsValid())
+		{
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (!Result.StructuredContent->TryGetArrayField(ArrayFieldName, Values) || !Values)
+		{
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& Value : *Values)
+		{
+			const TSharedPtr<FJsonObject> Object = Value.IsValid() && Value->Type == EJson::Object ? Value->AsObject() : nullptr;
+			FString EntryToolName;
+			if (Object.IsValid() && Object->TryGetStringField(TEXT("toolName"), EntryToolName) && EntryToolName == ToolName)
+			{
+				if (!LoadedFieldName.IsEmpty())
+				{
+					Object->TryGetBoolField(LoadedFieldName, bOutLoaded);
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool ListMadeToolsContainsLoaded(const FString& ToolName)
+	{
+		for (const UnrealMcp::TaskAtlasService::FMadeToolEntry& Entry : UnrealMcp::TaskAtlasService::ListMadeTools())
+		{
+			if (Entry.ToolName == ToolName)
+			{
+				return Entry.bLoadedInUserRegistry;
+			}
+		}
+		return false;
+	}
+
+	struct FChunk8Fixture
+	{
+		FString Root;
+		FString SavedRoot;
+		FString PyToolsRoot;
+	};
+
+	FChunk8Fixture SetupChunk8Fixture(const FString& Leaf)
+	{
+		FChunk8Fixture Fixture;
+		Fixture.Root = TestRoot(FPaths::Combine(TEXT("Chunk8"), Leaf));
+		Fixture.SavedRoot = FPaths::Combine(Fixture.Root, TEXT("Saved/UnrealMcp"));
+		Fixture.PyToolsRoot = RegistryUserToolsRoot();
+		ResetDirectory(Fixture.Root);
+		IFileManager::Get().MakeDirectory(*Fixture.SavedRoot, true);
+		UnrealMcp::TaskAtlasService::SetSavedRootDirForTests(Fixture.SavedRoot);
+		UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(Fixture.PyToolsRoot);
+		DeleteChunk8RegistryTools();
+		ReloadUserRegistryForTests();
+		return Fixture;
+	}
+
+	void ClearChunk8Fixture(const FChunk8Fixture& Fixture)
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		DeleteChunk8RegistryTools();
+		ReloadUserRegistryForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	}
+
+	bool WriteChunk8PreviewReadyTask(const FString& SavedRoot, const FString& TaskId, const FString& Label)
+	{
+		TArray<TSharedPtr<FJsonValue>> StepRefs;
+		StepRefs.Add(MakeTaskStepRef(0, TEXT("unreal.editor_status"), TEXT("captured")));
+		StepRefs.Add(MakeTaskStepRef(1, TEXT("unreal.list_maps"), TEXT("captured")));
+		return WriteTaskFixture(SavedRoot, TaskId, Label, StepRefs);
+	}
+
+	FString HttpResponseBodyToString(const FHttpServerResponse& Response)
+	{
+		if (Response.Body.Num() == 0)
+		{
+			return FString();
+		}
+
+		const FUTF8ToTCHAR Converter(reinterpret_cast<const ANSICHAR*>(Response.Body.GetData()), Response.Body.Num());
+		return FString(Converter.Length(), Converter.Get());
+	}
+
+	bool ParseHttpResponseJson(const FHttpServerResponse& Response, TSharedPtr<FJsonObject>& OutObject)
+	{
+		const FString Body = HttpResponseBodyToString(Response);
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
+		return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
+	}
+
+	void SetRequestBody(FHttpServerRequest& Request, const FString& Body)
+	{
+		const FTCHARToUTF8 BodyUtf8(*Body);
+		Request.Body.Append(reinterpret_cast<const uint8*>(BodyUtf8.Get()), BodyUtf8.Length());
 	}
 }
 
@@ -1522,6 +1667,225 @@ bool FUnrealMcpTaskAtlasMcpSmokeDryRunTest::RunTest(const FString& Parameters)
 	FString ReplayAfter;
 	TestTrue(TEXT("read replay after"), ReadToolJsonField(PyRoot, ToolId, TEXT("replayStatus"), ReplayAfter));
 	TestEqual(TEXT("dry-run keeps replay status"), ReplayAfter, ReplayBefore);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasMcpE2EHappyPathCycleTest,
+	"UnrealMcp.TaskAtlasMcp.E2E.HappyPathCycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasMcpE2EHappyPathCycleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk8Fixture Fixture = SetupChunk8Fixture(TEXT("E2E/HappyPathCycle"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk8Fixture(Fixture);
+	};
+
+	const FString TaskId = TEXT("chunk8-happy-path-cycle");
+	const FString Label = TEXT("Chunk8 Happy Path Cycle");
+	const FString ExpectedToolName = TEXT("user.atlas_chunk8_happy_path_cycle");
+	TestTrue(TEXT("task fixture writes"), WriteChunk8PreviewReadyTask(Fixture.SavedRoot, TaskId, Label));
+
+	UnrealMcp::TaskAtlasService::FMakeCompositeRequest Request;
+	Request.TaskId = TaskId;
+	const uint64 Version0 = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FMakeCompositeResult MakeResult = UnrealMcp::TaskAtlasService::MakeComposite(Request);
+	const uint64 Version1 = Version0 + 1;
+	TestTrue(TEXT("composite written"), MakeResult.Outcome == UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::CompositeWritten);
+	TestEqual(TEXT("tool name"), MakeResult.ToolName, ExpectedToolName);
+	TestFalse(TEXT("generated dir non-empty"), MakeResult.GeneratedDir.IsEmpty());
+	TestEqual(TEXT("make bumps version once"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	TestTrue(TEXT("list includes loaded made tool"), ListMadeToolsContainsLoaded(MakeResult.ToolName));
+	TSharedPtr<FJsonObject> ListArgs = MakeShared<FJsonObject>();
+	ListArgs->SetBoolField(TEXT("includeStale"), true);
+	const FUnrealMcpExecutionResult Listed = ExecuteMcpTool(TEXT("unreal.task_atlas_list_made_tools"), ListArgs);
+	TestFalse(TEXT("list wrapper succeeds"), Listed.bIsError);
+	bool bLoadedFromList = false;
+	TestTrue(TEXT("list wrapper includes made tool"), StructuredArrayContainsTool(Listed, TEXT("madeTools"), MakeResult.ToolName, TEXT("loadedInUserRegistry"), bLoadedFromList));
+	TestTrue(TEXT("list wrapper marks loaded"), bLoadedFromList);
+	TestEqual(TEXT("list exposes current version"), StructuredUint64(Listed, TEXT("toolsListVersion")), Version1);
+
+	UnrealMcp::TaskAtlasService::FSmokeRequest DryRunSmoke;
+	DryRunSmoke.ToolName = MakeResult.ToolName;
+	DryRunSmoke.bDryRun = true;
+	const UnrealMcp::TaskAtlasService::FSmokeResult DryRunResult = UnrealMcp::TaskAtlasService::SmokeMadeTool(DryRunSmoke);
+	TestTrue(TEXT("smoke dry-run outcome"), DryRunResult.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::DryRun);
+	TestEqual(TEXT("smoke dry-run keeps version"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	const UnrealMcp::TaskAtlasService::FSmokeResult SmokeResult = UnrealMcp::TaskAtlasService::SmokeMadeTool(MakeResult.ToolName);
+	TestTrue(TEXT("smoke real outcome"), SmokeResult.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::Passed);
+	TestEqual(TEXT("smoke pass keeps version"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult DeleteResult = UnrealMcp::TaskAtlasService::DeleteMadeTool(MakeResult.ToolName);
+	const uint64 Version2 = Version1 + 1;
+	TestTrue(TEXT("delete outcome"), DeleteResult.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Deleted);
+	TestEqual(TEXT("delete bumps version once"), UnrealMcp::GetUserToolListVersion(), Version2);
+
+	TestFalse(TEXT("list no longer includes made tool"), ListMadeToolsContainsLoaded(MakeResult.ToolName));
+	const FUnrealMcpExecutionResult ListedAfterDelete = ExecuteMcpTool(TEXT("unreal.task_atlas_list_made_tools"), ListArgs);
+	TestFalse(TEXT("post-delete list wrapper succeeds"), ListedAfterDelete.bIsError);
+	bool bLoadedAfterDelete = true;
+	TestFalse(TEXT("post-delete list omits made tool"), StructuredArrayContainsTool(ListedAfterDelete, TEXT("madeTools"), MakeResult.ToolName, TEXT("loadedInUserRegistry"), bLoadedAfterDelete));
+	TestEqual(TEXT("post-delete list exposes current version"), StructuredUint64(ListedAfterDelete, TEXT("toolsListVersion")), Version2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasMcpE2ECrossWrapperCycleTest,
+	"UnrealMcp.TaskAtlasMcp.E2E.CrossWrapperCycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasMcpE2ECrossWrapperCycleTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk8Fixture Fixture = SetupChunk8Fixture(TEXT("E2E/CrossWrapperCycle"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk8Fixture(Fixture);
+	};
+
+	const FString TaskId = TEXT("chunk8-cross-wrapper-cycle");
+	const FString Label = TEXT("Chunk8 Cross Wrapper Cycle");
+	const FString ExpectedToolName = TEXT("user.atlas_chunk8_cross_wrapper_cycle");
+	TestTrue(TEXT("task fixture writes"), WriteChunk8PreviewReadyTask(Fixture.SavedRoot, TaskId, Label));
+
+	TSharedPtr<FJsonObject> MakeArgs = MakeShared<FJsonObject>();
+	MakeArgs->SetStringField(TEXT("taskId"), TaskId);
+	const uint64 Version0 = UnrealMcp::GetUserToolListVersion();
+	const FUnrealMcpExecutionResult Made = ExecuteMcpTool(TEXT("unreal.task_atlas_make_composite"), MakeArgs);
+	const uint64 Version1 = Version0 + 1;
+	TestFalse(TEXT("make wrapper succeeds"), Made.bIsError);
+	TestEqual(TEXT("make action"), StructuredString(Made, TEXT("action")), TEXT("task_atlas_make_composite"));
+	TestEqual(TEXT("make outcome"), StructuredString(Made, TEXT("outcome")), TEXT("CompositeWritten"));
+	TestEqual(TEXT("make tool name"), StructuredString(Made, TEXT("toolName")), ExpectedToolName);
+	TestEqual(TEXT("make bumps version once"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	TSharedPtr<FJsonObject> ListArgs = MakeShared<FJsonObject>();
+	ListArgs->SetBoolField(TEXT("includeStale"), true);
+	const FUnrealMcpExecutionResult Listed = ExecuteMcpTool(TEXT("unreal.task_atlas_list_made_tools"), ListArgs);
+	TestFalse(TEXT("list wrapper succeeds"), Listed.bIsError);
+	TestEqual(TEXT("list action"), StructuredString(Listed, TEXT("action")), TEXT("task_atlas_list_made_tools"));
+	bool bLoadedFromList = false;
+	TestTrue(TEXT("list includes tool"), StructuredArrayContainsTool(Listed, TEXT("madeTools"), ExpectedToolName, TEXT("loadedInUserRegistry"), bLoadedFromList));
+	TestTrue(TEXT("list marks loaded"), bLoadedFromList);
+	TestEqual(TEXT("list version"), StructuredUint64(Listed, TEXT("toolsListVersion")), Version1);
+
+	TSharedPtr<FJsonObject> IntrospectArgs = MakeShared<FJsonObject>();
+	IntrospectArgs->SetStringField(TEXT("toolName"), ExpectedToolName);
+	const FUnrealMcpExecutionResult Introspected = ExecuteMcpTool(TEXT("unreal.user_registry_introspect"), IntrospectArgs);
+	TestFalse(TEXT("introspect wrapper succeeds"), Introspected.bIsError);
+	TestEqual(TEXT("introspect action"), StructuredString(Introspected, TEXT("action")), TEXT("user_registry_introspect"));
+	bool bLoadedFromIntrospect = false;
+	TestTrue(TEXT("introspect includes tool"), StructuredArrayContainsTool(Introspected, TEXT("tools"), ExpectedToolName, TEXT("loaded"), bLoadedFromIntrospect));
+	TestTrue(TEXT("introspect marks loaded"), bLoadedFromIntrospect);
+	TestEqual(TEXT("introspect version"), StructuredUint64(Introspected, TEXT("toolsListVersion")), Version1);
+
+	TSharedPtr<FJsonObject> PromoteArgs = MakeShared<FJsonObject>();
+	PromoteArgs->SetStringField(TEXT("taskId"), TaskId);
+	PromoteArgs->SetBoolField(TEXT("dryRun"), true);
+	PromoteArgs->SetBoolField(TEXT("refreshIndex"), false);
+	const FUnrealMcpExecutionResult Promoted = ExecuteMcpTool(TEXT("unreal.task_atlas_promote_to_rag"), PromoteArgs);
+	TestFalse(TEXT("promote dry-run wrapper succeeds"), Promoted.bIsError);
+	TestEqual(TEXT("promote action"), StructuredString(Promoted, TEXT("action")), TEXT("task_atlas_promote_to_rag"));
+	TestEqual(TEXT("promote dry-run outcome"), StructuredString(Promoted, TEXT("outcome")), TEXT("DryRun"));
+	TestEqual(TEXT("promote dry-run keeps version"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	TSharedPtr<FJsonObject> SmokeArgs = MakeShared<FJsonObject>();
+	SmokeArgs->SetStringField(TEXT("toolName"), ExpectedToolName);
+	SmokeArgs->SetBoolField(TEXT("dryRun"), true);
+	const FUnrealMcpExecutionResult DryRunSmoke = ExecuteMcpTool(TEXT("unreal.task_atlas_smoke_made_tool"), SmokeArgs);
+	TestFalse(TEXT("smoke dry-run wrapper succeeds"), DryRunSmoke.bIsError);
+	TestEqual(TEXT("smoke action"), StructuredString(DryRunSmoke, TEXT("action")), TEXT("task_atlas_smoke_made_tool"));
+	TestEqual(TEXT("smoke dry-run outcome"), StructuredString(DryRunSmoke, TEXT("outcome")), TEXT("DryRun"));
+	TestEqual(TEXT("smoke dry-run keeps version"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	SmokeArgs->SetBoolField(TEXT("dryRun"), false);
+	const FUnrealMcpExecutionResult RealSmoke = ExecuteMcpTool(TEXT("unreal.task_atlas_smoke_made_tool"), SmokeArgs);
+	TestFalse(TEXT("smoke real wrapper succeeds"), RealSmoke.bIsError);
+	TestEqual(TEXT("smoke real outcome"), StructuredString(RealSmoke, TEXT("outcome")), TEXT("Passed"));
+	TestEqual(TEXT("smoke pass keeps version"), UnrealMcp::GetUserToolListVersion(), Version1);
+
+	TSharedPtr<FJsonObject> DeleteArgs = MakeShared<FJsonObject>();
+	DeleteArgs->SetStringField(TEXT("toolName"), ExpectedToolName);
+	DeleteArgs->SetBoolField(TEXT("confirm"), true);
+	const FUnrealMcpExecutionResult Deleted = ExecuteMcpTool(TEXT("unreal.task_atlas_delete_made_tool"), DeleteArgs);
+	const uint64 Version2 = Version1 + 1;
+	TestFalse(TEXT("delete wrapper succeeds"), Deleted.bIsError);
+	TestEqual(TEXT("delete action"), StructuredString(Deleted, TEXT("action")), TEXT("task_atlas_delete_made_tool"));
+	TestEqual(TEXT("delete outcome"), StructuredString(Deleted, TEXT("outcome")), TEXT("Deleted"));
+	TestEqual(TEXT("delete bumps version once"), UnrealMcp::GetUserToolListVersion(), Version2);
+
+	const FUnrealMcpExecutionResult ListedAfterDelete = ExecuteMcpTool(TEXT("unreal.task_atlas_list_made_tools"), ListArgs);
+	TestFalse(TEXT("post-delete list wrapper succeeds"), ListedAfterDelete.bIsError);
+	bool bLoadedAfterDelete = true;
+	TestFalse(TEXT("post-delete list omits tool"), StructuredArrayContainsTool(ListedAfterDelete, TEXT("madeTools"), ExpectedToolName, TEXT("loadedInUserRegistry"), bLoadedAfterDelete));
+	TestEqual(TEXT("post-delete list version"), StructuredUint64(ListedAfterDelete, TEXT("toolsListVersion")), Version2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionToolsListIncludesVersionTest,
+	"UnrealMcp.UserToolListVersion.ToolsListIncludesVersion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionToolsListIncludesVersionTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	FHttpServerRequest Request;
+	Request.Verb = EHttpServerRequestVerbs::VERB_POST;
+	Request.Headers.Add(TEXT("Content-Type"), TArray<FString>{ TEXT("application/json") });
+	const UUnrealMcpSettings* Settings = GetDefault<UUnrealMcpSettings>();
+	if (Settings && !Settings->AuthToken.IsEmpty())
+	{
+		Request.Headers.Add(TEXT("Authorization"), TArray<FString>{ FString::Printf(TEXT("Bearer %s"), *Settings->AuthToken) });
+	}
+	UnrealMcpTaskAtlasServiceTests::SetRequestBody(Request, TEXT("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/list\",\"params\":{}}"));
+
+	FUnrealMcpModule& Module = FModuleManager::LoadModuleChecked<FUnrealMcpModule>(TEXT("UnrealMcp"));
+	TUniquePtr<FHttpServerResponse> Response = Module.HandleMcpHttpRequestInternal(Request);
+	TestTrue(TEXT("response valid"), Response.IsValid());
+	if (!Response.IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("response ok"), Response->Code, EHttpServerResponseCodes::Ok);
+
+	TSharedPtr<FJsonObject> Payload;
+	TestTrue(TEXT("response body parses"), UnrealMcpTaskAtlasServiceTests::ParseHttpResponseJson(*Response, Payload));
+	if (!Payload.IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* ResultObject = nullptr;
+	TestTrue(TEXT("result object exists"), Payload->TryGetObjectField(TEXT("result"), ResultObject) && ResultObject && (*ResultObject).IsValid());
+	if (!ResultObject || !(*ResultObject).IsValid())
+	{
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Tools = nullptr;
+	TestTrue(TEXT("tools array exists"), (*ResultObject)->TryGetArrayField(TEXT("tools"), Tools) && Tools && Tools->Num() > 0);
+	const TSharedPtr<FJsonObject>* StructuredContent = nullptr;
+	TestTrue(TEXT("structuredContent exists"), (*ResultObject)->TryGetObjectField(TEXT("structuredContent"), StructuredContent) && StructuredContent && (*StructuredContent).IsValid());
+	if (!StructuredContent || !(*StructuredContent).IsValid())
+	{
+		return false;
+	}
+
+	double Version = 0.0;
+	TestTrue(TEXT("toolsListVersion is number"), (*StructuredContent)->TryGetNumberField(TEXT("toolsListVersion"), Version));
+	TestTrue(TEXT("toolsListVersion non-zero"), Version >= 1.0);
+	TestEqual(TEXT("toolsListVersion matches global"), static_cast<uint64>(Version), UnrealMcp::GetUserToolListVersion());
 	return true;
 }
 
