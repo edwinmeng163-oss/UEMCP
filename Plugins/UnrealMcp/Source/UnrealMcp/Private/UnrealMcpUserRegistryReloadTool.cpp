@@ -2,6 +2,7 @@
 
 #include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpModule.h"
+#include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolLock.h"
 #include "UnrealMcpUserToolRegistry.h"
 
@@ -98,6 +99,7 @@ namespace UnrealMcp
 
 				UserToolLock::FExclusiveGuard ReloadGuard;
 				ReloadResult = UserRegistry::ReloadUserToolRegistry(bAcceptChangedHashes);
+				BumpUserToolListVersion();
 			}
 
 			Extension::FToolLifecycle Lifecycle;

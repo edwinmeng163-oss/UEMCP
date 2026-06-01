@@ -18,6 +18,7 @@
 #include "UnrealMcpToolExecutionGuard.h"
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolRegistry.h"
 #include "UnrealMcpWidgetTools.h"
 
@@ -344,6 +345,7 @@ namespace UnrealMcp
 				TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
 				Content->SetStringField(TEXT("action"), TEXT("task_atlas_list_made_tools"));
 				Content->SetNumberField(TEXT("count"), ToolValues.Num());
+				Content->SetNumberField(TEXT("toolsListVersion"), static_cast<double>(UnrealMcp::GetUserToolListVersion()));
 				Content->SetArrayField(TEXT("madeTools"), ToolValues);
 				OutResult = MakeExecutionResult(FString::Printf(TEXT("Listed %d Task Atlas generated user tools."), ToolValues.Num()), Content, false);
 				return true;
@@ -426,6 +428,7 @@ namespace UnrealMcp
 				Content->SetStringField(TEXT("action"), TEXT("user_registry_introspect"));
 				Content->SetNumberField(TEXT("count"), ToolValues.Num());
 				UnrealMcp::UserRegistry::InitializeUserToolRegistry();
+				Content->SetNumberField(TEXT("toolsListVersion"), static_cast<double>(UnrealMcp::GetUserToolListVersion()));
 				Content->SetStringField(TEXT("userToolsRootDir"), UnrealMcp::UserRegistry::GetUserToolsRootDir());
 				Content->SetArrayField(TEXT("tools"), ToolValues);
 				Content->SetArrayField(TEXT("rejected"), RejectedValues);

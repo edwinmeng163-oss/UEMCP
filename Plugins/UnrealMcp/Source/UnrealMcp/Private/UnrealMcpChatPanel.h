@@ -102,6 +102,7 @@ private:
 	void StopAssistantRequest();
 	void StartAssistantRequest(const FString& UserPrompt);
 	void StartAiConnectionTest();
+	void RefreshToolsOverviewIfRegistryChanged();
 	void RefreshSkillOptions(bool bAppendResult);
 	TSharedRef<SWidget> MakeSkillComboOption(TSharedPtr<FUnrealMcpSkillOption> SkillOption) const;
 	TSharedRef<SWidget> MakeSkillApplyModeComboOption(TSharedPtr<FString> ApplyMode) const;
@@ -157,6 +158,9 @@ private:
 	FString BuildToolsOverviewText(const FUnrealMcpExecutionResult& Result) const;
 
 	FUnrealMcpModule* OwnerModule = nullptr;
+	uint64 LastObservedUserToolListVersion = 0;
+	FString CachedToolsOverviewText;
+	bool bToolsOverviewCacheValid = false;
 	FString LastAssistantResponseId;
 	FString LastLogText;
 	mutable FString LastRagContextPrompt;

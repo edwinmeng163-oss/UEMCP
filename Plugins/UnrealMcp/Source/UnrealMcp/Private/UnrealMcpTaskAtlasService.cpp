@@ -8,6 +8,7 @@
 #include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpTaskAtlasTools.h"
+#include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolLock.h"
 #include "UnrealMcpUserToolRegistry.h"
 
@@ -1276,10 +1277,15 @@ namespace UnrealMcp::TaskAtlasService
 			}
 		}
 
-		UserRegistry::FReloadResult TaskAtlasServiceReloadUserRegistry()
+		UserRegistry::FReloadResult TaskAtlasServiceReloadUserRegistry(bool bBumpToolsListVersion)
 		{
 			UserToolLock::FExclusiveGuard Guard;
-			return UserRegistry::ReloadUserToolRegistry(true);
+			UserRegistry::FReloadResult ReloadResult = UserRegistry::ReloadUserToolRegistry(true);
+			if (bBumpToolsListVersion)
+			{
+				BumpUserToolListVersion();
+			}
+			return ReloadResult;
 		}
 
 		bool TaskAtlasServiceIsUserToolLoaded(const FString& ToolName)
@@ -1812,7 +1818,7 @@ namespace UnrealMcp::TaskAtlasService
 			return Result;
 		}
 
-		UserRegistry::FReloadResult ReloadResult = UserRegistry::ReloadUserToolRegistry(true);
+		UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry(true);
 
 #if WITH_DEV_AUTOMATION_TESTS
 		if (bTaskAtlasServiceRejectNextTargetReloadForTests)
@@ -1905,7 +1911,7 @@ namespace UnrealMcp::TaskAtlasService
 			if (bLoadedBefore)
 			{
 				Result.bWasStaleEntry = true;
-				const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry();
+				const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry(true);
 				Result.ReloadBeforeCount = ReloadResult.BeforeCount;
 				Result.ReloadAfterCount = ReloadResult.AfterCount;
 				Result.ReloadRemovedCount = ReloadResult.RemovedTools.Num();
@@ -1941,7 +1947,7 @@ namespace UnrealMcp::TaskAtlasService
 		}
 
 		Result.RemovedDir = Tool.TargetDir;
-		const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry();
+		const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry(true);
 		Result.ReloadBeforeCount = ReloadResult.BeforeCount;
 		Result.ReloadAfterCount = ReloadResult.AfterCount;
 		Result.ReloadRemovedCount = ReloadResult.RemovedTools.Num();
@@ -2235,7 +2241,7 @@ namespace UnrealMcp::TaskAtlasService
 
 		if (!TaskAtlasServiceIsUserToolLoaded(Tool.ToolName))
 		{
-			const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry();
+			const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry(false);
 			bool bTargetRejected = false;
 			TArray<FString> RejectedReasons;
 			TaskAtlasServiceCollectReloadRejections(ReloadResult, Tool.ToolName, RejectedReasons, bTargetRejected);
@@ -2283,6 +2289,10 @@ namespace UnrealMcp::TaskAtlasService
 			if (!TaskAtlasServiceSetToolJsonReplayStatus(Tool, TEXT("generated_smoke_failed"), Result.FailureDiagnosticPath, MetadataFailure))
 			{
 				Result.ErrorMessage += FString::Printf(TEXT(" Metadata update failed: %s."), *MetadataFailure);
+			}
+			else
+			{
+				BumpUserToolListVersion();
 			}
 			Result.ReplayStatusAfter = TEXT("generated_smoke_failed");
 			Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);

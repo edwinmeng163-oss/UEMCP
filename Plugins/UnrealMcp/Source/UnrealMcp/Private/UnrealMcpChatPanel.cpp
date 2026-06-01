@@ -26,6 +26,7 @@
 #include "UnrealMcpModule.h"
 #include "UnrealMcpSettings.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolLock.h"
 #include "UnrealMcpUserToolRegistry.h"
 #include "Widgets/Images/SThrobber.h"
@@ -1315,6 +1316,7 @@ private:
 void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* InOwnerModule)
 {
 	OwnerModule = InOwnerModule;
+	LastObservedUserToolListVersion = UnrealMcp::GetUserToolListVersion();
 	SkillApplyModes =
 	{
 		MakeShared<FString>(UnrealMcpChat::SkillApplyModeReadOnly()),
@@ -2129,6 +2131,13 @@ FReply SUnrealMcpChatPanel::HandleToolsOverviewClicked()
 		return FReply::Handled();
 	}
 
+	RefreshToolsOverviewIfRegistryChanged();
+	if (bToolsOverviewCacheValid)
+	{
+		AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tools"), CachedToolsOverviewText);
+		return FReply::Handled();
+	}
+
 	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
 	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_workbench_status"), *Arguments);
 	if (Result.bIsError || !Result.StructuredContent.IsValid())
@@ -2137,8 +2146,23 @@ FReply SUnrealMcpChatPanel::HandleToolsOverviewClicked()
 		return FReply::Handled();
 	}
 
-	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tools"), BuildToolsOverviewText(Result));
+	CachedToolsOverviewText = BuildToolsOverviewText(Result);
+	bToolsOverviewCacheValid = true;
+	AppendMessage(EUnrealMcpChatEntryType::System, TEXT("UEAtelier Tools"), CachedToolsOverviewText);
 	return FReply::Handled();
+}
+
+void SUnrealMcpChatPanel::RefreshToolsOverviewIfRegistryChanged()
+{
+	const uint64 CurrentVersion = UnrealMcp::GetUserToolListVersion();
+	if (CurrentVersion == LastObservedUserToolListVersion)
+	{
+		return;
+	}
+
+	LastObservedUserToolListVersion = CurrentVersion;
+	CachedToolsOverviewText.Reset();
+	bToolsOverviewCacheValid = false;
 }
 
 FReply SUnrealMcpChatPanel::HandleTaskAtlasClicked()

@@ -17,6 +17,7 @@
 #include "UnrealMcpHashUtils.h"
 #include "UnrealMcpModule.h"
 #include "UnrealMcpTaskAtlasService.h"
+#include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolLock.h"
 #include "UnrealMcpUserToolRegistry.h"
 
@@ -333,6 +334,246 @@ namespace UnrealMcpTaskAtlasServiceTests
 		}
 		return static_cast<int32>(Value);
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionInitialNonZeroTest,
+	"UnrealMcp.UserToolListVersion.InitialNonZero",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionInitialNonZeroTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	TestTrue(TEXT("initial version is non-zero"), UnrealMcp::GetUserToolListVersion() >= 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionBumpMonotonicTest,
+	"UnrealMcp.UserToolListVersion.BumpIncreasesMonotonic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionBumpMonotonicTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const uint64 Bumped = UnrealMcp::BumpUserToolListVersion();
+	TestEqual(TEXT("bump return value"), Bumped, Before + 1);
+	TestEqual(TEXT("stored bumped version"), UnrealMcp::GetUserToolListVersion(), Before + 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionReloadDryRunTest,
+	"UnrealMcp.UserToolListVersion.ReloadDryRunDoesNotBump",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionReloadDryRunTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetBoolField(TEXT("dryRun"), true);
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const FUnrealMcpExecutionResult Result = ExecuteMcpTool(TEXT("unreal.mcp_user_registry_reload"), Arguments);
+	TestFalse(TEXT("reload dry-run succeeds"), Result.bIsError);
+	TestEqual(TEXT("dry-run keeps version"), UnrealMcp::GetUserToolListVersion(), Before);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionReloadApplyTest,
+	"UnrealMcp.UserToolListVersion.ReloadApplyBumps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionReloadApplyTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
+	Arguments->SetBoolField(TEXT("dryRun"), false);
+	Arguments->SetBoolField(TEXT("acceptChangedHashes"), true);
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const FUnrealMcpExecutionResult Result = ExecuteMcpTool(TEXT("unreal.mcp_user_registry_reload"), Arguments);
+	TestFalse(TEXT("reload apply succeeds"), Result.bIsError);
+	TestEqual(TEXT("apply bumps version once"), UnrealMcp::GetUserToolListVersion(), Before + 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionMakeCompositePreviewReadyTest,
+	"UnrealMcp.UserToolListVersion.MakeCompositePreviewReadyBumps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionMakeCompositePreviewReadyTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FMakeCompositeFixture Fixture = SetupMakeCompositeFixture(TEXT("Version/PreviewReady"));
+	ON_SCOPE_EXIT
+	{
+		ClearMakeCompositeFixture(Fixture);
+	};
+
+	TArray<TSharedPtr<FJsonValue>> StepRefs;
+	StepRefs.Add(MakeTaskStepRef(0, TEXT("unreal.editor_status"), TEXT("captured")));
+	StepRefs.Add(MakeTaskStepRef(1, TEXT("unreal.list_maps"), TEXT("captured")));
+	TestTrue(TEXT("task fixture writes"), WriteTaskFixture(Fixture.SavedRoot, TEXT("version-preview-task"), TEXT("Version Preview Tool"), StepRefs));
+
+	UnrealMcp::TaskAtlasService::FMakeCompositeRequest Request;
+	Request.TaskId = TEXT("version-preview-task");
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FMakeCompositeResult Result = UnrealMcp::TaskAtlasService::MakeComposite(Request);
+	TestTrue(TEXT("composite written"), Result.Outcome == UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::CompositeWritten);
+	TestEqual(TEXT("make composite bumps version once"), UnrealMcp::GetUserToolListVersion(), Before + 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionMakeCompositeBlockedTest,
+	"UnrealMcp.UserToolListVersion.MakeCompositeBlockedDoesNotBump",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionMakeCompositeBlockedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FMakeCompositeFixture Fixture = SetupMakeCompositeFixture(TEXT("Version/Blocked"));
+	ON_SCOPE_EXIT
+	{
+		ClearMakeCompositeFixture(Fixture);
+	};
+
+	TArray<TSharedPtr<FJsonValue>> StepRefs;
+	StepRefs.Add(MakeTaskStepRef(0, TEXT("unreal.execute_python"), TEXT("captured")));
+	TestTrue(TEXT("task fixture writes"), WriteTaskFixture(Fixture.SavedRoot, TEXT("version-blocked-task"), TEXT("Version Blocked Tool"), StepRefs));
+
+	UnrealMcp::TaskAtlasService::FMakeCompositeRequest Request;
+	Request.TaskId = TEXT("version-blocked-task");
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FMakeCompositeResult Result = UnrealMcp::TaskAtlasService::MakeComposite(Request);
+	TestTrue(TEXT("blocked outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::Blocked);
+	TestEqual(TEXT("blocked keeps version"), UnrealMcp::GetUserToolListVersion(), Before);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionDeleteBumpsTest,
+	"UnrealMcp.UserToolListVersion.DeleteBumps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionDeleteBumpsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("Version/Delete"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("version_delete");
+	const FString ToolName = FString(TEXT("user.")) + ToolId;
+	TestTrue(TEXT("delete fixture writes"), WriteGeneratedToolWithPython(Fixture.PyToolsRoot, ToolId, Chunk4PassPy));
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult Result = UnrealMcp::TaskAtlasService::DeleteMadeTool(ToolName);
+	TestTrue(TEXT("delete outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Deleted);
+	TestEqual(TEXT("delete bumps version once"), UnrealMcp::GetUserToolListVersion(), Before + 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionSmokeDryRunTest,
+	"UnrealMcp.UserToolListVersion.SmokeDryRunDoesNotBump",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionSmokeDryRunTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("Version/SmokeDryRun"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("version_smoke_dry_run");
+	TestTrue(TEXT("smoke dry-run fixture writes"), WriteGeneratedToolWithPython(Fixture.PyToolsRoot, ToolId, Chunk4PassPy));
+	UnrealMcp::TaskAtlasService::FSmokeRequest Request;
+	Request.ToolName = FString(TEXT("user.")) + ToolId;
+	Request.bDryRun = true;
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(Request);
+	TestTrue(TEXT("dry-run outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::DryRun);
+	TestEqual(TEXT("smoke dry-run keeps version"), UnrealMcp::GetUserToolListVersion(), Before);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionSmokeFailedTest,
+	"UnrealMcp.UserToolListVersion.SmokeFailedBumps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionSmokeFailedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("Version/SmokeFailed"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("version_smoke_failed");
+	TestTrue(TEXT("smoke fail fixture writes"), WriteGeneratedToolWithPython(Fixture.PyToolsRoot, ToolId, Chunk4RaisePy));
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(FString(TEXT("user.")) + ToolId);
+	TestTrue(TEXT("smoke failed"), Result.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::Failed);
+	TestEqual(TEXT("smoke failure bumps version once"), UnrealMcp::GetUserToolListVersion(), Before + 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpUserToolListVersionSmokePassedTest,
+	"UnrealMcp.UserToolListVersion.SmokePassedDoesNotBump",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpUserToolListVersionSmokePassedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("Version/SmokePassed"));
+	const FString PyRoot = RegistryUserToolsRoot();
+	UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(PyRoot);
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("version_smoke_passed");
+	TestTrue(TEXT("smoke pass fixture writes"), WriteGeneratedToolWithPython(PyRoot, ToolId, Chunk4PassPy));
+	ReloadUserRegistryForTests();
+	const uint64 Before = UnrealMcp::GetUserToolListVersion();
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(FString(TEXT("user.")) + ToolId);
+	TestTrue(TEXT("smoke passed"), Result.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::Passed);
+	TestEqual(TEXT("smoke pass keeps version"), UnrealMcp::GetUserToolListVersion(), Before);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1229,6 +1470,7 @@ bool FUnrealMcpTaskAtlasMcpListIntrospectReadOnlyTest::RunTest(const FString& Pa
 	TestFalse(TEXT("list read-only result"), Listed.bIsError);
 	TestEqual(TEXT("list action"), StructuredString(Listed, TEXT("action")), TEXT("task_atlas_list_made_tools"));
 	TestTrue(TEXT("list includes at least one made tool"), StructuredInt(Listed, TEXT("count")) >= 1);
+	TestTrue(TEXT("list reports toolsListVersion"), StructuredInt(Listed, TEXT("toolsListVersion")) >= 1);
 
 	TSharedPtr<FJsonObject> IntrospectArgs = MakeShared<FJsonObject>();
 	IntrospectArgs->SetStringField(TEXT("toolName"), ToolName);
@@ -1236,6 +1478,7 @@ bool FUnrealMcpTaskAtlasMcpListIntrospectReadOnlyTest::RunTest(const FString& Pa
 	TestFalse(TEXT("introspect read-only result"), Introspected.bIsError);
 	TestEqual(TEXT("introspect action"), StructuredString(Introspected, TEXT("action")), TEXT("user_registry_introspect"));
 	TestEqual(TEXT("introspect count"), StructuredInt(Introspected, TEXT("count")), 1);
+	TestTrue(TEXT("introspect reports toolsListVersion"), StructuredInt(Introspected, TEXT("toolsListVersion")) >= 1);
 	TestTrue(TEXT("directory still exists after reads"), IFileManager::Get().DirectoryExists(*ToolDir));
 	return true;
 }
