@@ -6,7 +6,21 @@ class FJsonObject;
 
 namespace UnrealMcp
 {
-	struct FTaskAtlasModel;
+	struct FTaskAtlasStepRef
+	{
+		FString ToolName;
+		FString EventId;
+		FString CaptureStatus;
+		FString CaptureRef;
+		FString CaptureSummary;
+	};
+
+	struct FTaskAtlasModel
+	{
+		FString TaskId;
+		TArray<FTaskAtlasStepRef> StepRefs;
+		TArray<FString> CriticalPath;
+	};
 }
 
 namespace UnrealMcp::TaskAtlasService
@@ -189,6 +203,10 @@ namespace UnrealMcp::TaskAtlasService
 	FMakeCompositeResult MakeComposite(const FMakeCompositeRequest& Req);
 	FDeleteMadeToolResult DeleteMadeTool(const FString& ToolName);
 	TArray<FMadeToolEntry> ListMadeTools();
+#if WITH_DEV_AUTOMATION_TESTS
+	void SetMadeToolsRootDirForTests(const FString& RootDir);
+	void ClearMadeToolsRootDirForTests();
+#endif
 	FPromoteToRagResult PromoteToRag(const FString& TaskId);
 	FSmokeResult SmokeMadeTool(const FString& ToolName);
 	TArray<FUserToolView> IntrospectUserRegistry();
