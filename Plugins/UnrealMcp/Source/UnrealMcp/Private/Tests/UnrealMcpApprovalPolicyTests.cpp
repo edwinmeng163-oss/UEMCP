@@ -45,6 +45,21 @@ namespace
 		return Args;
 	}
 
+	TSharedPtr<FJsonObject> MakeTaskAtlasMakeArgs(bool bPreferDocumentOnly, bool bForceWriteEvenIfBlocked)
+	{
+		TSharedPtr<FJsonObject> Args = MakeApprovalTestArgs();
+		Args->SetBoolField(TEXT("preferDocumentOnly"), bPreferDocumentOnly);
+		Args->SetBoolField(TEXT("forceWriteEvenIfBlocked"), bForceWriteEvenIfBlocked);
+		return Args;
+	}
+
+	TSharedPtr<FJsonObject> MakeDryRunArgs(bool bDryRun)
+	{
+		TSharedPtr<FJsonObject> Args = MakeApprovalTestArgs();
+		Args->SetBoolField(TEXT("dryRun"), bDryRun);
+		return Args;
+	}
+
 	UnrealMcp::Approval::FApprovalRequest MakeApprovalRequest(const FString& ToolName)
 	{
 		UnrealMcp::Approval::FApprovalRequest Request;
@@ -133,6 +148,45 @@ bool FUnrealMcpApprovalPolicy_DecisionTest::RunTest(const FString& Parameters)
 		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.mcp_apply_scaffold"), MakeApplyScaffoldArgs(false), false, Risk, Reason)),
 		ApprovalDecisionValue(EDecision::Allow));
 	TestEqual(TEXT("external bypass reason"), Reason, FString(TEXT("non-assistant caller; approval bypassed")));
+
+	TestEqual(
+		TEXT("task_atlas_make_composite document-only is allowed"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_make_composite"), MakeTaskAtlasMakeArgs(true, false), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::Allow));
+	TestEqual(TEXT("task_atlas_make_composite document-only downgrades to low"), ApprovalRiskValue(Risk), ApprovalRiskValue(ERiskLevel::Low));
+
+	TestEqual(
+		TEXT("task_atlas_make_composite real write requires approval"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_make_composite"), MakeTaskAtlasMakeArgs(false, false), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::RequireApproval));
+	TestEqual(TEXT("task_atlas_make_composite real write is high"), ApprovalRiskValue(Risk), ApprovalRiskValue(ERiskLevel::High));
+
+	TestEqual(
+		TEXT("task_atlas_delete_made_tool dryRun=true is allowed"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_delete_made_tool"), MakeDryRunArgs(true), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::Allow));
+	TestEqual(
+		TEXT("task_atlas_delete_made_tool omitted dryRun requires approval"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_delete_made_tool"), MakeApprovalTestArgs(), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::RequireApproval));
+
+	TestEqual(
+		TEXT("task_atlas_promote_to_rag dryRun=true is allowed"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_promote_to_rag"), MakeDryRunArgs(true), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::Allow));
+	TestEqual(
+		TEXT("task_atlas_promote_to_rag real write requires approval"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_promote_to_rag"), MakeDryRunArgs(false), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::RequireApproval));
+
+	TestEqual(
+		TEXT("task_atlas_smoke_made_tool dryRun=true is allowed"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_smoke_made_tool"), MakeDryRunArgs(true), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::Allow));
+	TestEqual(
+		TEXT("task_atlas_smoke_made_tool real smoke requires approval"),
+		ApprovalDecisionValue(EvaluateApprovalPolicy(TEXT("unreal.task_atlas_smoke_made_tool"), MakeDryRunArgs(false), true, Risk, Reason)),
+		ApprovalDecisionValue(EDecision::RequireApproval));
 
 	return true;
 }

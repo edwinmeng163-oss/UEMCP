@@ -320,7 +320,7 @@ The Chat panel also has a `Task Atlas` button. It opens a local Slate view over
 `Saved/UnrealMcp/Tasks`, showing extracted workflows, unused tools, live search,
 tool details, functional pinning, `To Skills` / `To RAG` promote actions, and
 `Make Tool` preview composite generation.
-The plugin registry currently contains 181 registered MCP tools across actors,
+The plugin registry currently contains 187 registered MCP tools across actors,
 blueprint, code, editor, material, memory, scaffold, self-extension, skills,
 task-atlas, verification, and widget categories.
 v0.27 makes AI self-extension the project-local Python user-tool path only.

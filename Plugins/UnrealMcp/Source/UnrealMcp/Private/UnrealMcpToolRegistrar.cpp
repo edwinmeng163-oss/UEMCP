@@ -119,6 +119,30 @@ namespace UnrealMcp
 			return Property;
 		}
 
+		TSharedPtr<FJsonObject> MakeIntegerProperty(const FString& Description, int32 DefaultValue)
+		{
+			TSharedPtr<FJsonObject> Property = MakeShared<FJsonObject>();
+			Property->SetStringField(TEXT("type"), TEXT("integer"));
+			Property->SetStringField(TEXT("description"), Description);
+			Property->SetNumberField(TEXT("default"), DefaultValue);
+			return Property;
+		}
+
+		TSharedPtr<FJsonObject> MakeConstBoolProperty(const FString& Description, bool ConstValue)
+		{
+			TSharedPtr<FJsonObject> Property = MakeBoolProperty(Description, ConstValue);
+			Property->SetBoolField(TEXT("const"), ConstValue);
+			return Property;
+		}
+
+		TSharedPtr<FJsonObject> MakeUserToolNameProperty(const FString& Description)
+		{
+			TSharedPtr<FJsonObject> Property = MakeStringProperty(Description, FString());
+			Property->SetNumberField(TEXT("minLength"), 6.0);
+			Property->SetStringField(TEXT("pattern"), TEXT("^user\\.[A-Za-z0-9_]+$"));
+			return Property;
+		}
+
 		TArray<TSharedPtr<FJsonValue>> MakeEnumValues(const TArray<FString>& Values)
 		{
 			TArray<TSharedPtr<FJsonValue>> EnumValues;
@@ -1407,6 +1431,136 @@ namespace UnrealMcp
 		void RegisterTaskAtlasMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
 			{
+				TSharedPtr<FJsonObject> OverrideProperties = MakeShared<FJsonObject>();
+				TSharedPtr<FJsonObject> OrdinalProperty = MakeIntegerProperty(TEXT("0-based step ordinal to override."), 0);
+				OrdinalProperty->SetNumberField(TEXT("minimum"), 0.0);
+				OverrideProperties->SetObjectField(TEXT("ordinal"), OrdinalProperty);
+				OverrideProperties->SetObjectField(TEXT("toolName"), MakeStringProperty(TEXT("Optional expected tool name for the step."), FString()));
+				OverrideProperties->SetObjectField(TEXT("argumentsJson"), MakeStringProperty(TEXT("Closed-schema JSON string parsed into override arguments for this step."), TEXT("{}")));
+				TSharedPtr<FJsonObject> OverrideItemSchema = MakeSchemaWithRequired(OverrideProperties, TArray<FString>{ TEXT("ordinal"), TEXT("argumentsJson") });
+
+				TSharedPtr<FJsonObject> OverrideArray = MakeShared<FJsonObject>();
+				OverrideArray->SetStringField(TEXT("type"), TEXT("array"));
+				OverrideArray->SetStringField(TEXT("description"), TEXT("Optional strict override bridge for developer tools. Each entry carries JSON as a string."));
+				OverrideArray->SetObjectField(TEXT("items"), OverrideItemSchema);
+
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("taskId"), MakeStringProperty(TEXT("Task Atlas task id to classify and convert."), FString()));
+				Properties->SetObjectField(TEXT("preferDocumentOnly"), MakeBoolProperty(TEXT("Dry-run/document-only mode. When true, never writes Tools/UnrealMcpPyTools and writes/returns a markdown draft instead."), false));
+				Properties->SetObjectField(TEXT("forceWriteEvenIfBlocked"), MakeBoolProperty(TEXT("Developer escape hatch. Still requires AssistantRun approval when invoked by AI; UI must not set this."), false));
+				Properties->SetObjectField(TEXT("overrideStepArgs"), OverrideArray);
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_atlas_make_composite"),
+					TEXT("Make Task Atlas Composite"),
+					TEXT("Turns a Task Atlas task into a generated preview composite Python user tool or a document-only draft based on replay eligibility."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 Task Atlas Make Tool Set MCP wrapper over TaskAtlasService::MakeComposite.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("taskId") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("toolName"), MakeUserToolNameProperty(TEXT("Generated user tool name to delete. Only Task Atlas generated tools are eligible.")));
+				Properties->SetObjectField(TEXT("confirm"), MakeConstBoolProperty(TEXT("Must be true. The tool refuses deletion without explicit confirmation."), true));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("When true, report the target dir and reload effect without deleting. confirm=true is still required."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_atlas_delete_made_tool"),
+					TEXT("Delete Task Atlas Made Tool"),
+					TEXT("Removes a Task Atlas generated user composite and reloads the user registry."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 Task Atlas generated composite deletion wrapper with confirm guard.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("toolName"), TEXT("confirm") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("includeStale"), MakeBoolProperty(TEXT("Include generated dirs that are not currently loaded in the user registry."), true));
+				Properties->SetObjectField(TEXT("includeFailureMarkers"), MakeBoolProperty(TEXT("Include generated_smoke_failed and MakeToolSetFailures diagnostic links when present."), true));
+				Properties->SetObjectField(TEXT("sourceTaskId"), MakeStringProperty(TEXT("Optional exact task id filter. Empty means no filter."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_atlas_list_made_tools"),
+					TEXT("List Task Atlas Made Tools"),
+					TEXT("Lists Task Atlas generated user composites from the user-tool registry roots for diagnostics and UI polling."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 read-only Task Atlas generated composite listing wrapper.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("taskId"), MakeStringProperty(TEXT("Task Atlas task id to promote."), FString()));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("When true, report source/target paths and refresh plan without writing KnowledgeSources."), false));
+				Properties->SetObjectField(TEXT("refreshIndex"), MakeBoolProperty(TEXT("Run knowledge_index_refresh after writing the source."), true));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_atlas_promote_to_rag"),
+					TEXT("Promote Task Atlas Task To RAG"),
+					TEXT("Promotes a Task Atlas task or draft into a RAG knowledge source and refreshes the knowledge index on real writes."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 Task Atlas RAG promotion wrapper over TaskAtlasService::PromoteToRag.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("taskId") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("toolName"), MakeUserToolNameProperty(TEXT("Generated composite user tool to smoke.")));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("When true, validate presence and show smoke args without executing the user tool."), true));
+				Properties->SetObjectField(TEXT("acceptChangedHashes"), MakeBoolProperty(TEXT("Forwarded to user registry reload only when a real pre-smoke reload is required. Default must remain false."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.task_atlas_smoke_made_tool"),
+					TEXT("Smoke Task Atlas Made Tool"),
+					TEXT("Runs or previews a smoke test for a generated composite user tool and records failure diagnostics without deleting the tool."),
+					TEXT("task-atlas"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::High);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/TaskAtlas.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 Task Atlas generated composite smoke wrapper over TaskAtlasService::SmokeMadeTool.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("toolName") }));
+			}
+
+			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
 				Properties->SetObjectField(TEXT("kind"), MakeEnumStringProperty(TEXT("Activity annotation kind."), TEXT("user_intent"), TArray<FString>{ TEXT("user_intent"), TEXT("ai_summary") }));
 				Properties->SetObjectField(TEXT("content"), MakeStringProperty(TEXT("Annotation content to write into ActivityLog."), FString()));
@@ -1716,6 +1870,27 @@ namespace UnrealMcp
 
 		void RegisterSelfExtensionMcpToolDescriptors(FUnrealMcpToolRegistrar& Registrar)
 		{
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("includeToolJson"), MakeBoolProperty(TEXT("Include sanitized tool.json snippets. Do not include private captured args."), false));
+				Properties->SetObjectField(TEXT("includePythonSha"), MakeBoolProperty(TEXT("Include python handler SHA-256 where available."), true));
+				Properties->SetObjectField(TEXT("toolName"), MakeStringProperty(TEXT("Optional exact user tool name filter. Empty means all."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.user_registry_introspect"),
+					TEXT("Introspect User Registry"),
+					TEXT("Inspects user registry state, generated source metadata, handler hashes, lifecycle state, and rejection reasons without exposing private captured args."),
+					TEXT("self-extension"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/SelfExtensionPipeline.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 visible read-only user registry introspection wrapper over TaskAtlasService::IntrospectUserRegistry.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
 			Registrar.Add(
 				MakeDescriptor(
 					TEXT("unreal.mcp_tool_audit"),

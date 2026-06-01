@@ -4257,6 +4257,52 @@
       "notes": ""
     },
     {
+      "name": "unreal.user_registry_introspect",
+      "category": "self-extension",
+      "handlerName": "unreal.user_registry_introspect",
+      "title": "Introspect User Registry",
+      "description": "Inspect user registry state, generated source metadata, handler hashes, lifecycle state, and rejection reasons without exposing private captured args.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/SelfExtensionPipeline.md",
+      "reason": "v0.31 visible read-only user registry introspection wrapper over TaskAtlasService::IntrospectUserRegistry.",
+      "summaryTemplate": "Inspected user registry tools",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "includeToolJson": {
+            "type": "boolean",
+            "description": "Include sanitized tool.json snippets. Do not include private captured args.",
+            "default": false
+          },
+          "includePythonSha": {
+            "type": "boolean",
+            "description": "Include python handler SHA-256 where available.",
+            "default": true
+          },
+          "toolName": {
+            "type": "string",
+            "description": "Optional exact user tool name filter. Empty means all.",
+            "default": ""
+          }
+        },
+        "required": []
+      },
+      "notes": "AssistantRun approval: not_required. This tool is read-only and sanitizes generated metadata; it never returns private captured args or Python source."
+    },
+    {
       "name": "unreal.mcp_tool_audit",
       "category": "self-extension",
       "handlerName": "unreal.mcp_tool_audit",
@@ -11235,6 +11281,274 @@
         }
       },
       "notes": "Calls Anthropic through configured provider settings, preferring claude-haiku-4-5 and falling back to claude-sonnet-4-6. Missing provider config returns success with no_provider_configured skips. The tool never overwrites pinned tasks or labels outside the exact Session YYYY-MM-DD HH:MM placeholder with empty userIntentText."
+    },
+    {
+      "name": "unreal.task_atlas_make_composite",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_atlas_make_composite",
+      "title": "Make Task Atlas Composite",
+      "description": "Turn a Task Atlas task into either a generated preview composite Python user tool or a document-only draft, depending on eligibility.",
+      "exposure": "visible",
+      "riskLevel": "high",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.31 Task Atlas Make Tool Set MCP wrapper over TaskAtlasService::MakeComposite.",
+      "summaryTemplate": "Made Task Atlas composite for {args.taskId}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Task Atlas task id to classify and convert."
+          },
+          "preferDocumentOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "Dry-run/document-only mode. When true, never writes Tools/UnrealMcpPyTools and writes/returns a markdown draft instead."
+          },
+          "forceWriteEvenIfBlocked": {
+            "type": "boolean",
+            "default": false,
+            "description": "Developer escape hatch. Still requires AssistantRun approval when invoked by AI; UI must not set this."
+          },
+          "overrideStepArgs": {
+            "type": "array",
+            "description": "Optional strict override bridge for developer tools. Each item carries JSON as a string to keep the MCP schema closed.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ordinal",
+                "argumentsJson"
+              ],
+              "properties": {
+                "ordinal": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "toolName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "argumentsJson": {
+                  "type": "string",
+                  "minLength": 2
+                }
+              }
+            },
+            "default": []
+          }
+        }
+      },
+      "notes": "AssistantRun approval: required for generated PyTools writes and forceWriteEvenIfBlocked=true; preferDocumentOnly=true is the dry-run equivalent."
+    },
+    {
+      "name": "unreal.task_atlas_delete_made_tool",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_atlas_delete_made_tool",
+      "title": "Delete Task Atlas Made Tool",
+      "description": "Remove a Task Atlas generated user composite and reload the user registry.",
+      "exposure": "visible",
+      "riskLevel": "high",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.31 Task Atlas generated composite deletion wrapper with confirm guard.",
+      "summaryTemplate": "Deleted Task Atlas made tool {args.toolName}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "toolName",
+          "confirm"
+        ],
+        "properties": {
+          "toolName": {
+            "type": "string",
+            "minLength": 6,
+            "pattern": "^user\\.[A-Za-z0-9_]+$",
+            "description": "Generated user tool name to delete. Only tools with Task Atlas generator metadata are eligible."
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true. The tool refuses deletion without explicit confirmation."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, report the target dir and reload effect without deleting. confirm=true is still required."
+          }
+        }
+      },
+      "notes": "AssistantRun approval: required for dryRun=false deletion. The wrapper refuses confirm=false and the service refuses non-Task-Atlas-generated tools."
+    },
+    {
+      "name": "unreal.task_atlas_list_made_tools",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_atlas_list_made_tools",
+      "title": "List Task Atlas Made Tools",
+      "description": "List Task Atlas generated user composites for CLI diagnostics and Made Tools views.",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.31 read-only Task Atlas generated composite listing wrapper.",
+      "summaryTemplate": "Listed Task Atlas made tools",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "includeStale": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include generated dirs that are not currently loaded in the user registry."
+          },
+          "includeFailureMarkers": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include generated_smoke_failed and MakeToolSetFailures diagnostic links when present."
+          },
+          "sourceTaskId": {
+            "type": "string",
+            "default": "",
+            "description": "Optional exact task id filter. Empty means no filter."
+          }
+        },
+        "required": []
+      },
+      "notes": "AssistantRun approval: not_required. Read-only registry and generated-dir metadata listing."
+    },
+    {
+      "name": "unreal.task_atlas_promote_to_rag",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_atlas_promote_to_rag",
+      "title": "Promote Task Atlas Task To RAG",
+      "description": "Promote a Task Atlas task or draft into a RAG knowledge source and refresh the knowledge index.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.31 Task Atlas RAG promotion wrapper over TaskAtlasService::PromoteToRag.",
+      "summaryTemplate": "Promoted Task Atlas task {args.taskId} to RAG",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "taskId"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Task Atlas task id to promote."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, report source/target paths and refresh plan without writing KnowledgeSources."
+          },
+          "refreshIndex": {
+            "type": "boolean",
+            "default": true,
+            "description": "Run knowledge_index_refresh after writing the source."
+          }
+        }
+      },
+      "notes": "AssistantRun approval: required for dryRun=false because this writes long-lived KnowledgeSources. refreshIndex=false real writes are refused by the wrapper until service support exists."
+    },
+    {
+      "name": "unreal.task_atlas_smoke_made_tool",
+      "category": "task-atlas",
+      "handlerName": "unreal.task_atlas_smoke_made_tool",
+      "title": "Smoke Task Atlas Made Tool",
+      "description": "Run or preview a smoke test for a generated composite user tool and record failure diagnostics without deleting the tool.",
+      "exposure": "visible",
+      "riskLevel": "high",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/TaskAtlas.md",
+      "reason": "v0.31 Task Atlas generated composite smoke wrapper over TaskAtlasService::SmokeMadeTool.",
+      "summaryTemplate": "Smoked Task Atlas made tool {args.toolName}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "toolName"
+        ],
+        "properties": {
+          "toolName": {
+            "type": "string",
+            "minLength": 6,
+            "pattern": "^user\\.[A-Za-z0-9_]+$",
+            "description": "Generated composite user tool to smoke."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, validate presence and show smoke args without executing the user tool."
+          },
+          "acceptChangedHashes": {
+            "type": "boolean",
+            "default": false,
+            "description": "Forwarded to user registry reload only when a real pre-smoke reload is required. Default must remain false."
+          }
+        }
+      },
+      "notes": "AssistantRun approval: required for dryRun=false because real smoke can execute user Python and can update generated failure markers."
     },
     {
       "name": "unreal.code_workspace_status",

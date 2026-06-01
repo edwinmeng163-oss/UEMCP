@@ -70,6 +70,9 @@ namespace UnrealMcp::Approval
 		if (ToolName == TEXT("unreal.mcp_clean_test_artifacts")) { return ERiskLevel::High; }
 		if (ToolName == TEXT("unreal.code_apply_change")) { return ERiskLevel::High; }
 		if (ToolName == TEXT("unreal.code_rollback_change")) { return ERiskLevel::High; }
+		if (ToolName == TEXT("unreal.task_atlas_make_composite")) { return ERiskLevel::High; }
+		if (ToolName == TEXT("unreal.task_atlas_delete_made_tool")) { return ERiskLevel::High; }
+		if (ToolName == TEXT("unreal.task_atlas_smoke_made_tool")) { return ERiskLevel::High; }
 
 		// HIGH: core docs / registry mutations
 		if (ToolName.StartsWith(TEXT("unreal.docs_"))) { return ERiskLevel::High; }
@@ -82,6 +85,7 @@ namespace UnrealMcp::Approval
 		if (ToolName == TEXT("unreal.scaffold_mcp_tool")) { return ERiskLevel::Medium; }
 		if (ToolName == ::UnrealMcp::Extension::ControlToolUserRegistryReload) { return ERiskLevel::Medium; }
 		if (ToolName == ::UnrealMcp::Extension::ControlToolUserToolSmoke) { return ERiskLevel::Low; }
+		if (ToolName == TEXT("unreal.task_atlas_promote_to_rag")) { return ERiskLevel::Medium; }
 		if (ToolName.StartsWith(TEXT("unreal.spawn_"))) { return ERiskLevel::Medium; }
 		if (ToolName.StartsWith(TEXT("unreal.set_"))) { return ERiskLevel::Medium; }
 		if (ToolName.StartsWith(TEXT("unreal.create_"))) { return ERiskLevel::Medium; }
@@ -114,6 +118,16 @@ namespace UnrealMcp::Approval
 		auto GetDryRunDefaultTrue = [&Arguments]()
 		{
 			bool bDryRun = true;
+			if (Arguments.IsValid() && Arguments->HasField(TEXT("dryRun")))
+			{
+				bDryRun = Arguments->GetBoolField(TEXT("dryRun"));
+			}
+			return bDryRun;
+		};
+
+		auto GetDryRunDefaultFalse = [&Arguments]()
+		{
+			bool bDryRun = false;
 			if (Arguments.IsValid() && Arguments->HasField(TEXT("dryRun")))
 			{
 				bDryRun = Arguments->GetBoolField(TEXT("dryRun"));
@@ -173,6 +187,66 @@ namespace UnrealMcp::Approval
 			}
 			OutRiskLevel = ERiskLevel::High;
 			OutReason = TEXT("code_rollback_change dryRun=false restores user code files; requires approval");
+			return EDecision::RequireApproval;
+		}
+
+		if (ToolName == TEXT("unreal.task_atlas_make_composite"))
+		{
+			const bool bPreferDocumentOnly = Arguments.IsValid()
+				&& Arguments->HasField(TEXT("preferDocumentOnly"))
+				&& Arguments->GetBoolField(TEXT("preferDocumentOnly"));
+			const bool bForceWriteEvenIfBlocked = Arguments.IsValid()
+				&& Arguments->HasField(TEXT("forceWriteEvenIfBlocked"))
+				&& Arguments->GetBoolField(TEXT("forceWriteEvenIfBlocked"));
+			if (bPreferDocumentOnly && !bForceWriteEvenIfBlocked)
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("task_atlas_make_composite preferDocumentOnly=true is document-only; allowed");
+				return EDecision::Allow;
+			}
+			OutRiskLevel = ERiskLevel::High;
+			OutReason = TEXT("task_atlas_make_composite can write generated user tools; requires approval");
+			return EDecision::RequireApproval;
+		}
+
+		if (ToolName == TEXT("unreal.task_atlas_delete_made_tool"))
+		{
+			if (GetDryRunDefaultFalse())
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("task_atlas_delete_made_tool dryRun=true is preview-only; allowed");
+				return EDecision::Allow;
+			}
+			OutRiskLevel = ERiskLevel::High;
+			OutReason = TEXT("task_atlas_delete_made_tool deletes generated user tools; requires approval");
+			return EDecision::RequireApproval;
+		}
+
+		if (ToolName == TEXT("unreal.task_atlas_promote_to_rag"))
+		{
+			if (Arguments.IsValid()
+				&& Arguments->HasField(TEXT("dryRun"))
+				&& Arguments->GetBoolField(TEXT("dryRun")))
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("task_atlas_promote_to_rag dryRun=true is preview-only; allowed");
+				return EDecision::Allow;
+			}
+			OutRiskLevel = ERiskLevel::Medium;
+			OutReason = TEXT("task_atlas_promote_to_rag writes KnowledgeSources; requires approval");
+			return EDecision::RequireApproval;
+		}
+
+		if (ToolName == TEXT("unreal.task_atlas_smoke_made_tool"))
+		{
+			if (GetDryRunDefaultTrue())
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("task_atlas_smoke_made_tool dryRun=true is preview-only; allowed");
+				return EDecision::Allow;
+			}
+			OutRiskLevel = ERiskLevel::High;
+			OutReason = TEXT("task_atlas_smoke_made_tool can execute user Python and write failure markers; requires approval");
 			return EDecision::RequireApproval;
 		}
 

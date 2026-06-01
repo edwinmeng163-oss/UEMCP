@@ -156,7 +156,8 @@ drafts unless explicitly asked.
   knowledge index/search/eval, tool/workflow recommend, project memory CRUD,
   skill activity/drafts/promote, task extract/list/describe/rate/pin/promote,
   schema v2 ordered Task Atlas stepRefs with preview composite generation from
-  private captured args,
+  private captured args, MCP wrappers for making/listing/deleting/smoking
+  Task Atlas generated tools, RAG promotion, and user-registry introspection,
   `unreal.automation_list`, `unreal.automation_run`,
   `unreal.automation_report`, `unreal.pie_smoke`,
   `unreal.verify_player_controls`, `unreal.pie_input_probe`,
@@ -170,7 +171,7 @@ The explicit ToolRegistry is central. Do not bypass it:
 `Tools/UnrealMcpToolRegistry/schema.json`, and
 `Schemas/UnrealMcpToolRegistry.schema.json`.
 
-At the time this file was written, the registry contained 181 entries across:
+At the time this file was written, the registry contained 187 entries across:
 actors, blueprint, code, editor, material, memory, scaffold, self-extension,
 skills, task-atlas, verification, and widget.
 
@@ -194,8 +195,8 @@ defaults, per-step `policyDecision`, `isError`, and force-dry-run
 makes Task Atlas `Make Tool Set` generate skeleton composite Python user tools
 directly under the user registry from visible core `unreal.*` critical-path
 steps, writing closed `tool.json` schemas, `pythonHandlerSha256`, `smokeArgs`,
-then running user-registry reload and smoke while preserving the 181-tool core
-registry count; v0.30 R2 Wave B
+then running user-registry reload and smoke while preserving the then-current
+core registry count; v0.30 R2 Wave B
 adds Python user-tool `call_tool` / `call_tool_raw` builtins over
 `unreal.UnrealMcpCallTool.call_tool`, enabling fail-closed composition of
 visible core `unreal.*` tools; v0.29 Wave B implements the `code` category with
@@ -260,8 +261,9 @@ Execution: UnrealMcpToolExecutionGuard.cpp/.h, UnrealMcp*OutcomeVerifier.cpp,
   UnrealMcpHashUtils.cpp/.h, UnrealMcpCaptureRedaction.cpp/.h,
   UnrealMcpCapturedArgsStore.cpp/.h
 Task/verification: UnrealMcpTaskAtlasTools.cpp/.h,
-  UnrealMcpTaskLabelBackfillTool.cpp/.h, UnrealMcpAutomationTools.cpp/.h,
-  UnrealMcpPieSmokeTools.cpp/.h, UnrealMcpDiagnosticsTools.cpp/.h
+  UnrealMcpTaskAtlasService.cpp/.h, UnrealMcpTaskLabelBackfillTool.cpp/.h,
+  UnrealMcpAutomationTools.cpp/.h, UnrealMcpPieSmokeTools.cpp/.h,
+  UnrealMcpDiagnosticsTools.cpp/.h
 Knowledge: UnrealMcpKnowledgeBridge.h, UnrealMcpKnowledgeTools.cpp,
   UnrealMcpWorkflowTools.cpp
 Category handlers: UnrealMcpEditorTools.cpp,
