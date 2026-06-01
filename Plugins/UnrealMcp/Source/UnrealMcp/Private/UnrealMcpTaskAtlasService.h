@@ -226,4 +226,6 @@ namespace UnrealMcp::TaskAtlasService
 	FSmokeResult SmokeMadeTool(const FSmokeRequest& Req);
 	FSmokeResult SmokeMadeTool(const FString& ToolName);
 	TArray<FUserToolView> IntrospectUserRegistry();
+	FString SanitizeToolIdPart(const FString& In);
+	FString MakeAtlasToolId(const FString& TaskLabel, const FString& TaskId);
 }

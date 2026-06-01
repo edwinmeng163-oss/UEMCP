@@ -676,32 +676,53 @@ namespace TaskAtlasWindow
 		return Values;
 	}
 
-	int32 CountDeniedCompositeStepRefs(
-		const TArray<TSharedPtr<FJsonValue>>& StepRefs,
-		const TSet<FString>& VisibleCoreToolNames)
+	FString EligibilityToText(UnrealMcp::TaskAtlasService::EEligibility Eligibility)
 	{
-		int32 Count = 0;
-		for (const TSharedPtr<FJsonValue>& StepValue : StepRefs)
+		switch (Eligibility)
 		{
-			const TSharedPtr<FJsonObject> StepObject = StepValue.IsValid() && StepValue->Type == EJson::Object ? StepValue->AsObject() : nullptr;
-			if (!StepObject.IsValid())
-			{
-				continue;
-			}
+		case UnrealMcp::TaskAtlasService::EEligibility::PreviewReady:
+			return TEXT("preview_ready");
+		case UnrealMcp::TaskAtlasService::EEligibility::Partial:
+			return TEXT("partial");
+		case UnrealMcp::TaskAtlasService::EEligibility::Blocked:
+			return TEXT("blocked");
+		case UnrealMcp::TaskAtlasService::EEligibility::SkeletonPreCapture:
+		default:
+			return TEXT("skeleton_pre_capture");
+		}
+	}
 
-			const FString ToolName = GetStringField(StepObject, TEXT("tool")).TrimStartAndEnd();
-			if (!ToolName.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive)
-				|| !VisibleCoreToolNames.Contains(ToolName))
-			{
-				continue;
-			}
+	UnrealMcp::FTaskAtlasModel BuildTaskAtlasModel(const TSharedPtr<FJsonObject>& TaskObject, const FString& FallbackTaskId, const TArray<FString>& FallbackCriticalPath)
+	{
+		UnrealMcp::FTaskAtlasModel Model;
+		Model.TaskId = GetStringField(TaskObject, TEXT("taskId"), FallbackTaskId);
+		Model.CriticalPath = GetStringArrayField(TaskObject, TEXT("criticalPath"));
+		if (Model.CriticalPath.Num() == 0)
+		{
+			Model.CriticalPath = FallbackCriticalPath;
+		}
 
-			if (GetStringField(StepObject, TEXT("policyClassAtCapture")).TrimStartAndEnd().ToLower() == TEXT("deny"))
+		const TArray<TSharedPtr<FJsonValue>>* StepRefs = nullptr;
+		if (TaskObject.IsValid() && TaskObject->TryGetArrayField(TEXT("stepRefs"), StepRefs) && StepRefs)
+		{
+			for (const TSharedPtr<FJsonValue>& StepValue : *StepRefs)
 			{
-				++Count;
+				const TSharedPtr<FJsonObject> StepObject = StepValue.IsValid() && StepValue->Type == EJson::Object ? StepValue->AsObject() : nullptr;
+				if (!StepObject.IsValid())
+				{
+					continue;
+				}
+
+				UnrealMcp::FTaskAtlasStepRef Step;
+				Step.ToolName = GetStringField(StepObject, TEXT("tool"));
+				Step.EventId = GetStringField(StepObject, TEXT("eventId"));
+				Step.CaptureStatus = GetStringField(StepObject, TEXT("captureStatus"));
+				Step.CaptureRef = GetStringField(StepObject, TEXT("captureRef"));
+				Step.CaptureSummary = GetStringField(StepObject, TEXT("captureSummary"));
+				Model.StepRefs.Add(MoveTemp(Step));
 			}
 		}
-		return Count;
+		return Model;
 	}
 
 	int32 WorkflowSortRank(const STaskAtlasWindow::FWorkflowRow& Row)
@@ -715,6 +736,69 @@ namespace TaskAtlasWindow
 			return 1;
 		}
 		return 2;
+	}
+
+	void PopulateVisibleToolRows(TArray<STaskAtlasWindow::FToolRow>& Tools, TMap<FString, STaskAtlasWindow::FToolRow>& ToolsByName)
+	{
+		for (const UnrealMcp::FToolRegistryEntry& Entry : UnrealMcp::GetToolRegistryEntries())
+		{
+			if (Entry.Exposure != UnrealMcp::EToolExposure::Visible)
+			{
+				continue;
+			}
+
+			STaskAtlasWindow::FToolRow Tool;
+			Tool.Name = Entry.Name;
+			Tool.Category = Entry.Category;
+			Tool.RiskLevel = UnrealMcp::LexToString(Entry.Policy.RiskLevel);
+			Tool.Description = Entry.Description;
+			Tool.Owner = Entry.Policy.Owner;
+			Tool.DocsPath = Entry.Policy.DocsPath;
+			Tool.InputSchemaText = JsonObjectToPrettyString(Entry.InputSchema);
+			Tools.Add(Tool);
+			ToolsByName.Add(Tool.Name, Tool);
+		}
+
+		Tools.Sort([](const STaskAtlasWindow::FToolRow& Left, const STaskAtlasWindow::FToolRow& Right)
+		{
+			return Left.Name < Right.Name;
+		});
+	}
+
+	void AppendWorkflowRowsFromTaskValues(const TArray<TSharedPtr<FJsonValue>>& TaskValues, TArray<STaskAtlasWindow::FWorkflowRow>& Workflows)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : TaskValues)
+		{
+			if (!Value.IsValid() || Value->Type != EJson::Object || !Value->AsObject().IsValid())
+			{
+				continue;
+			}
+
+			const TSharedPtr<FJsonObject> TaskObject = Value->AsObject();
+			STaskAtlasWindow::FWorkflowRow Row;
+			Row.TaskId = GetStringField(TaskObject, TEXT("taskId"));
+			Row.Label = GetStringField(TaskObject, TEXT("label"), Row.TaskId);
+			Row.Rating = GetStringField(TaskObject, TEXT("rating"), TEXT("unrated"));
+			Row.TEndUtc = GetStringField(TaskObject, TEXT("tEndUtc"));
+			Row.ReplayEligibility = UnrealMcp::TaskAtlasComposite::NormalizeReplayEligibility(
+				GetStringField(TaskObject, TEXT("replayEligibility"), TEXT("skeleton_pre_capture")));
+			Row.ReplayUnavailableReason = GetStringField(TaskObject, TEXT("replayUnavailableReason"));
+			Row.bPinned = GetBoolField(TaskObject, TEXT("pinned"));
+			Row.CriticalPath = GetStringArrayField(TaskObject, TEXT("criticalPath"));
+			Row.Json = TaskObject;
+
+			const UnrealMcp::FTaskAtlasModel TaskModel = BuildTaskAtlasModel(Row.Json, Row.TaskId, Row.CriticalPath);
+			const UnrealMcp::TaskAtlasService::FEligibilityResult Eligibility = UnrealMcp::TaskAtlasService::ClassifyTask(TaskModel);
+			Row.Eligibility = Eligibility.Eligibility;
+			Row.BlockedFirstStep = Eligibility.BlockedFirstStep;
+			Row.BlockedFirstReason = Eligibility.BlockedFirstReason;
+			Row.ReplayEligibility = EligibilityToText(Eligibility.Eligibility);
+			if (Row.Eligibility == UnrealMcp::TaskAtlasService::EEligibility::Blocked && !Row.BlockedFirstReason.IsEmpty())
+			{
+				Row.ReplayUnavailableReason = Row.BlockedFirstReason;
+			}
+			Workflows.Add(Row);
+		}
 	}
 
 	FString JoinCriticalPath(const TArray<FString>& CriticalPath)
@@ -751,67 +835,6 @@ namespace TaskAtlasWindow
 		{
 			OutValue.AppendChar('-');
 		}
-	}
-
-	FString TrimUnderscores(FString Value)
-	{
-		while (Value.StartsWith(TEXT("_")))
-		{
-			Value.RightChopInline(1);
-		}
-		while (Value.EndsWith(TEXT("_")))
-		{
-			Value.LeftChopInline(1);
-		}
-		return Value;
-	}
-
-	void AppendNormalizedUnderscore(FString& OutValue)
-	{
-		if (!OutValue.IsEmpty() && !OutValue.EndsWith(TEXT("_")))
-		{
-			OutValue.AppendChar('_');
-		}
-	}
-
-	FString SanitizeToolIdPart(const FString& Source)
-	{
-		FString Slug;
-		for (const TCHAR Ch : Source)
-		{
-			if (Ch >= 'A' && Ch <= 'Z')
-			{
-				Slug.AppendChar(static_cast<TCHAR>(Ch + ('a' - 'A')));
-			}
-			else if ((Ch >= 'a' && Ch <= 'z') || (Ch >= '0' && Ch <= '9'))
-			{
-				Slug.AppendChar(Ch);
-			}
-			else
-			{
-				AppendNormalizedUnderscore(Slug);
-			}
-		}
-		return TrimUnderscores(Slug);
-	}
-
-	FString MakeAtlasToolId(const FString& Label, const FString& TaskId)
-	{
-		FString ToolId = SanitizeToolIdPart(Label);
-		if (ToolId.IsEmpty())
-		{
-			ToolId = SanitizeToolIdPart(TaskId);
-		}
-		if (ToolId.IsEmpty())
-		{
-			ToolId = TEXT("workflow");
-		}
-		ToolId = FString::Printf(TEXT("atlas_%s"), *ToolId);
-		if (ToolId.Len() > 64)
-		{
-			ToolId = TrimUnderscores(ToolId.Left(64));
-		}
-		return ToolId.IsEmpty() ? FString(TEXT("atlas_workflow")) : ToolId;
 	}
 
 	FString SanitizeSkillSlugPart(const FString& Source)
@@ -854,339 +877,6 @@ namespace TaskAtlasWindow
 		}
 		return Slug;
 	}
-
-	FString SanitizeTaskFilename(const FString& TaskId)
-	{
-		FString SafeName;
-		for (const TCHAR Ch : TaskId)
-		{
-			if ((Ch >= 'A' && Ch <= 'Z')
-				|| (Ch >= 'a' && Ch <= 'z')
-				|| (Ch >= '0' && Ch <= '9')
-				|| Ch == '-'
-				|| Ch == '_'
-				|| Ch == '.')
-			{
-				SafeName.AppendChar(Ch);
-			}
-			else
-			{
-				AppendNormalizedDash(SafeName);
-			}
-		}
-
-		SafeName = TrimDashes(SafeName);
-		if (SafeName.Len() > 128)
-		{
-			SafeName = TrimDashes(SafeName.Left(128));
-		}
-		if (SafeName.IsEmpty() || SafeName == TEXT(".") || SafeName == TEXT(".."))
-		{
-			SafeName = TEXT("task-atlas-workflow");
-		}
-		return SafeName;
-	}
-
-	FString RedactHomePaths(FString Text)
-	{
-		const FString Replacement = TEXT("<HOME>/");
-		auto RedactPrefix = [&Text, &Replacement](const FString& Prefix)
-		{
-			int32 SearchStart = 0;
-			while (SearchStart < Text.Len())
-			{
-				const int32 PrefixIndex = Text.Find(Prefix, ESearchCase::CaseSensitive, ESearchDir::FromStart, SearchStart);
-				if (PrefixIndex == INDEX_NONE)
-				{
-					break;
-				}
-
-				const int32 NameStart = PrefixIndex + Prefix.Len();
-				const int32 SlashIndex = Text.Find(TEXT("/"), ESearchCase::CaseSensitive, ESearchDir::FromStart, NameStart);
-				if (SlashIndex == INDEX_NONE)
-				{
-					break;
-				}
-				if (SlashIndex == NameStart)
-				{
-					SearchStart = NameStart + 1;
-					continue;
-				}
-
-				Text = Text.Left(PrefixIndex) + Replacement + Text.Mid(SlashIndex + 1);
-				SearchStart = PrefixIndex + Replacement.Len();
-			}
-		};
-
-		RedactPrefix(TEXT("/Users/"));
-		RedactPrefix(TEXT("/home/"));
-		return Text;
-	}
-
-	FString MarkdownValue(const FString& Value, bool bRedact = true)
-	{
-		const FString CleanValue = (bRedact ? RedactHomePaths(Value) : Value).TrimStartAndEnd();
-		return CleanValue.IsEmpty() ? FString(TEXT("(empty)")) : CleanValue;
-	}
-
-	FString BoolText(bool bValue)
-	{
-		return bValue ? FString(TEXT("true")) : FString(TEXT("false"));
-	}
-
-	void AppendMetadataLine(FString& OutMarkdown, const FString& FieldName, const FString& Value, bool bRedact = true)
-	{
-		OutMarkdown += FString::Printf(TEXT("- %s: %s\n"), *FieldName, *MarkdownValue(Value, bRedact));
-	}
-
-	void AppendTextSection(FString& OutMarkdown, const FString& Heading, const FString& Value)
-	{
-		OutMarkdown += FString::Printf(TEXT("## %s\n\n%s\n\n"), *Heading, *MarkdownValue(Value));
-	}
-
-	bool HasAdditionalEventRefFields(const TSharedPtr<FJsonObject>& EventObject)
-	{
-		if (!EventObject.IsValid())
-		{
-			return false;
-		}
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : EventObject->Values)
-		{
-			if (Pair.Key != TEXT("ts") && Pair.Key != TEXT("tool") && Pair.Key != TEXT("isError"))
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
-	void AppendEventRefs(FString& OutMarkdown, const TSharedPtr<FJsonObject>& TaskJson)
-	{
-		OutMarkdown += TEXT("## Event Refs\n\n");
-
-		const TArray<TSharedPtr<FJsonValue>>* EventRefs = nullptr;
-		if (!TaskJson.IsValid() || !TaskJson->TryGetArrayField(TEXT("eventRefs"), EventRefs) || !EventRefs || EventRefs->Num() == 0)
-		{
-			OutMarkdown += TEXT("- (none)\n\n");
-			return;
-		}
-
-		for (int32 Index = 0; Index < EventRefs->Num(); ++Index)
-		{
-			const TSharedPtr<FJsonValue>& EventValue = (*EventRefs)[Index];
-			if (!EventValue.IsValid() || EventValue->Type != EJson::Object || !EventValue->AsObject().IsValid())
-			{
-				OutMarkdown += FString::Printf(TEXT("- event %d: (non-object ref)\n"), Index + 1);
-				continue;
-			}
-
-			const TSharedPtr<FJsonObject> EventObject = EventValue->AsObject();
-			const FString Ts = RedactHomePaths(GetStringField(EventObject, TEXT("ts"), TEXT("(missing)")));
-			const FString Tool = RedactHomePaths(GetStringField(EventObject, TEXT("tool"), TEXT("(missing)")));
-			bool bEventIsError = false;
-			const FString ErrorText = EventObject->TryGetBoolField(TEXT("isError"), bEventIsError)
-				? BoolText(bEventIsError)
-				: FString(TEXT("(missing)"));
-			OutMarkdown += FString::Printf(TEXT("- event %d: ts=%s, tool=%s, isError=%s\n"), Index + 1, *Ts, *Tool, *ErrorText);
-
-			if (HasAdditionalEventRefFields(EventObject))
-			{
-				const FString JsonText = RedactHomePaths(JsonObjectToPrettyString(EventObject)).TrimStartAndEnd();
-				if (!JsonText.IsEmpty())
-				{
-					OutMarkdown += TEXT("  details:\n\n");
-					OutMarkdown += TEXT("```json\n");
-					OutMarkdown += JsonText;
-					OutMarkdown += TEXT("\n```\n");
-				}
-			}
-		}
-		OutMarkdown += TEXT("\n");
-	}
-
-	FString BuildTaskKnowledgeMarkdown(const STaskAtlasWindow::FWorkflowRow& Row)
-	{
-		const TSharedPtr<FJsonObject>& TaskJson = Row.Json;
-		const FString TaskId = GetStringField(TaskJson, TEXT("taskId"), Row.TaskId);
-		const FString Label = GetStringField(TaskJson, TEXT("label"), Row.Label);
-		const FString Rating = GetStringField(TaskJson, TEXT("rating"), Row.Rating.IsEmpty() ? TEXT("unrated") : Row.Rating);
-		const bool bPinned = GetBoolField(TaskJson, TEXT("pinned"), Row.bPinned);
-		const FString SessionId = GetStringField(TaskJson, TEXT("sessionId"));
-		const FString TStartUtc = GetStringField(TaskJson, TEXT("tStartUtc"));
-		const FString TEndUtc = GetStringField(TaskJson, TEXT("tEndUtc"), Row.TEndUtc);
-		const FString UserIntent = GetStringField(TaskJson, TEXT("userIntentText"));
-		const FString AiSummary = GetStringField(TaskJson, TEXT("aiSummaryText"));
-		TArray<FString> CriticalPath = GetStringArrayField(TaskJson, TEXT("criticalPath"));
-		if (CriticalPath.Num() == 0)
-		{
-			CriticalPath = Row.CriticalPath;
-		}
-
-		FString Markdown;
-		Markdown += TEXT("# Task Atlas Workflow\n\n");
-		Markdown += TEXT("## Metadata\n\n");
-		AppendMetadataLine(Markdown, TEXT("taskId"), TaskId, false);
-		AppendMetadataLine(Markdown, TEXT("label"), Label);
-		AppendMetadataLine(Markdown, TEXT("rating"), Rating, false);
-		AppendMetadataLine(Markdown, TEXT("pinned"), BoolText(bPinned), false);
-		AppendMetadataLine(Markdown, TEXT("sessionId"), SessionId, false);
-		AppendMetadataLine(Markdown, TEXT("tStartUtc"), TStartUtc, false);
-		AppendMetadataLine(Markdown, TEXT("tEndUtc"), TEndUtc, false);
-		Markdown += TEXT("\n");
-
-		AppendTextSection(Markdown, TEXT("User Intent"), UserIntent);
-		AppendTextSection(Markdown, TEXT("AI Summary"), AiSummary);
-
-		Markdown += TEXT("## Critical Path Tools\n\n");
-		if (CriticalPath.Num() == 0)
-		{
-			Markdown += TEXT("- (none)\n\n");
-		}
-		else
-		{
-			for (const FString& ToolName : CriticalPath)
-			{
-				Markdown += FString::Printf(TEXT("- %s\n"), *MarkdownValue(ToolName));
-			}
-			Markdown += TEXT("\n");
-		}
-
-		AppendEventRefs(Markdown, TaskJson);
-		return Markdown;
-	}
-
-	bool BuildTaskAtlasKnowledgeSourcePath(const FString& TaskId, FString& OutPath, FString& OutFailureReason)
-	{
-		FString SourceRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
-			FPaths::ProjectSavedDir(),
-			TEXT("UnrealMcp/KnowledgeSources/TaskAtlas")));
-		FPaths::NormalizeDirectoryName(SourceRoot);
-
-		if (!IFileManager::Get().MakeDirectory(*SourceRoot, true))
-		{
-			OutFailureReason = FString::Printf(TEXT("Failed to create Task Atlas knowledge source directory: %s"), *SourceRoot);
-			return false;
-		}
-
-		const FString SafeName = SanitizeTaskFilename(TaskId);
-		FString SourcePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(SourceRoot, SafeName + TEXT(".md")));
-		FPaths::NormalizeFilename(SourcePath);
-
-		const FString RootPrefix = SourceRoot + TEXT("/");
-		if (!SourcePath.StartsWith(RootPrefix, ESearchCase::IgnoreCase))
-		{
-			OutFailureReason = TEXT("Refused to write Task Atlas knowledge source outside Saved/UnrealMcp/KnowledgeSources/TaskAtlas.");
-			return false;
-		}
-
-		OutPath = SourcePath;
-		return true;
-	}
-
-	bool IsTaskAtlasCompositeUserTool(const UnrealMcp::UserRegistry::FUserToolEntry& Entry, FString& OutCompositeKind)
-	{
-		OutCompositeKind.Reset();
-		if (!Entry.ToolJson.IsValid())
-		{
-			return false;
-		}
-
-		FString Generator;
-		if (!Entry.ToolJson->TryGetStringField(TEXT("generator"), Generator)
-			|| Generator != TEXT("task-atlas-composite"))
-		{
-			return false;
-		}
-
-		Entry.ToolJson->TryGetStringField(TEXT("compositeKind"), OutCompositeKind);
-		OutCompositeKind = OutCompositeKind.TrimStartAndEnd();
-		if (OutCompositeKind.IsEmpty())
-		{
-			OutCompositeKind = TEXT("unknown");
-		}
-		return true;
-	}
-
-	FString NormalizeAbsoluteDirectory(const FString& Directory)
-	{
-		if (Directory.TrimStartAndEnd().IsEmpty())
-		{
-			return FString();
-		}
-
-		FString Result = FPaths::ConvertRelativePathToFull(Directory);
-		FPaths::NormalizeFilename(Result);
-		FPaths::CollapseRelativeDirectories(Result);
-		Result.RemoveFromEnd(TEXT("/"));
-		return Result;
-	}
-
-	FString MakeRelativeDisplayPath(const FString& AbsolutePath, const FString& FallbackRoot)
-	{
-		FString ProjectDir = NormalizeAbsoluteDirectory(FPaths::ProjectDir());
-		FString RelativePath = AbsolutePath;
-		if (!ProjectDir.IsEmpty())
-		{
-			const FString ProjectPrefix = ProjectDir + TEXT("/");
-			if (AbsolutePath.StartsWith(ProjectPrefix, ESearchCase::IgnoreCase))
-			{
-				const FString ProjectBase = ProjectDir + TEXT("/");
-				if (FPaths::MakePathRelativeTo(RelativePath, *ProjectBase))
-				{
-					FPaths::NormalizeFilename(RelativePath);
-					return RelativePath;
-				}
-			}
-		}
-
-		RelativePath = AbsolutePath;
-		const FString FallbackBase = FallbackRoot + TEXT("/");
-		if (FPaths::MakePathRelativeTo(RelativePath, *FallbackBase))
-		{
-			FPaths::NormalizeFilename(RelativePath);
-			return RelativePath;
-		}
-		return AbsolutePath;
-	}
-
-	bool ResolveUserToolScaffoldDir(
-		const FString& InputScaffoldDir,
-		FString& OutScaffoldDir,
-		FString& OutRelativeScaffoldDir,
-		FString& OutFailureReason)
-	{
-		OutScaffoldDir.Reset();
-		OutRelativeScaffoldDir.Reset();
-		OutFailureReason.Reset();
-
-		const FString RootDir = NormalizeAbsoluteDirectory(UnrealMcp::UserRegistry::GetUserToolsRootDir());
-		if (RootDir.IsEmpty())
-		{
-			OutFailureReason = TEXT("User-tool registry root is empty.");
-			return false;
-		}
-
-		const FString ScaffoldDir = NormalizeAbsoluteDirectory(InputScaffoldDir);
-		if (ScaffoldDir.IsEmpty())
-		{
-			OutFailureReason = TEXT("User tool scaffold directory is empty.");
-			return false;
-		}
-
-		const FString RootPrefix = RootDir + TEXT("/");
-		if (ScaffoldDir.Equals(RootDir, ESearchCase::IgnoreCase)
-			|| !ScaffoldDir.StartsWith(RootPrefix, ESearchCase::IgnoreCase))
-		{
-			OutFailureReason = FString::Printf(
-				TEXT("Refused to delete user tool outside the registry root: %s"),
-				*ScaffoldDir);
-			return false;
-		}
-
-		OutScaffoldDir = ScaffoldDir;
-		OutRelativeScaffoldDir = MakeRelativeDisplayPath(ScaffoldDir, RootDir);
-		return true;
-	}
 }
 
 void STaskAtlasWindow::Construct(const FArguments& InArgs, FUnrealMcpModule* InOwnerModule)
@@ -1220,6 +910,16 @@ void STaskAtlasWindow::Construct(const FArguments& InArgs, FUnrealMcpModule* InO
 					SNew(SButton)
 					.Text(LOCTEXT("Refresh", "Refresh"))
 					.OnClicked(this, &STaskAtlasWindow::HandleRefreshClicked)
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("Debug", "Debug"))
+					.ToolTipText(LOCTEXT("DebugTooltip", "Show user registry introspection summary"))
+					.OnClicked(this, &STaskAtlasWindow::HandleDebugClicked)
 				]
 			]
 			+ SVerticalBox::Slot()
@@ -1445,122 +1145,46 @@ FReply STaskAtlasWindow::HandleMakeToolClicked(FWorkflowRow Row)
 		return FReply::Handled();
 	}
 
-	const FString TaskLabel = Row.Label.TrimStartAndEnd();
-	const FString ToolId = TaskAtlasWindow::MakeAtlasToolId(TaskLabel, Row.TaskId);
-	const FString Title = TaskLabel.IsEmpty() ? ToolId : TaskLabel;
-	const FString ReplayEligibility = UnrealMcp::TaskAtlasComposite::NormalizeReplayEligibility(Row.ReplayEligibility);
-	const FString ReplaySummary = UnrealMcp::TaskAtlasComposite::ReplayStatusSummary(ReplayEligibility, Row.ReplayUnavailableReason);
-	const FString CriticalPathText = TaskAtlasWindow::JoinCriticalPath(Row.CriticalPath);
-	const FString CriticalPathDescription = CriticalPathText.IsEmpty()
-		? FString(TEXT("No critical path tools were recorded."))
-		: FString::Printf(TEXT("Critical path: %s."), *CriticalPathText);
-	const FString Description = FString::Printf(
-		TEXT("Task Atlas composite for workflow '%s'. %s Generated from the visible core-tool critical path. %s."),
-		*Title,
-		*CriticalPathDescription,
-		*ReplaySummary);
+	UnrealMcp::TaskAtlasService::FMakeCompositeRequest Req;
+	Req.TaskId = Row.TaskId;
+	Req.bPreferDocumentOnly = Row.Eligibility == UnrealMcp::TaskAtlasService::EEligibility::Blocked;
+	const FString ExpectedToolName = FString::Printf(
+		TEXT("user.%s"),
+		*UnrealMcp::TaskAtlasService::MakeAtlasToolId(Row.Label.TrimStartAndEnd(), Row.TaskId));
+	const UnrealMcp::TaskAtlasService::FMakeCompositeResult Result = UnrealMcp::TaskAtlasService::MakeComposite(Req);
 
-	TSet<FString> VisibleCoreToolNames;
-	for (const UnrealMcp::FToolRegistryEntry& Entry : UnrealMcp::GetToolRegistryEntries())
+	switch (Result.Outcome)
 	{
-		if (Entry.Exposure == UnrealMcp::EToolExposure::Visible && Entry.Name.StartsWith(TEXT("unreal."), ESearchCase::CaseSensitive))
-		{
-			VisibleCoreToolNames.Add(Entry.Name);
-		}
-	}
-
-	FString ToolName;
-	FString MainPy;
-	FString MainPySha256;
-	FString ToolJson;
-	TSharedPtr<FJsonObject> SmokeArgs;
-	TArray<FString> StepTools;
-	FString FailureReason;
-	TArray<TSharedPtr<FJsonValue>> StepRefs;
-	const TArray<TSharedPtr<FJsonValue>>* StepRefArray = nullptr;
-	if (Row.Json.IsValid() && Row.Json->TryGetArrayField(TEXT("stepRefs"), StepRefArray) && StepRefArray)
-	{
-		StepRefs = *StepRefArray;
-	}
-	if (!UnrealMcp::TaskAtlasComposite::BuildCompositeUserToolFiles(
-		ToolId,
-		Title,
-		Description,
-		Row.TaskId,
-		ReplayEligibility,
-		Row.ReplayUnavailableReason,
-		Row.CriticalPath,
-		StepRefs,
-		VisibleCoreToolNames,
-		ToolName,
-		MainPy,
-		MainPySha256,
-		ToolJson,
-		SmokeArgs,
-		StepTools,
-		FailureReason))
-	{
-		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Make Tool Set failed to generate a composite user tool.")) : FailureReason);
-		return FReply::Handled();
-	}
-
-	FString Directory;
-	if (!UnrealMcp::TaskAtlasComposite::WriteCompositeUserToolFiles(ToolId, MainPy, ToolJson, false, Directory, FailureReason))
-	{
-		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Make Tool Set failed to write the composite user tool.")) : FailureReason);
-		return FReply::Handled();
-	}
-
-	TSharedPtr<FJsonObject> ReloadArguments = MakeShared<FJsonObject>();
-	ReloadArguments->SetBoolField(TEXT("acceptChangedHashes"), true);
-	const FUnrealMcpExecutionResult ReloadResult = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_registry_reload"), *ReloadArguments);
-	if (ReloadResult.bIsError)
-	{
+	case UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::CompositeWritten:
 		SetStatus(FString::Printf(
-			TEXT("Composite user tool written at %s (%s), but registry reload failed: %s"),
-			*Directory,
-			*ReplaySummary,
-			ReloadResult.Text.IsEmpty() ? TEXT("unreal.mcp_user_registry_reload failed.") : *ReloadResult.Text));
-		return FReply::Handled();
-	}
-
-	TSharedPtr<FJsonObject> SmokeArguments = MakeShared<FJsonObject>();
-	SmokeArguments->SetStringField(TEXT("toolName"), ToolName);
-	SmokeArguments->SetStringField(TEXT("dryRunArgs"), UnrealMcp::TaskAtlasComposite::JsonObjectToCondensedString(SmokeArgs));
-	SmokeArguments->SetNumberField(TEXT("timeoutSeconds"), 15.0);
-	const FUnrealMcpExecutionResult SmokeResult = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_tool_smoke"), *SmokeArguments);
-	const int32 BlockedStepCount = TaskAtlasWindow::CountDeniedCompositeStepRefs(StepRefs, VisibleCoreToolNames);
-	const bool bGeneratedBlockedComposite = ReplayEligibility == TEXT("blocked") || BlockedStepCount > 0;
-	if (SmokeResult.bIsError)
-	{
-		RefreshMadeTools();
-		RebuildLists();
+			TEXT("Composite %s written at %s"),
+			*(Result.ToolName.IsEmpty() ? ExpectedToolName : Result.ToolName),
+			*Result.GeneratedDir));
+		break;
+	case UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::DocumentOnly:
 		SetStatus(FString::Printf(
-			TEXT("Composite user tool %s written at %s and reloaded (%s), but smoke failed: %s"),
-			*ToolName,
-			*Directory,
-			*ReplaySummary,
-			SmokeResult.Text.IsEmpty() ? TEXT("unreal.mcp_user_tool_smoke failed.") : *SmokeResult.Text));
-		return FReply::Handled();
+			TEXT("Document-only (eligibility=%s) at %s"),
+			*TaskAtlasWindow::EligibilityToText(Result.Eligibility.Eligibility),
+			*Result.DocumentPath));
+		break;
+	case UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::Blocked:
+		SetStatus(FString::Printf(
+			TEXT("Blocked at step %d (%s). Use Distill Skill / To RAG."),
+			Result.Eligibility.BlockedFirstStep,
+			*Result.Eligibility.BlockedFirstReason));
+		break;
+	case UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::StagingFailed:
+	case UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::ReloadRejected:
+		SetStatus(FString::Printf(TEXT("Failed: %s. See %s"), *Result.ErrorMessage, *Result.FailureDiagnosticPath));
+		break;
+	case UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::Skipped:
+	default:
+		SetStatus(FString::Printf(TEXT("Skipped: %s"), *Result.ErrorMessage));
+		break;
 	}
 
 	RefreshMadeTools();
 	RebuildLists();
-	if (bGeneratedBlockedComposite)
-	{
-		const int32 DisplayBlockedStepCount = BlockedStepCount > 0 ? BlockedStepCount : 1;
-		SetStatus(FString::Printf(
-			TEXT("Composite tool set %s generated at %s and reloaded. Note: %d step(s) are blocked by call_tool policy (write/high-risk tools cannot run via call_tool - preview only). Fill reviewed args or run manually."),
-			*ToolName,
-			*Directory,
-			DisplayBlockedStepCount));
-		return FReply::Handled();
-	}
-
-	SetStatus(FString::Printf(
-		TEXT("Composite tool set %s generated at %s, reloaded, and smoke-tested OK."),
-		*ToolName,
-		*Directory));
 	return FReply::Handled();
 }
 
@@ -1620,38 +1244,32 @@ FReply STaskAtlasWindow::HandlePromoteToSkillsClicked(FWorkflowRow Row)
 
 FReply STaskAtlasWindow::HandlePromoteToRagClicked(FWorkflowRow Row)
 {
-	FString SourcePath;
-	FString FailureReason;
-	if (!TaskAtlasWindow::BuildTaskAtlasKnowledgeSourcePath(Row.TaskId, SourcePath, FailureReason))
-	{
-		SetStatus(FailureReason);
-		return FReply::Handled();
-	}
-
-	const FString Markdown = TaskAtlasWindow::BuildTaskKnowledgeMarkdown(Row);
-	if (!FFileHelper::SaveStringToFile(Markdown, *SourcePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-	{
-		SetStatus(FString::Printf(TEXT("Failed to write Task Atlas RAG source: %s"), *SourcePath));
-		return FReply::Handled();
-	}
-
 	if (!OwnerModule)
 	{
-		SetStatus(FString::Printf(TEXT("RAG source written: %s. Refresh failed: Task Atlas is not connected to the module."), *SourcePath));
+		SetStatus(TEXT("Task Atlas is not connected to the module."));
 		return FReply::Handled();
 	}
 
-	TSharedPtr<FJsonObject> Arguments = MakeShared<FJsonObject>();
-	const FUnrealMcpExecutionResult Result = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.knowledge_index_refresh"), *Arguments);
-	if (Result.bIsError)
+	UnrealMcp::TaskAtlasService::FPromoteToRagRequest Req;
+	Req.TaskId = Row.TaskId;
+	Req.bDryRun = false;
+	const UnrealMcp::TaskAtlasService::FPromoteToRagResult Result = UnrealMcp::TaskAtlasService::PromoteToRag(Req);
+
+	switch (Result.Outcome)
 	{
-		const FString ResultText = Result.Text.IsEmpty() ? FString(TEXT("unreal.knowledge_index_refresh failed.")) : Result.Text;
-		SetStatus(FString::Printf(TEXT("RAG source written: %s. Refresh failed: %s"), *SourcePath, *ResultText));
-		return FReply::Handled();
+	case UnrealMcp::TaskAtlasService::EPromoteToRagOutcome::Promoted:
+		SetStatus(FString::Printf(
+			TEXT("RAG source written: %s. Refresh: %s"),
+			*Result.KnowledgeSourcePath,
+			*Result.RefreshResultText));
+		break;
+	case UnrealMcp::TaskAtlasService::EPromoteToRagOutcome::RefreshFailed:
+		SetStatus(FString::Printf(TEXT("Written but refresh failed: %s"), *Result.ErrorMessage));
+		break;
+	default:
+		SetStatus(FString::Printf(TEXT("Promote: %s"), *Result.ErrorMessage));
+		break;
 	}
-
-	const FString ResultText = Result.Text.IsEmpty() ? FString(TEXT("knowledge_index_refresh completed.")) : Result.Text;
-	SetStatus(FString::Printf(TEXT("RAG source written: %s. Refresh: %s"), *SourcePath, *ResultText));
 	return FReply::Handled();
 }
 
@@ -1669,68 +1287,89 @@ FReply STaskAtlasWindow::HandleDeleteMadeToolClicked(FString ToolName)
 		return FReply::Handled();
 	}
 
-	UnrealMcp::UserRegistry::InitializeUserToolRegistry();
-	const UnrealMcp::UserRegistry::FUserToolEntry* Entry = UnrealMcp::UserRegistry::FindUserTool(ToolName);
-	if (!Entry)
-	{
-		SetStatus(FString::Printf(TEXT("Made tool %s was not found in the user registry."), *ToolName));
-		return FReply::Handled();
-	}
-
-	FString CompositeKind;
-	if (!TaskAtlasWindow::IsTaskAtlasCompositeUserTool(*Entry, CompositeKind))
-	{
-		SetStatus(FString::Printf(TEXT("Refused to delete %s because it is not a Task Atlas composite user tool."), *ToolName));
-		return FReply::Handled();
-	}
-
-	FString ScaffoldDir;
-	FString RelativeScaffoldDir;
-	FString FailureReason;
-	if (!TaskAtlasWindow::ResolveUserToolScaffoldDir(Entry->ScaffoldDir, ScaffoldDir, RelativeScaffoldDir, FailureReason))
-	{
-		SetStatus(FailureReason.IsEmpty() ? FString(TEXT("Refused to delete made tool because its scaffold directory is unsafe.")) : FailureReason);
-		return FReply::Handled();
-	}
-
 	const EAppReturnType::Type Response = FMessageDialog::Open(
 		EAppMsgType::YesNo,
 		FText::Format(
-			LOCTEXT("ConfirmDeleteMadeTool", "Delete Task Atlas made tool '{0}'?\n\nDirectory: {1}"),
-			FText::FromString(ToolName),
-			FText::FromString(RelativeScaffoldDir)));
+			LOCTEXT("ConfirmDeleteMadeTool", "Delete made tool '{0}'?"),
+			FText::FromString(ToolName)));
 	if (Response != EAppReturnType::Yes)
 	{
 		return FReply::Handled();
 	}
 
-	const bool bDirectoryExisted = IFileManager::Get().DirectoryExists(*ScaffoldDir);
-	if (bDirectoryExisted && !IFileManager::Get().DeleteDirectory(*ScaffoldDir, false, true))
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult Result = UnrealMcp::TaskAtlasService::DeleteMadeTool(ToolName);
+	switch (Result.Outcome)
 	{
-		SetStatus(FString::Printf(TEXT("Failed to delete made tool directory for %s: %s"), *ToolName, *ScaffoldDir));
-		return FReply::Handled();
-	}
-
-	TSharedPtr<FJsonObject> ReloadArguments = MakeShared<FJsonObject>();
-	ReloadArguments->SetBoolField(TEXT("acceptChangedHashes"), true);
-	const FUnrealMcpExecutionResult ReloadResult = OwnerModule->ExecuteToolFromEditorUI(TEXT("unreal.mcp_user_registry_reload"), *ReloadArguments);
-	if (ReloadResult.bIsError)
-	{
-		SetStatus(FString::Printf(
-			TEXT("Deleted made tool directory for %s, but registry reload failed: %s"),
-			*ToolName,
-			ReloadResult.Text.IsEmpty() ? TEXT("unreal.mcp_user_registry_reload failed.") : *ReloadResult.Text));
-		return FReply::Handled();
+	case UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Deleted:
+		SetStatus(FString::Printf(TEXT("Deleted %s"), *ToolName));
+		break;
+	case UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::NotFound:
+		SetStatus(FString::Printf(TEXT("Tool %s not found"), *ToolName));
+		break;
+	case UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Refused:
+		SetStatus(FString::Printf(TEXT("Refused: %s"), *Result.ErrorMessage));
+		break;
+	case UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::ReloadRejected:
+	case UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Failed:
+		SetStatus(FString::Printf(TEXT("Error: %s. See %s"), *Result.ErrorMessage, *Result.FailureDiagnosticPath));
+		break;
+	case UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::DryRun:
+	default:
+		SetStatus(FString::Printf(TEXT("Delete: %s"), *Result.ErrorMessage));
+		break;
 	}
 
 	RefreshMadeTools();
 	RebuildLists();
-	SetStatus(FString::Printf(
-		TEXT("%s Task Atlas made tool %s (%s). Registry reload: %s"),
-		bDirectoryExisted ? TEXT("Deleted") : TEXT("Removed stale registry entry for"),
-		*ToolName,
-		*RelativeScaffoldDir,
-		ReloadResult.Text.IsEmpty() ? TEXT("ok") : *ReloadResult.Text));
+	return FReply::Handled();
+}
+
+FReply STaskAtlasWindow::HandleTestNowClicked(FString ToolName)
+{
+	if (!OwnerModule)
+	{
+		SetStatus(TEXT("Task Atlas is not connected to the module."));
+		return FReply::Handled();
+	}
+
+	UnrealMcp::TaskAtlasService::FSmokeRequest Req;
+	Req.ToolName = ToolName;
+	Req.bDryRun = false;
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(Req);
+
+	switch (Result.Outcome)
+	{
+	case UnrealMcp::TaskAtlasService::ESmokeOutcome::Passed:
+		SetStatus(FString::Printf(TEXT("Smoke passed: %s"), *ToolName));
+		break;
+	case UnrealMcp::TaskAtlasService::ESmokeOutcome::Failed:
+		SetStatus(FString::Printf(TEXT("Smoke failed: %s. See %s"), *Result.ErrorMessage, *Result.FailureDiagnosticPath));
+		break;
+	default:
+		SetStatus(FString::Printf(TEXT("Smoke: %s"), *Result.ErrorMessage));
+		break;
+	}
+
+	RefreshMadeTools();
+	RebuildLists();
+	return FReply::Handled();
+}
+
+FReply STaskAtlasWindow::HandleDebugClicked()
+{
+	const TArray<UnrealMcp::TaskAtlasService::FUserToolView> Views = UnrealMcp::TaskAtlasService::IntrospectUserRegistry();
+
+	FString Summary = FString::Printf(TEXT("User registry: %d tools loaded.\n"), Views.Num());
+	for (const UnrealMcp::TaskAtlasService::FUserToolView& View : Views)
+	{
+		Summary += FString::Printf(
+			TEXT("- %s (%s, %s)\n"),
+			*View.ToolName,
+			*View.Generator,
+			View.bLoaded ? TEXT("loaded") : TEXT("not loaded"));
+	}
+
+	FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
 	return FReply::Handled();
 }
 
@@ -1741,33 +1380,12 @@ void STaskAtlasWindow::RefreshData()
 	MadeTools.Reset();
 	ToolsByName.Reset();
 
-	for (const UnrealMcp::FToolRegistryEntry& Entry : UnrealMcp::GetToolRegistryEntries())
-	{
-		if (Entry.Exposure != UnrealMcp::EToolExposure::Visible)
-		{
-			continue;
-		}
-
-		FToolRow Tool;
-		Tool.Name = Entry.Name;
-		Tool.Category = Entry.Category;
-		Tool.RiskLevel = UnrealMcp::LexToString(Entry.Policy.RiskLevel);
-		Tool.Description = Entry.Description;
-		Tool.Owner = Entry.Policy.Owner;
-		Tool.DocsPath = Entry.Policy.DocsPath;
-		Tool.InputSchemaText = TaskAtlasWindow::JsonObjectToPrettyString(Entry.InputSchema);
-		Tools.Add(Tool);
-		ToolsByName.Add(Tool.Name, Tool);
-	}
-	Tools.Sort([](const FToolRow& Left, const FToolRow& Right)
-	{
-		return Left.Name < Right.Name;
-	});
-	RefreshMadeTools();
+	TaskAtlasWindow::PopulateVisibleToolRows(Tools, ToolsByName);
 
 	if (!OwnerModule)
 	{
 		SetStatus(TEXT("Task Atlas is not connected to the module."));
+		RefreshMadeTools();
 		RebuildLists();
 		return;
 	}
@@ -1786,27 +1404,7 @@ void STaskAtlasWindow::RefreshData()
 	const TArray<TSharedPtr<FJsonValue>>* TaskValues = nullptr;
 	if (Result.StructuredContent->TryGetArrayField(TEXT("tasks"), TaskValues) && TaskValues)
 	{
-		for (const TSharedPtr<FJsonValue>& Value : *TaskValues)
-		{
-			if (!Value.IsValid() || Value->Type != EJson::Object || !Value->AsObject().IsValid())
-			{
-				continue;
-			}
-
-			const TSharedPtr<FJsonObject> TaskObject = Value->AsObject();
-			FWorkflowRow Row;
-			Row.TaskId = TaskAtlasWindow::GetStringField(TaskObject, TEXT("taskId"));
-			Row.Label = TaskAtlasWindow::GetStringField(TaskObject, TEXT("label"), Row.TaskId);
-			Row.Rating = TaskAtlasWindow::GetStringField(TaskObject, TEXT("rating"), TEXT("unrated"));
-			Row.TEndUtc = TaskAtlasWindow::GetStringField(TaskObject, TEXT("tEndUtc"));
-			Row.ReplayEligibility = UnrealMcp::TaskAtlasComposite::NormalizeReplayEligibility(
-				TaskAtlasWindow::GetStringField(TaskObject, TEXT("replayEligibility"), TEXT("skeleton_pre_capture")));
-			Row.ReplayUnavailableReason = TaskAtlasWindow::GetStringField(TaskObject, TEXT("replayUnavailableReason"));
-			Row.bPinned = TaskAtlasWindow::GetBoolField(TaskObject, TEXT("pinned"));
-			Row.CriticalPath = TaskAtlasWindow::GetStringArrayField(TaskObject, TEXT("criticalPath"));
-			Row.Json = TaskObject;
-			Workflows.Add(Row);
-		}
+		TaskAtlasWindow::AppendWorkflowRowsFromTaskValues(*TaskValues, Workflows);
 	}
 
 	Workflows.Sort([](const FWorkflowRow& Left, const FWorkflowRow& Right)
@@ -1820,6 +1418,7 @@ void STaskAtlasWindow::RefreshData()
 		return Left.TEndUtc > Right.TEndUtc;
 	});
 
+	RefreshMadeTools();
 	SetStatus(FString::Printf(
 		TEXT("Loaded %d workflow(s), %d visible tool(s), and %d made tool(s)."),
 		Workflows.Num(),
@@ -1832,34 +1431,19 @@ void STaskAtlasWindow::RefreshMadeTools()
 {
 	MadeTools.Reset();
 
-	UnrealMcp::UserRegistry::InitializeUserToolRegistry();
-	for (const UnrealMcp::UserRegistry::FUserToolEntry* Entry : UnrealMcp::UserRegistry::GetAllUserTools())
+	const TArray<UnrealMcp::TaskAtlasService::FMadeToolEntry> Entries = UnrealMcp::TaskAtlasService::ListMadeTools();
+	for (const UnrealMcp::TaskAtlasService::FMadeToolEntry& Entry : Entries)
 	{
-		if (!Entry)
-		{
-			continue;
-		}
-
-		FString CompositeKind;
-		if (!TaskAtlasWindow::IsTaskAtlasCompositeUserTool(*Entry, CompositeKind))
-		{
-			continue;
-		}
-
 		FMadeToolRow Row;
-		Row.ToolName = Entry->ToolName;
-		Row.CompositeKind = CompositeKind;
-		FString FailureReason;
-		if (TaskAtlasWindow::ResolveUserToolScaffoldDir(Entry->ScaffoldDir, Row.ScaffoldDir, Row.RelativeScaffoldDir, FailureReason))
-		{
-			MadeTools.Add(Row);
-			continue;
-		}
-
-		Row.ScaffoldDir = Entry->ScaffoldDir;
-		Row.RelativeScaffoldDir = Entry->ScaffoldDir.IsEmpty()
-			? FString(TEXT("<missing scaffold dir>"))
-			: FString::Printf(TEXT("%s (outside user-tool root)"), *Entry->ScaffoldDir);
+		Row.ToolName = Entry.ToolName;
+		Row.ScaffoldDir = Entry.ScaffoldDir;
+		Row.RelativeScaffoldDir = Entry.ScaffoldDir;
+		Row.CompositeKind = Entry.CompositeKind;
+		Row.ReplayStatus = Entry.ReplayStatus;
+		Row.CreatedUtc = Entry.CreatedUtc;
+		Row.SourceTaskId = Entry.SourceTaskId;
+		Row.bLoaded = Entry.bLoadedInUserRegistry;
+		Row.bHasFailureMarker = Entry.bHasFailureMarker;
 		MadeTools.Add(Row);
 	}
 
@@ -2069,6 +1653,13 @@ TSharedRef<SWidget> STaskAtlasWindow::BuildWorkflowRow(const FWorkflowRow& Row)
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("MakeToolSet", "Make Tool Set"))
+					.IsEnabled(Row.Eligibility != UnrealMcp::TaskAtlasService::EEligibility::Blocked)
+					.ToolTipText(Row.Eligibility == UnrealMcp::TaskAtlasService::EEligibility::Blocked
+						? FText::Format(
+							LOCTEXT("MakeToolSetBlockedTooltip", "Blocked at step {0}: {1}. Use Distill Skill / To RAG."),
+							FText::AsNumber(Row.BlockedFirstStep),
+							FText::FromString(Row.BlockedFirstReason))
+						: LOCTEXT("MakeToolSetTooltip", "Generate composite Python user tool"))
 					.OnClicked(this, &STaskAtlasWindow::HandleMakeToolClicked, Row)
 				]
 				+ SWrapBox::Slot()
@@ -2149,9 +1740,21 @@ TSharedRef<SWidget> STaskAtlasWindow::BuildMadeToolRow(const FMadeToolRow& Row)
 			.VAlign(VAlign_Center)
 			.Padding(8.0f, 0.0f, 0.0f, 0.0f)
 			[
-				SNew(SButton)
-				.Text(LOCTEXT("DeleteMadeTool", "Delete"))
-				.OnClicked(this, &STaskAtlasWindow::HandleDeleteMadeToolClicked, Row.ToolName)
+				SNew(SWrapBox)
+				.InnerSlotPadding(FVector2D(4.0f, 4.0f))
+				+ SWrapBox::Slot()
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("TestNow", "Test Now"))
+					.ToolTipText(LOCTEXT("TestNowTooltip", "Run user-tool smoke (real execution)"))
+					.OnClicked(this, &STaskAtlasWindow::HandleTestNowClicked, Row.ToolName)
+				]
+				+ SWrapBox::Slot()
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("DeleteMadeTool", "Delete"))
+					.OnClicked(this, &STaskAtlasWindow::HandleDeleteMadeToolClicked, Row.ToolName)
+				]
 			]
 		];
 }

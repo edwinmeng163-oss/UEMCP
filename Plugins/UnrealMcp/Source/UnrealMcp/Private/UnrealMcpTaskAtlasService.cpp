@@ -414,47 +414,6 @@ namespace UnrealMcp::TaskAtlasService
 			}
 		}
 
-		FString TaskAtlasServiceSanitizeToolIdPart(const FString& Source)
-		{
-			FString Slug;
-			for (const TCHAR Ch : Source)
-			{
-				if (Ch >= 'A' && Ch <= 'Z')
-				{
-					Slug.AppendChar(static_cast<TCHAR>(Ch + ('a' - 'A')));
-				}
-				else if ((Ch >= 'a' && Ch <= 'z') || (Ch >= '0' && Ch <= '9'))
-				{
-					Slug.AppendChar(Ch);
-				}
-				else
-				{
-					TaskAtlasServiceAppendNormalizedUnderscore(Slug);
-				}
-			}
-			return TaskAtlasServiceTrimUnderscores(Slug);
-		}
-
-		// duplicated from STaskAtlasWindow.cpp; chunk 6 will consolidate.
-		FString TaskAtlasServiceMakeAtlasToolId(const FString& Label, const FString& TaskId)
-		{
-			FString ToolId = TaskAtlasServiceSanitizeToolIdPart(Label);
-			if (ToolId.IsEmpty())
-			{
-				ToolId = TaskAtlasServiceSanitizeToolIdPart(TaskId);
-			}
-			if (ToolId.IsEmpty())
-			{
-				ToolId = TEXT("workflow");
-			}
-			ToolId = FString::Printf(TEXT("atlas_%s"), *ToolId);
-			if (ToolId.Len() > 64)
-			{
-				ToolId = TaskAtlasServiceTrimUnderscores(ToolId.Left(64));
-			}
-			return ToolId.IsEmpty() ? FString(TEXT("atlas_workflow")) : ToolId;
-		}
-
 		TArray<TSharedPtr<FJsonValue>> TaskAtlasServiceMakeStringArray(const TArray<FString>& Values)
 		{
 			TArray<TSharedPtr<FJsonValue>> JsonValues;
@@ -1029,7 +988,7 @@ namespace UnrealMcp::TaskAtlasService
 			int32 ReloadAfterCount,
 			const FString& TimestampUtc)
 		{
-			const FString SafeName = TaskAtlasServiceSanitizeToolIdPart(ToolName);
+			const FString SafeName = SanitizeToolIdPart(ToolName);
 			FString SafeTimestamp = TimestampUtc;
 			SafeTimestamp.ReplaceInline(TEXT(":"), TEXT(""));
 			SafeTimestamp.ReplaceInline(TEXT("-"), TEXT(""));
@@ -1518,6 +1477,46 @@ namespace UnrealMcp::TaskAtlasService
 		}
 	}
 
+	FString SanitizeToolIdPart(const FString& In)
+	{
+		FString Slug;
+		for (const TCHAR Ch : In)
+		{
+			if (Ch >= 'A' && Ch <= 'Z')
+			{
+				Slug.AppendChar(static_cast<TCHAR>(Ch + ('a' - 'A')));
+			}
+			else if ((Ch >= 'a' && Ch <= 'z') || (Ch >= '0' && Ch <= '9'))
+			{
+				Slug.AppendChar(Ch);
+			}
+			else
+			{
+				TaskAtlasServiceAppendNormalizedUnderscore(Slug);
+			}
+		}
+		return TaskAtlasServiceTrimUnderscores(Slug);
+	}
+
+	FString MakeAtlasToolId(const FString& TaskLabel, const FString& TaskId)
+	{
+		FString ToolId = SanitizeToolIdPart(TaskLabel);
+		if (ToolId.IsEmpty())
+		{
+			ToolId = SanitizeToolIdPart(TaskId);
+		}
+		if (ToolId.IsEmpty())
+		{
+			ToolId = TEXT("workflow");
+		}
+		ToolId = FString::Printf(TEXT("atlas_%s"), *ToolId);
+		if (ToolId.Len() > 64)
+		{
+			ToolId = TaskAtlasServiceTrimUnderscores(ToolId.Left(64));
+		}
+		return ToolId.IsEmpty() ? FString(TEXT("atlas_workflow")) : ToolId;
+	}
+
 	FEligibilityResult ClassifyTask(const FTaskAtlasModel& Task)
 	{
 		FEligibilityResult Result;
@@ -1675,7 +1674,7 @@ namespace UnrealMcp::TaskAtlasService
 			return Result;
 		}
 
-		const FString ToolId = TaskAtlasServiceMakeAtlasToolId(Task.Label, Task.Model.TaskId);
+		const FString ToolId = MakeAtlasToolId(Task.Label, Task.Model.TaskId);
 		const FString NewToolName = FString::Printf(TEXT("user.%s"), *ToolId);
 		Result.ToolName = NewToolName;
 		Result.CompositeKind = TEXT("preview");

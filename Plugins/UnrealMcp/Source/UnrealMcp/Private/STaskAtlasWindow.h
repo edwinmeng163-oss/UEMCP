@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UnrealMcpTaskAtlasService.h"
 #include "Widgets/SCompoundWidget.h"
 
 class FJsonObject;
@@ -25,6 +26,9 @@ public:
 		FString TEndUtc;
 		FString ReplayEligibility;
 		FString ReplayUnavailableReason;
+		UnrealMcp::TaskAtlasService::EEligibility Eligibility = UnrealMcp::TaskAtlasService::EEligibility::SkeletonPreCapture;
+		int32 BlockedFirstStep = -1;
+		FString BlockedFirstReason;
 		bool bPinned = false;
 		TArray<FString> CriticalPath;
 		TSharedPtr<FJsonObject> Json;
@@ -47,6 +51,11 @@ public:
 		FString CompositeKind;
 		FString ScaffoldDir;
 		FString RelativeScaffoldDir;
+		FString ReplayStatus;
+		FDateTime CreatedUtc;
+		FString SourceTaskId;
+		bool bLoaded = false;
+		bool bHasFailureMarker = false;
 	};
 
 private:
@@ -58,6 +67,8 @@ private:
 	FReply HandlePromoteToRagClicked(FWorkflowRow Row);
 	FReply HandleToolClicked(FString ToolName);
 	FReply HandleDeleteMadeToolClicked(FString ToolName);
+	FReply HandleTestNowClicked(FString ToolName);
+	FReply HandleDebugClicked();
 
 	void RefreshData();
 	void RefreshMadeTools();
