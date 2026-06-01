@@ -159,13 +159,21 @@ namespace UnrealMcp::TaskAtlasService
 	{
 		EPromoteToRagOutcome Outcome = EPromoteToRagOutcome::Failed;
 		FString TaskId;
+		bool bDryRun = false;
 		FString SourcePath;                   // markdown source: draft path or generated README/manifest summary
 		FString KnowledgeSourcePath;           // target under Saved/UnrealMcp/KnowledgeSources/TaskAtlas or configured source root
+		int32 MarkdownLength = 0;
 		FString RefreshResultText;             // text from knowledge_index_refresh if invoked
 		TSharedPtr<FJsonObject> RefreshResult; // structured refresh result if available
 		FString ErrorCode;
 		FString ErrorMessage;
 		TSharedPtr<FJsonObject> StructuredContent;
+	};
+
+	struct FPromoteToRagRequest
+	{
+		FString TaskId;
+		bool bDryRun = false;
 	};
 
 	struct FSmokeResult
@@ -181,6 +189,12 @@ namespace UnrealMcp::TaskAtlasService
 		FString FailureDiagnosticPath;
 		FString ErrorCode;
 		FString ErrorMessage;
+	};
+
+	struct FSmokeRequest
+	{
+		FString ToolName;
+		bool bDryRun = false;
 	};
 
 	struct FUserToolView
@@ -207,7 +221,9 @@ namespace UnrealMcp::TaskAtlasService
 	void SetMadeToolsRootDirForTests(const FString& RootDir);
 	void ClearMadeToolsRootDirForTests();
 #endif
+	FPromoteToRagResult PromoteToRag(const FPromoteToRagRequest& Req);
 	FPromoteToRagResult PromoteToRag(const FString& TaskId);
+	FSmokeResult SmokeMadeTool(const FSmokeRequest& Req);
 	FSmokeResult SmokeMadeTool(const FString& ToolName);
 	TArray<FUserToolView> IntrospectUserRegistry();
 }

@@ -2,7 +2,10 @@
 
 #include "UnrealMcpCallToolPolicy.h"
 #include "UnrealMcpCapturedArgsStore.h"
+#include "UnrealMcpExtensionLifecycle.h"
 #include "UnrealMcpHashUtils.h"
+#include "UnrealMcpModule.h"
+#include "UnrealMcpSelfExtensionTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpTaskAtlasTools.h"
 #include "UnrealMcpUserToolLock.h"
@@ -14,10 +17,12 @@
 #include "GenericPlatform/GenericPlatformFile.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Policies/PrettyJsonPrintPolicy.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -49,6 +54,11 @@ namespace UnrealMcp::TaskAtlasComposite
 		FString& OutFailureReason);
 }
 
+namespace UnrealMcp::UnrealMcpUserToolSmokeTool
+{
+	FUnrealMcpExecutionResult Execute(const FJsonObject& Arguments);
+}
+
 namespace UnrealMcp::TaskAtlasService
 {
 	// Service functions return result structs. They do not throw or use checkf for user/data errors.
@@ -63,9 +73,26 @@ namespace UnrealMcp::TaskAtlasService
 			FTaskAtlasModel Model;
 			FString Label;
 			FString Description;
+			FString Rating;
+			bool bPinned = false;
+			FString SessionId;
+			FString TStartUtc;
+			FString TEndUtc;
+			FString UserIntent;
 			FString ReplayEligibility;
 			FString ReplayUnavailableReason;
 			FString TaskPath;
+			TSharedPtr<FJsonObject> TaskJson;
+		};
+
+		struct FResolvedMadeTool
+		{
+			FString ToolName;
+			FString ToolId;
+			FString RootDir;
+			FString TargetDir;
+			FString ToolJsonPath;
+			TSharedPtr<FJsonObject> ToolJson;
 		};
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -73,6 +100,7 @@ namespace UnrealMcp::TaskAtlasService
 		FString GTaskAtlasServiceSavedRootForTests;
 		bool bTaskAtlasServiceCorruptNextStagingShaForTests = false;
 		bool bTaskAtlasServiceRejectNextTargetReloadForTests = false;
+		bool bTaskAtlasServiceFailNextKnowledgeRefreshForTests = false;
 #endif
 
 		FString TaskAtlasServiceNormalizeAbsolutePath(const FString& Path)
@@ -465,6 +493,66 @@ namespace UnrealMcp::TaskAtlasService
 				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		}
 
+		FString TaskAtlasServiceJsonToCondensedString(const TSharedPtr<FJsonObject>& Object)
+		{
+			if (!Object.IsValid())
+			{
+				return TEXT("{}");
+			}
+
+			FString Output;
+			const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+				TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Output);
+			FJsonSerializer::Serialize(Object.ToSharedRef(), Writer);
+			return Output;
+		}
+
+		FString TaskAtlasServiceMakeDisplayPath(const FString& Path)
+		{
+			if (Path.TrimStartAndEnd().IsEmpty())
+			{
+				return FString();
+			}
+
+			FString FullPath = FPaths::IsRelative(Path)
+				? FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), Path))
+				: FPaths::ConvertRelativePathToFull(Path);
+			FPaths::NormalizeFilename(FullPath);
+
+			FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+			FPaths::NormalizeDirectoryName(ProjectDir);
+			if (!ProjectDir.EndsWith(TEXT("/")))
+			{
+				ProjectDir += TEXT("/");
+			}
+			FString Relative = FullPath;
+			if (FPaths::MakePathRelativeTo(Relative, *ProjectDir))
+			{
+				return Relative;
+			}
+
+			FString HomeDir = FPlatformProcess::UserDir();
+			FPaths::NormalizeDirectoryName(HomeDir);
+			if (!HomeDir.EndsWith(TEXT("/")))
+			{
+				HomeDir += TEXT("/");
+			}
+			if (!HomeDir.IsEmpty() && FullPath.StartsWith(HomeDir, ESearchCase::IgnoreCase))
+			{
+				return FString(TEXT("<home>/")) + FullPath.RightChop(HomeDir.Len());
+			}
+			return FullPath;
+		}
+
+		FString TaskAtlasServiceMakeSafeTimestamp(const FString& TimestampUtc)
+		{
+			FString SafeTimestamp = TimestampUtc;
+			SafeTimestamp.ReplaceInline(TEXT(":"), TEXT(""));
+			SafeTimestamp.ReplaceInline(TEXT("-"), TEXT(""));
+			SafeTimestamp.ReplaceInline(TEXT("."), TEXT(""));
+			return SafeTimestamp;
+		}
+
 		FString TaskAtlasServiceEligibilityToString(EEligibility Eligibility)
 		{
 			switch (Eligibility)
@@ -615,9 +703,20 @@ namespace UnrealMcp::TaskAtlasService
 			{
 				OutTask.Description = FString::Printf(TEXT("Composite user tool generated from Task Atlas task %s."), *OutTask.Model.TaskId);
 			}
+			OutTask.Rating = TaskAtlasServiceGetStringField(TaskJson, TEXT("rating"));
+			if (OutTask.Rating.IsEmpty())
+			{
+				OutTask.Rating = TEXT("unrated");
+			}
+			TaskJson->TryGetBoolField(TEXT("pinned"), OutTask.bPinned);
+			OutTask.SessionId = TaskAtlasServiceGetStringField(TaskJson, TEXT("sessionId"));
+			OutTask.TStartUtc = TaskAtlasServiceGetStringField(TaskJson, TEXT("tStartUtc"));
+			OutTask.TEndUtc = TaskAtlasServiceGetStringField(TaskJson, TEXT("tEndUtc"));
+			OutTask.UserIntent = TaskAtlasServiceGetStringField(TaskJson, TEXT("userIntentText"));
 			OutTask.ReplayEligibility = TaskAtlasServiceGetStringField(TaskJson, TEXT("replayEligibility"));
 			OutTask.ReplayUnavailableReason = TaskAtlasServiceGetStringField(TaskJson, TEXT("replayUnavailableReason"));
 			OutTask.TaskPath = TaskPath;
+			OutTask.TaskJson = TaskJson;
 			OutTask.Model.CriticalPath = TaskAtlasServiceReadStringArrayField(TaskJson, TEXT("criticalPath"));
 
 			const TArray<TSharedPtr<FJsonValue>>* StepRefs = nullptr;
@@ -955,6 +1054,467 @@ namespace UnrealMcp::TaskAtlasService
 			return TaskAtlasServiceWriteJsonObject(Diagnostic, DiagnosticPath)
 				? TaskAtlasServiceNormalizeAbsolutePath(DiagnosticPath)
 				: FString();
+		}
+
+		bool TaskAtlasServiceTryExtractAtlasToolId(const FString& RawToolName, FString& OutToolName, FString& OutToolId)
+		{
+			OutToolName = RawToolName.TrimStartAndEnd();
+			OutToolId.Reset();
+			if (!OutToolName.StartsWith(TEXT("user."), ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+
+			OutToolId = OutToolName.RightChop(5);
+			if (!OutToolId.StartsWith(TEXT("atlas_"), ESearchCase::CaseSensitive) || OutToolId.Len() <= 6)
+			{
+				return false;
+			}
+
+			for (const TCHAR Character : OutToolId)
+			{
+				const bool bLower = Character >= TCHAR('a') && Character <= TCHAR('z');
+				const bool bDigit = Character >= TCHAR('0') && Character <= TCHAR('9');
+				if (!bLower && !bDigit && Character != TCHAR('_'))
+				{
+					return false;
+				}
+			}
+			return TaskAtlasServiceIsSafeDirectoryName(OutToolId);
+		}
+
+		bool TaskAtlasServiceResolveMadeTool(
+			const FString& RawToolName,
+			bool bRequireExistingDirectory,
+			FResolvedMadeTool& OutTool,
+			FString& OutErrorCode,
+			FString& OutErrorMessage)
+		{
+			OutTool = FResolvedMadeTool();
+			OutErrorCode.Reset();
+			OutErrorMessage.Reset();
+
+			if (!TaskAtlasServiceTryExtractAtlasToolId(RawToolName, OutTool.ToolName, OutTool.ToolId))
+			{
+				OutErrorCode = TEXT("invalid_name");
+				OutErrorMessage = TEXT("ToolName must use the generated Task Atlas form user.atlas_<snake>.");
+				return false;
+			}
+
+			OutTool.RootDir = TaskAtlasServiceMadeToolsRootDir();
+			const FString CanonicalRootDir = IFileManager::Get().DirectoryExists(*OutTool.RootDir)
+				? TaskAtlasServiceCanonicalExistingPath(OutTool.RootDir)
+				: TaskAtlasServiceNormalizeAbsolutePath(OutTool.RootDir);
+			OutTool.TargetDir = TaskAtlasServiceNormalizeAbsolutePath(FPaths::Combine(OutTool.RootDir, OutTool.ToolId));
+			if (!TaskAtlasServicePathEqualsOrChild(OutTool.TargetDir, CanonicalRootDir))
+			{
+				OutErrorCode = TEXT("path_unsafe");
+				OutErrorMessage = TEXT("Resolved user tool directory is outside the user-tool registry root.");
+				return false;
+			}
+
+			if (!IFileManager::Get().DirectoryExists(*OutTool.TargetDir))
+			{
+				if (bRequireExistingDirectory)
+				{
+					OutErrorCode = TEXT("not_found");
+					OutErrorMessage = FString::Printf(TEXT("Generated user tool directory does not exist: %s"), *OutTool.TargetDir);
+					return false;
+				}
+				return true;
+			}
+
+			if (TaskAtlasServiceIsSymlink(OutTool.TargetDir))
+			{
+				OutErrorCode = TEXT("path_unsafe");
+				OutErrorMessage = TEXT("Refused to use a symlinked user tool directory.");
+				return false;
+			}
+
+			OutTool.TargetDir = TaskAtlasServiceCanonicalExistingPath(OutTool.TargetDir);
+			if (!TaskAtlasServicePathEqualsOrChild(OutTool.TargetDir, CanonicalRootDir))
+			{
+				OutErrorCode = TEXT("path_unsafe");
+				OutErrorMessage = TEXT("Refused symlink/path escape outside the user-tool registry root.");
+				return false;
+			}
+
+			OutTool.ToolJsonPath = FPaths::Combine(OutTool.TargetDir, TEXT("tool.json"));
+			if (!FPaths::FileExists(OutTool.ToolJsonPath) || TaskAtlasServiceIsSymlink(OutTool.ToolJsonPath))
+			{
+				OutErrorCode = TEXT("not_task_atlas_generated");
+				OutErrorMessage = TEXT("Refused because tool.json is missing or unsafe.");
+				return false;
+			}
+
+			if (!TaskAtlasServiceLoadJsonObject(OutTool.ToolJsonPath, OutTool.ToolJson))
+			{
+				OutErrorCode = TEXT("not_task_atlas_generated");
+				OutErrorMessage = TEXT("Refused because tool.json is not valid JSON.");
+				return false;
+			}
+
+			FString Generator;
+			if (!TaskAtlasServiceReadRequiredString(OutTool.ToolJson, TEXT("generator"), Generator)
+				|| Generator != TEXT("task_atlas_make_composite"))
+			{
+				OutErrorCode = TEXT("not_task_atlas_generated");
+				OutErrorMessage = TEXT("Refused because this user tool was not generated by Task Atlas Make Tool Set.");
+				return false;
+			}
+
+			FString DeclaredToolName;
+			if (!TaskAtlasServiceReadRequiredString(OutTool.ToolJson, TEXT("name"), DeclaredToolName)
+				|| DeclaredToolName != OutTool.ToolName)
+			{
+				OutErrorCode = TEXT("invalid_name");
+				OutErrorMessage = TEXT("Refused because tool.json name does not match the requested user tool.");
+				return false;
+			}
+
+			return true;
+		}
+
+		const TCHAR* TaskAtlasServiceDeleteOutcomeToString(EDeleteMadeToolOutcome Outcome)
+		{
+			switch (Outcome)
+			{
+			case EDeleteMadeToolOutcome::Deleted: return TEXT("Deleted");
+			case EDeleteMadeToolOutcome::DryRun: return TEXT("DryRun");
+			case EDeleteMadeToolOutcome::NotFound: return TEXT("NotFound");
+			case EDeleteMadeToolOutcome::ReloadRejected: return TEXT("ReloadRejected");
+			case EDeleteMadeToolOutcome::Failed: return TEXT("Failed");
+			case EDeleteMadeToolOutcome::Refused:
+			default: return TEXT("Refused");
+			}
+		}
+
+		const TCHAR* TaskAtlasServicePromoteOutcomeToString(EPromoteToRagOutcome Outcome)
+		{
+			switch (Outcome)
+			{
+			case EPromoteToRagOutcome::Promoted: return TEXT("Promoted");
+			case EPromoteToRagOutcome::DryRun: return TEXT("DryRun");
+			case EPromoteToRagOutcome::NotFound: return TEXT("NotFound");
+			case EPromoteToRagOutcome::Refused: return TEXT("Refused");
+			case EPromoteToRagOutcome::RefreshFailed: return TEXT("RefreshFailed");
+			case EPromoteToRagOutcome::Failed:
+			default: return TEXT("Failed");
+			}
+		}
+
+		const TCHAR* TaskAtlasServiceSmokeOutcomeToString(ESmokeOutcome Outcome)
+		{
+			switch (Outcome)
+			{
+			case ESmokeOutcome::Passed: return TEXT("Passed");
+			case ESmokeOutcome::Failed: return TEXT("Failed");
+			case ESmokeOutcome::DryRun: return TEXT("DryRun");
+			case ESmokeOutcome::NotFound: return TEXT("NotFound");
+			case ESmokeOutcome::ReloadRejected: return TEXT("ReloadRejected");
+			case ESmokeOutcome::FailedToExecute: return TEXT("FailedToExecute");
+			case ESmokeOutcome::Refused:
+			default: return TEXT("Refused");
+			}
+		}
+
+		TSharedPtr<FJsonObject> TaskAtlasServiceMakeDeleteResultContent(const FDeleteMadeToolResult& Result)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("action"), TEXT("task_atlas_delete_made_tool"));
+			Object->SetStringField(TEXT("outcome"), TaskAtlasServiceDeleteOutcomeToString(Result.Outcome));
+			Object->SetStringField(TEXT("toolName"), Result.ToolName);
+			Object->SetStringField(TEXT("removedDir"), Result.RemovedDir);
+			Object->SetBoolField(TEXT("wasStaleEntry"), Result.bWasStaleEntry);
+			Object->SetNumberField(TEXT("reloadRemovedCount"), Result.ReloadRemovedCount);
+			Object->SetNumberField(TEXT("reloadBeforeCount"), Result.ReloadBeforeCount);
+			Object->SetNumberField(TEXT("reloadAfterCount"), Result.ReloadAfterCount);
+			Object->SetArrayField(TEXT("rejectedReasons"), TaskAtlasServiceMakeStringArray(Result.RejectedReasons));
+			Object->SetStringField(TEXT("failureDiagnosticPath"), Result.FailureDiagnosticPath);
+			Object->SetStringField(TEXT("errorCode"), Result.ErrorCode);
+			Object->SetStringField(TEXT("errorMessage"), Result.ErrorMessage);
+			return Object;
+		}
+
+		TSharedPtr<FJsonObject> TaskAtlasServiceMakePromoteResultContent(const FPromoteToRagResult& Result)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("action"), TEXT("task_atlas_promote_to_rag"));
+			Object->SetStringField(TEXT("outcome"), TaskAtlasServicePromoteOutcomeToString(Result.Outcome));
+			Object->SetStringField(TEXT("taskId"), Result.TaskId);
+			Object->SetBoolField(TEXT("dryRun"), Result.bDryRun);
+			Object->SetStringField(TEXT("sourcePath"), Result.SourcePath);
+			Object->SetStringField(TEXT("knowledgeSourcePath"), Result.KnowledgeSourcePath);
+			Object->SetNumberField(TEXT("markdownLength"), Result.MarkdownLength);
+			Object->SetStringField(TEXT("refreshResultText"), Result.RefreshResultText);
+			if (Result.RefreshResult.IsValid())
+			{
+				Object->SetObjectField(TEXT("refreshResult"), Result.RefreshResult);
+			}
+			Object->SetStringField(TEXT("errorCode"), Result.ErrorCode);
+			Object->SetStringField(TEXT("errorMessage"), Result.ErrorMessage);
+			return Object;
+		}
+
+		TSharedPtr<FJsonObject> TaskAtlasServiceMakeSmokeResultContent(const FSmokeResult& Result)
+		{
+			TSharedPtr<FJsonObject> Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("action"), TEXT("task_atlas_smoke_made_tool"));
+			Object->SetStringField(TEXT("outcome"), TaskAtlasServiceSmokeOutcomeToString(Result.Outcome));
+			Object->SetStringField(TEXT("toolName"), Result.ToolName);
+			Object->SetStringField(TEXT("smokeText"), Result.SmokeText);
+			Object->SetBoolField(TEXT("verdictMatchesEligibility"), Result.bVerdictMatchesEligibility);
+			Object->SetBoolField(TEXT("dryRun"), Result.bDryRun);
+			Object->SetStringField(TEXT("replayStatusBefore"), Result.ReplayStatusBefore);
+			Object->SetStringField(TEXT("replayStatusAfter"), Result.ReplayStatusAfter);
+			Object->SetStringField(TEXT("failureDiagnosticPath"), Result.FailureDiagnosticPath);
+			Object->SetStringField(TEXT("errorCode"), Result.ErrorCode);
+			Object->SetStringField(TEXT("errorMessage"), Result.ErrorMessage);
+			return Object;
+		}
+
+		FString TaskAtlasServiceWriteOperationDiagnostic(
+			const FString& Operation,
+			const FString& SafeName,
+			const TSharedPtr<FJsonObject>& Diagnostic)
+		{
+			const FString TimestampUtc = FDateTime::UtcNow().ToIso8601();
+			const FString DiagnosticDir = FPaths::Combine(
+				TaskAtlasServiceFailureRootDir(),
+				FString::Printf(
+					TEXT("%s-%s-%s"),
+					*TaskAtlasServiceMakeSafeTimestamp(TimestampUtc),
+					*Operation,
+					*SafeName));
+			const FString DiagnosticPath = FPaths::Combine(DiagnosticDir, TEXT("diagnostic.json"));
+
+			TSharedPtr<FJsonObject> Object = Diagnostic.IsValid() ? Diagnostic : MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("operation"), Operation);
+			Object->SetStringField(TEXT("timestampUtc"), TimestampUtc);
+			return TaskAtlasServiceWriteJsonObject(Object, DiagnosticPath)
+				? TaskAtlasServiceNormalizeAbsolutePath(DiagnosticPath)
+				: FString();
+		}
+
+		void TaskAtlasServiceCollectReloadRejections(
+			const UserRegistry::FReloadResult& ReloadResult,
+			const FString& TargetToolName,
+			TArray<FString>& OutRejectedReasons,
+			bool& bOutTargetRejected)
+		{
+			bOutTargetRejected = false;
+			for (const UserRegistry::FReloadResult::FRejection& Rejection : ReloadResult.RejectedTools)
+			{
+				if (Rejection.ToolName == TargetToolName)
+				{
+					bOutTargetRejected = true;
+					OutRejectedReasons.Add(FString::Printf(TEXT("target:%s"), *Rejection.Reason));
+				}
+				else
+				{
+					OutRejectedReasons.Add(FString::Printf(TEXT("unrelated:%s:%s"), *Rejection.ToolName, *Rejection.Reason));
+				}
+			}
+		}
+
+		UserRegistry::FReloadResult TaskAtlasServiceReloadUserRegistry()
+		{
+			UserToolLock::FExclusiveGuard Guard;
+			return UserRegistry::ReloadUserToolRegistry(true);
+		}
+
+		bool TaskAtlasServiceIsUserToolLoaded(const FString& ToolName)
+		{
+			UserToolLock::FSharedGuard Guard;
+			return UserRegistry::FindUserTool(ToolName) != nullptr;
+		}
+
+		FString TaskAtlasServiceReadReplayStatus(const TSharedPtr<FJsonObject>& ToolJson)
+		{
+			FString ReplayStatus;
+			if (ToolJson.IsValid())
+			{
+				ToolJson->TryGetStringField(TEXT("replayStatus"), ReplayStatus);
+			}
+			return ReplayStatus.TrimStartAndEnd();
+		}
+
+		bool TaskAtlasServiceReadSmokeArgs(const TSharedPtr<FJsonObject>& ToolJson, TSharedPtr<FJsonObject>& OutSmokeArgs)
+		{
+			OutSmokeArgs.Reset();
+			const TSharedPtr<FJsonObject>* SmokeArgs = nullptr;
+			if (!ToolJson.IsValid() || !ToolJson->TryGetObjectField(TEXT("smokeArgs"), SmokeArgs) || !SmokeArgs || !(*SmokeArgs).IsValid())
+			{
+				return false;
+			}
+			OutSmokeArgs = MakeShared<FJsonObject>();
+			OutSmokeArgs->Values = (*SmokeArgs)->Values;
+			return true;
+		}
+
+		bool TaskAtlasServiceSmokeResultHasBlockedSteps(const FUnrealMcpExecutionResult& SmokeResult)
+		{
+			if (SmokeResult.StructuredContent.IsValid())
+			{
+				bool bHasBlockedSteps = false;
+				if (SmokeResult.StructuredContent->TryGetBoolField(TEXT("hasBlockedSteps"), bHasBlockedSteps) && bHasBlockedSteps)
+				{
+					return true;
+				}
+
+				FString Preview;
+				if (SmokeResult.StructuredContent->TryGetStringField(TEXT("executionResultPreview"), Preview))
+				{
+					TSharedPtr<FJsonObject> PreviewObject;
+					const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Preview);
+					if (FJsonSerializer::Deserialize(Reader, PreviewObject) && PreviewObject.IsValid())
+					{
+						if (PreviewObject->TryGetBoolField(TEXT("hasBlockedSteps"), bHasBlockedSteps) && bHasBlockedSteps)
+						{
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		}
+
+		bool TaskAtlasServiceSetToolJsonReplayStatus(
+			const FResolvedMadeTool& Tool,
+			const FString& ReplayStatus,
+			const FString& FailureDiagnosticPath,
+			FString& OutFailureReason)
+		{
+			OutFailureReason.Reset();
+			TSharedPtr<FJsonObject> ToolJson = Tool.ToolJson;
+			if (!ToolJson.IsValid() && !TaskAtlasServiceLoadJsonObject(Tool.ToolJsonPath, ToolJson))
+			{
+				OutFailureReason = TEXT("failed to reload tool.json");
+				return false;
+			}
+			ToolJson->SetStringField(TEXT("replayStatus"), ReplayStatus);
+			if (!FailureDiagnosticPath.IsEmpty())
+			{
+				ToolJson->SetStringField(TEXT("failureDiagnosticPath"), FailureDiagnosticPath);
+			}
+			return TaskAtlasServiceWriteJsonObject(ToolJson, Tool.ToolJsonPath);
+		}
+
+		bool TaskAtlasServiceWriteFailureMarker(const FResolvedMadeTool& Tool, const FString& Reason)
+		{
+			const FString MarkerPath = FPaths::Combine(Tool.TargetDir, TEXT("_failure.marker"));
+			const FString MarkerText = FString::Printf(
+				TEXT("timestampUtc=%s\nreason=%s\n"),
+				*FDateTime::UtcNow().ToIso8601(),
+				*Reason);
+			return FFileHelper::SaveStringToFile(MarkerText, *MarkerPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		}
+
+		FString TaskAtlasServiceMarkdownValue(FString Value)
+		{
+			Value.ReplaceInline(TEXT("`"), TEXT("'"));
+			return FString::Printf(TEXT("`%s`"), *Value);
+		}
+
+		void TaskAtlasServiceAppendMetadataLine(FString& Markdown, const FString& Key, const FString& Value, bool bSkipEmpty = true)
+		{
+			if (bSkipEmpty && Value.TrimStartAndEnd().IsEmpty())
+			{
+				return;
+			}
+			Markdown += FString::Printf(TEXT("- %s: %s\n"), *Key, *TaskAtlasServiceMarkdownValue(Value));
+		}
+
+		void TaskAtlasServiceAppendTextSection(FString& Markdown, const FString& Heading, const FString& Text)
+		{
+			if (Text.TrimStartAndEnd().IsEmpty())
+			{
+				return;
+			}
+			Markdown += FString::Printf(TEXT("## %s\n\n%s\n\n"), *Heading, *Text.TrimStartAndEnd());
+		}
+
+		FString TaskAtlasServiceBuildTaskKnowledgeMarkdown(const FLoadedTask& Task)
+		{
+			// Duplicated from STaskAtlasWindow.cpp; chunk 6 will consolidate the UI/service copy.
+			FString Markdown;
+			Markdown += TEXT("# Task Atlas Workflow\n\n");
+			Markdown += TEXT("## Metadata\n\n");
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("taskId"), Task.Model.TaskId, false);
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("label"), Task.Label);
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("rating"), Task.Rating, false);
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("pinned"), Task.bPinned ? FString(TEXT("true")) : FString(TEXT("false")), false);
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("sessionId"), Task.SessionId, false);
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("tStartUtc"), Task.TStartUtc, false);
+			TaskAtlasServiceAppendMetadataLine(Markdown, TEXT("tEndUtc"), Task.TEndUtc, false);
+			Markdown += TEXT("\n");
+
+			TaskAtlasServiceAppendTextSection(Markdown, TEXT("User Intent"), Task.UserIntent);
+			TaskAtlasServiceAppendTextSection(Markdown, TEXT("AI Summary"), Task.Description);
+
+			Markdown += TEXT("## Critical Path Tools\n\n");
+			if (Task.Model.CriticalPath.Num() == 0)
+			{
+				Markdown += TEXT("- (none)\n\n");
+			}
+			else
+			{
+				for (const FString& ToolName : Task.Model.CriticalPath)
+				{
+					Markdown += FString::Printf(TEXT("- %s\n"), *TaskAtlasServiceMarkdownValue(ToolName));
+				}
+				Markdown += TEXT("\n");
+			}
+
+			Markdown += TEXT("## Step References\n\n");
+			if (Task.Model.StepRefs.Num() == 0)
+			{
+				Markdown += TEXT("- (none)\n\n");
+			}
+			else
+			{
+				for (int32 Index = 0; Index < Task.Model.StepRefs.Num(); ++Index)
+				{
+					const FTaskAtlasStepRef& Step = Task.Model.StepRefs[Index];
+					Markdown += FString::Printf(
+						TEXT("- step %d: tool=%s, eventId=%s, captureStatus=%s\n"),
+						Index,
+						*TaskAtlasServiceMarkdownValue(Step.ToolName),
+						*TaskAtlasServiceMarkdownValue(Step.EventId),
+						*TaskAtlasServiceMarkdownValue(Step.CaptureStatus));
+				}
+				Markdown += TEXT("\n");
+			}
+			return Markdown;
+		}
+
+		bool TaskAtlasServiceBuildTaskAtlasKnowledgeSourcePath(
+			const FString& TaskId,
+			bool bEnsureDirectory,
+			FString& OutPath,
+			FString& OutFailureReason)
+		{
+			OutPath.Reset();
+			OutFailureReason.Reset();
+			const FString SourceRoot = TaskAtlasServiceNormalizeAbsolutePath(FPaths::Combine(
+				TaskAtlasServiceSavedRootDir(),
+				TEXT("KnowledgeSources/TaskAtlas")));
+			if (bEnsureDirectory && !IFileManager::Get().MakeDirectory(*SourceRoot, true))
+			{
+				OutFailureReason = FString::Printf(TEXT("Failed to create Task Atlas knowledge source directory: %s"), *SourceRoot);
+				return false;
+			}
+
+			const FString SafeName = TaskAtlasServiceSanitizeTaskToken(TaskId);
+			const FString SourcePath = TaskAtlasServiceNormalizeAbsolutePath(FPaths::Combine(SourceRoot, SafeName + TEXT(".md")));
+			if (!TaskAtlasServicePathEqualsOrChild(SourcePath, SourceRoot))
+			{
+				OutFailureReason = TEXT("Refused to write Task Atlas knowledge source outside Saved/UnrealMcp/KnowledgeSources/TaskAtlas.");
+				return false;
+			}
+
+			OutPath = SourcePath;
+			return true;
 		}
 	}
 
@@ -1321,12 +1881,95 @@ namespace UnrealMcp::TaskAtlasService
 
 	FDeleteMadeToolResult DeleteMadeTool(const FString& ToolName)
 	{
-		(void)ToolName;
-
+		check(IsInGameThread());
 		FDeleteMadeToolResult Result;
-		Result.Outcome = EDeleteMadeToolOutcome::Refused;
-		Result.ErrorCode = TEXT("not_implemented_chunk1_stub");
-		Result.ErrorMessage = TEXT("UnrealMcpTaskAtlasService::DeleteMadeTool is a chunk-1 stub.");
+		Result.ToolName = ToolName.TrimStartAndEnd();
+
+		FScopeLock MutationGuard(&GTaskAtlasServiceMutationLock);
+
+		FResolvedMadeTool Tool;
+		FString ErrorCode;
+		FString ErrorMessage;
+		if (!TaskAtlasServiceResolveMadeTool(Result.ToolName, false, Tool, ErrorCode, ErrorMessage))
+		{
+			Result.Outcome = ErrorCode == TEXT("not_found") ? EDeleteMadeToolOutcome::NotFound : EDeleteMadeToolOutcome::Refused;
+			Result.ErrorCode = ErrorCode;
+			Result.ErrorMessage = ErrorMessage;
+			Result.StructuredContent = TaskAtlasServiceMakeDeleteResultContent(Result);
+			return Result;
+		}
+		Result.ToolName = Tool.ToolName;
+
+		const bool bLoadedBefore = TaskAtlasServiceIsUserToolLoaded(Tool.ToolName);
+		if (!IFileManager::Get().DirectoryExists(*Tool.TargetDir))
+		{
+			if (bLoadedBefore)
+			{
+				Result.bWasStaleEntry = true;
+				const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry();
+				Result.ReloadBeforeCount = ReloadResult.BeforeCount;
+				Result.ReloadAfterCount = ReloadResult.AfterCount;
+				Result.ReloadRemovedCount = ReloadResult.RemovedTools.Num();
+				bool bTargetRejected = false;
+				TaskAtlasServiceCollectReloadRejections(ReloadResult, Tool.ToolName, Result.RejectedReasons, bTargetRejected);
+				(void)bTargetRejected;
+			}
+			Result.Outcome = Result.RejectedReasons.Num() > 0 ? EDeleteMadeToolOutcome::ReloadRejected : EDeleteMadeToolOutcome::NotFound;
+			Result.ErrorCode = TEXT("not_found");
+			Result.ErrorMessage = TEXT("Generated user tool directory was already absent.");
+			Result.StructuredContent = TaskAtlasServiceMakeDeleteResultContent(Result);
+			return Result;
+		}
+
+		if (!bLoadedBefore)
+		{
+			Result.bWasStaleEntry = true;
+		}
+
+		if (!IFileManager::Get().DeleteDirectory(*Tool.TargetDir, false, true))
+		{
+			Result.Outcome = EDeleteMadeToolOutcome::Failed;
+			Result.ErrorCode = TEXT("filesystem_delete_failed");
+			Result.ErrorMessage = FString::Printf(TEXT("Failed to delete generated user tool directory: %s"), *Tool.TargetDir);
+			TSharedPtr<FJsonObject> Diagnostic = MakeShared<FJsonObject>();
+			Diagnostic->SetStringField(TEXT("toolName"), Tool.ToolName);
+			Diagnostic->SetStringField(TEXT("targetDir"), Tool.TargetDir);
+			Diagnostic->SetStringField(TEXT("errorCode"), Result.ErrorCode);
+			Diagnostic->SetStringField(TEXT("errorMessage"), Result.ErrorMessage);
+			Result.FailureDiagnosticPath = TaskAtlasServiceWriteOperationDiagnostic(TEXT("delete"), Tool.ToolId, Diagnostic);
+			Result.StructuredContent = TaskAtlasServiceMakeDeleteResultContent(Result);
+			return Result;
+		}
+
+		Result.RemovedDir = Tool.TargetDir;
+		const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry();
+		Result.ReloadBeforeCount = ReloadResult.BeforeCount;
+		Result.ReloadAfterCount = ReloadResult.AfterCount;
+		Result.ReloadRemovedCount = ReloadResult.RemovedTools.Num();
+		bool bTargetRejected = false;
+		TaskAtlasServiceCollectReloadRejections(ReloadResult, Tool.ToolName, Result.RejectedReasons, bTargetRejected);
+
+		if (Result.RejectedReasons.Num() > 0)
+		{
+			Result.Outcome = EDeleteMadeToolOutcome::ReloadRejected;
+			Result.ErrorCode = bTargetRejected ? FString(TEXT("reload_rejected_deleted_target")) : FString(TEXT("reload_rejected"));
+			Result.ErrorMessage = bTargetRejected
+				? FString(TEXT("Registry reload rejected the deleted target tool unexpectedly."))
+				: FString(TEXT("Registry reload reported unrelated rejected user tools after deletion."));
+			TSharedPtr<FJsonObject> Diagnostic = MakeShared<FJsonObject>();
+			Diagnostic->SetStringField(TEXT("toolName"), Tool.ToolName);
+			Diagnostic->SetStringField(TEXT("removedDir"), Result.RemovedDir);
+			Diagnostic->SetArrayField(TEXT("rejectedReasons"), TaskAtlasServiceMakeStringArray(Result.RejectedReasons));
+			Diagnostic->SetNumberField(TEXT("reloadBeforeCount"), ReloadResult.BeforeCount);
+			Diagnostic->SetNumberField(TEXT("reloadAfterCount"), ReloadResult.AfterCount);
+			Result.FailureDiagnosticPath = TaskAtlasServiceWriteOperationDiagnostic(TEXT("delete"), Tool.ToolId, Diagnostic);
+		}
+		else
+		{
+			Result.Outcome = EDeleteMadeToolOutcome::Deleted;
+		}
+
+		Result.StructuredContent = TaskAtlasServiceMakeDeleteResultContent(Result);
 		return Result;
 	}
 
@@ -1445,32 +2088,283 @@ namespace UnrealMcp::TaskAtlasService
 	{
 		bTaskAtlasServiceRejectNextTargetReloadForTests = true;
 	}
+
+	void FailNextPromoteRefreshForTests()
+	{
+		bTaskAtlasServiceFailNextKnowledgeRefreshForTests = true;
+	}
 #endif
+
+	FPromoteToRagResult PromoteToRag(const FPromoteToRagRequest& Req)
+	{
+		check(IsInGameThread());
+		FPromoteToRagResult Result;
+		Result.TaskId = Req.TaskId.TrimStartAndEnd();
+		Result.bDryRun = Req.bDryRun;
+
+		FLoadedTask Task;
+		FString FailureReason;
+		if (!TaskAtlasServiceLoadTaskById(Result.TaskId, Task, FailureReason))
+		{
+			Result.Outcome = EPromoteToRagOutcome::NotFound;
+			Result.ErrorCode = TEXT("task_not_found");
+			Result.ErrorMessage = FailureReason;
+			Result.StructuredContent = TaskAtlasServiceMakePromoteResultContent(Result);
+			return Result;
+		}
+
+		Result.TaskId = Task.Model.TaskId;
+		Result.SourcePath = Task.TaskPath;
+		const FString Markdown = TaskAtlasServiceBuildTaskKnowledgeMarkdown(Task);
+		Result.MarkdownLength = Markdown.Len();
+		if (!TaskAtlasServiceBuildTaskAtlasKnowledgeSourcePath(Task.Model.TaskId, !Req.bDryRun, Result.KnowledgeSourcePath, FailureReason))
+		{
+			Result.Outcome = EPromoteToRagOutcome::Refused;
+			Result.ErrorCode = TEXT("path_unsafe");
+			Result.ErrorMessage = FailureReason;
+			Result.StructuredContent = TaskAtlasServiceMakePromoteResultContent(Result);
+			return Result;
+		}
+
+		if (Req.bDryRun)
+		{
+			Result.Outcome = EPromoteToRagOutcome::DryRun;
+			Result.StructuredContent = TaskAtlasServiceMakePromoteResultContent(Result);
+			return Result;
+		}
+
+		if (!FFileHelper::SaveStringToFile(Markdown, *Result.KnowledgeSourcePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			Result.Outcome = EPromoteToRagOutcome::Failed;
+			Result.ErrorCode = TEXT("filesystem_write_failed");
+			Result.ErrorMessage = FString::Printf(TEXT("Failed to write Task Atlas RAG source: %s"), *Result.KnowledgeSourcePath);
+			Result.StructuredContent = TaskAtlasServiceMakePromoteResultContent(Result);
+			return Result;
+		}
+
+		FJsonObject RefreshArguments;
+		FUnrealMcpExecutionResult RefreshResult;
+#if WITH_DEV_AUTOMATION_TESTS
+		if (bTaskAtlasServiceFailNextKnowledgeRefreshForTests)
+		{
+			bTaskAtlasServiceFailNextKnowledgeRefreshForTests = false;
+			RefreshResult.bIsError = true;
+			RefreshResult.Text = TEXT("test_forced_refresh_failure");
+			RefreshResult.StructuredContent = MakeShared<FJsonObject>();
+			RefreshResult.StructuredContent->SetStringField(TEXT("action"), TEXT("knowledge_index_refresh"));
+			RefreshResult.StructuredContent->SetStringField(TEXT("errorCode"), TEXT("test_forced_refresh_failure"));
+		}
+		else
+#endif
+		{
+			RefreshResult = KnowledgeIndexRefresh(RefreshArguments);
+		}
+
+		Result.RefreshResultText = RefreshResult.Text;
+		Result.RefreshResult = RefreshResult.StructuredContent;
+		if (RefreshResult.bIsError)
+		{
+			Result.Outcome = EPromoteToRagOutcome::RefreshFailed;
+			Result.ErrorCode = TEXT("knowledge_refresh_failed");
+			Result.ErrorMessage = RefreshResult.Text.IsEmpty() ? FString(TEXT("unreal.knowledge_index_refresh failed.")) : RefreshResult.Text;
+			Result.StructuredContent = TaskAtlasServiceMakePromoteResultContent(Result);
+			return Result;
+		}
+
+		Result.Outcome = EPromoteToRagOutcome::Promoted;
+		Result.StructuredContent = TaskAtlasServiceMakePromoteResultContent(Result);
+		return Result;
+	}
 
 	FPromoteToRagResult PromoteToRag(const FString& TaskId)
 	{
-		(void)TaskId;
+		FPromoteToRagRequest Req;
+		Req.TaskId = TaskId;
+		return PromoteToRag(Req);
+	}
 
-		FPromoteToRagResult Result;
-		Result.Outcome = EPromoteToRagOutcome::Failed;
-		Result.ErrorCode = TEXT("not_implemented_chunk1_stub");
-		Result.ErrorMessage = TEXT("UnrealMcpTaskAtlasService::PromoteToRag is a chunk-1 stub.");
+	FSmokeResult SmokeMadeTool(const FSmokeRequest& Req)
+	{
+		check(IsInGameThread());
+		FSmokeResult Result;
+		Result.ToolName = Req.ToolName.TrimStartAndEnd();
+		Result.bDryRun = Req.bDryRun;
+
+		FScopeLock MutationGuard(&GTaskAtlasServiceMutationLock);
+
+		FResolvedMadeTool Tool;
+		FString ErrorCode;
+		FString ErrorMessage;
+		if (!TaskAtlasServiceResolveMadeTool(Result.ToolName, true, Tool, ErrorCode, ErrorMessage))
+		{
+			Result.Outcome = ErrorCode == TEXT("not_found") ? ESmokeOutcome::NotFound : ESmokeOutcome::Refused;
+			Result.ErrorCode = ErrorCode;
+			Result.ErrorMessage = ErrorMessage;
+			Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);
+			return Result;
+		}
+		Result.ToolName = Tool.ToolName;
+		Result.ReplayStatusBefore = TaskAtlasServiceReadReplayStatus(Tool.ToolJson);
+		Result.ReplayStatusAfter = Result.ReplayStatusBefore;
+
+		TSharedPtr<FJsonObject> SmokeArgs;
+		if (!TaskAtlasServiceReadSmokeArgs(Tool.ToolJson, SmokeArgs))
+		{
+			Result.Outcome = ESmokeOutcome::Refused;
+			Result.ErrorCode = TEXT("no_smoke_args");
+			Result.ErrorMessage = TEXT("Task Atlas generated tool is missing required smokeArgs in tool.json.");
+			Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);
+			return Result;
+		}
+
+		const FString SmokeArgsText = TaskAtlasServiceJsonToCondensedString(SmokeArgs);
+		if (Req.bDryRun)
+		{
+			FString ReplayEligibility;
+			Tool.ToolJson->TryGetStringField(TEXT("replayEligibility"), ReplayEligibility);
+			Result.Outcome = ESmokeOutcome::DryRun;
+			Result.bVerdictMatchesEligibility = true;
+			Result.SmokeText = FString::Printf(
+				TEXT("Dry-run plan: would call %s with smokeArgs %s (replayEligibility=%s)."),
+				*Tool.ToolName,
+				*SmokeArgsText,
+				*(ReplayEligibility.IsEmpty() ? FString(TEXT("unknown")) : ReplayEligibility));
+			Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);
+			Result.StructuredContent->SetObjectField(TEXT("smokeArgs"), SmokeArgs);
+			return Result;
+		}
+
+		if (!TaskAtlasServiceIsUserToolLoaded(Tool.ToolName))
+		{
+			const UserRegistry::FReloadResult ReloadResult = TaskAtlasServiceReloadUserRegistry();
+			bool bTargetRejected = false;
+			TArray<FString> RejectedReasons;
+			TaskAtlasServiceCollectReloadRejections(ReloadResult, Tool.ToolName, RejectedReasons, bTargetRejected);
+			if (bTargetRejected)
+			{
+				Result.Outcome = ESmokeOutcome::ReloadRejected;
+				Result.ErrorCode = TEXT("reload_rejected");
+				Result.ErrorMessage = TEXT("Generated user tool was rejected by registry reload before smoke.");
+				Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);
+				Result.StructuredContent->SetArrayField(TEXT("rejectedReasons"), TaskAtlasServiceMakeStringArray(RejectedReasons));
+				return Result;
+			}
+		}
+
+		FJsonObject SmokeArguments;
+		SmokeArguments.SetStringField(TEXT("toolName"), Tool.ToolName);
+		SmokeArguments.SetStringField(TEXT("dryRunArgs"), SmokeArgsText);
+		SmokeArguments.SetNumberField(TEXT("timeoutSeconds"), 15.0);
+		const FUnrealMcpExecutionResult SmokeExecutionResult = UnrealMcpUserToolSmokeTool::Execute(SmokeArguments);
+		Result.SmokeText = SmokeExecutionResult.Text;
+
+		const bool bHasBlockedSteps = TaskAtlasServiceSmokeResultHasBlockedSteps(SmokeExecutionResult);
+		if (SmokeExecutionResult.bIsError || bHasBlockedSteps)
+		{
+			const FString Reason = SmokeExecutionResult.bIsError
+				? (SmokeExecutionResult.Text.IsEmpty() ? FString(TEXT("mcp_user_tool_smoke failed")) : SmokeExecutionResult.Text)
+				: FString(TEXT("mcp_user_tool_smoke reported blocked steps"));
+			Result.Outcome = ESmokeOutcome::Failed;
+			Result.ErrorCode = SmokeExecutionResult.bIsError ? FString(TEXT("smoke_failed")) : FString(TEXT("smoke_blocked_steps"));
+			Result.ErrorMessage = Reason;
+
+			TaskAtlasServiceWriteFailureMarker(Tool, Reason);
+			TSharedPtr<FJsonObject> Diagnostic = MakeShared<FJsonObject>();
+			Diagnostic->SetStringField(TEXT("toolName"), Tool.ToolName);
+			Diagnostic->SetStringField(TEXT("targetDir"), Tool.TargetDir);
+			Diagnostic->SetStringField(TEXT("reason"), Reason);
+			Diagnostic->SetStringField(TEXT("smokeText"), SmokeExecutionResult.Text);
+			if (SmokeExecutionResult.StructuredContent.IsValid())
+			{
+				Diagnostic->SetObjectField(TEXT("smokeStructuredContent"), SmokeExecutionResult.StructuredContent);
+			}
+			Result.FailureDiagnosticPath = TaskAtlasServiceWriteOperationDiagnostic(TEXT("smoke"), Tool.ToolId, Diagnostic);
+
+			FString MetadataFailure;
+			if (!TaskAtlasServiceSetToolJsonReplayStatus(Tool, TEXT("generated_smoke_failed"), Result.FailureDiagnosticPath, MetadataFailure))
+			{
+				Result.ErrorMessage += FString::Printf(TEXT(" Metadata update failed: %s."), *MetadataFailure);
+			}
+			Result.ReplayStatusAfter = TEXT("generated_smoke_failed");
+			Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);
+			if (SmokeExecutionResult.StructuredContent.IsValid())
+			{
+				Result.StructuredContent->SetObjectField(TEXT("smokeStructuredContent"), SmokeExecutionResult.StructuredContent);
+			}
+			return Result;
+		}
+
+		Result.Outcome = ESmokeOutcome::Passed;
+		Result.bVerdictMatchesEligibility = !Result.ReplayStatusBefore.Equals(TEXT("blocked"), ESearchCase::IgnoreCase)
+			&& !Result.ReplayStatusBefore.Equals(TEXT("generated_smoke_failed"), ESearchCase::IgnoreCase);
+		Result.StructuredContent = TaskAtlasServiceMakeSmokeResultContent(Result);
+		if (SmokeExecutionResult.StructuredContent.IsValid())
+		{
+			Result.StructuredContent->SetObjectField(TEXT("smokeStructuredContent"), SmokeExecutionResult.StructuredContent);
+		}
 		return Result;
 	}
 
 	FSmokeResult SmokeMadeTool(const FString& ToolName)
 	{
-		(void)ToolName;
-
-		FSmokeResult Result;
-		Result.Outcome = ESmokeOutcome::Refused;
-		Result.ErrorCode = TEXT("not_implemented_chunk1_stub");
-		Result.ErrorMessage = TEXT("UnrealMcpTaskAtlasService::SmokeMadeTool is a chunk-1 stub.");
-		return Result;
+		FSmokeRequest Req;
+		Req.ToolName = ToolName;
+		return SmokeMadeTool(Req);
 	}
 
 	TArray<FUserToolView> IntrospectUserRegistry()
 	{
-		return TArray<FUserToolView>();
+		TArray<FUserToolView> Views;
+		UserToolLock::FSharedGuard ReadGuard;
+		for (const UserRegistry::FUserToolEntry* Entry : UserRegistry::GetAllUserTools())
+		{
+			if (!Entry)
+			{
+				continue;
+			}
+
+			FUserToolView View;
+			View.ToolName = Entry->ToolName;
+			View.ScaffoldDir = TaskAtlasServiceMakeDisplayPath(Entry->ScaffoldDir);
+			View.PythonSha = Entry->PythonHandlerSha256;
+			View.LifecycleState = Extension::LifecycleStateToString(Entry->LifecycleState);
+			View.ToolJsonPath = TaskAtlasServiceMakeDisplayPath(FPaths::Combine(Entry->ScaffoldDir, TEXT("tool.json")));
+			View.PythonPath = TaskAtlasServiceMakeDisplayPath(Entry->PythonHandlerPath);
+			View.bLoaded = true;
+
+			if (Entry->ToolJson.IsValid())
+			{
+				Entry->ToolJson->TryGetStringField(TEXT("generator"), View.Generator);
+				Entry->ToolJson->TryGetStringField(TEXT("sourceKind"), View.SourceKind);
+				Entry->ToolJson->TryGetStringField(TEXT("sourceTaskId"), View.SourceTaskId);
+				if (View.SourceTaskId.IsEmpty())
+				{
+					Entry->ToolJson->TryGetStringField(TEXT("taskId"), View.SourceTaskId);
+				}
+			}
+			if (View.Generator.IsEmpty())
+			{
+				View.Generator = TEXT("unknown");
+			}
+			if (View.SourceKind.IsEmpty())
+			{
+				View.SourceKind = View.Generator == TEXT("task_atlas_make_composite")
+					? FString(TEXT("GeneratedComposite"))
+					: FString(TEXT("UserRegistry"));
+			}
+
+			Views.Add(MoveTemp(View));
+		}
+
+		Views.Sort(
+			[](const FUserToolView& Left, const FUserToolView& Right)
+			{
+				if (Left.bLoaded != Right.bLoaded)
+				{
+					return Left.bLoaded;
+				}
+				return Left.ToolName < Right.ToolName;
+			});
+		return Views;
 	}
 }

@@ -4,6 +4,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -12,7 +13,10 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UnrealMcpHashUtils.h"
 #include "UnrealMcpTaskAtlasService.h"
+#include "UnrealMcpUserToolLock.h"
+#include "UnrealMcpUserToolRegistry.h"
 
 #if PLATFORM_MAC || PLATFORM_LINUX
 #include <unistd.h>
@@ -24,6 +28,7 @@ namespace UnrealMcp::TaskAtlasService
 	void ClearSavedRootDirForTests();
 	void CorruptNextMakeCompositeStagingShaForTests();
 	void RejectNextMakeCompositeReloadForTests();
+	void FailNextPromoteRefreshForTests();
 }
 
 namespace UnrealMcpTaskAtlasServiceTests
@@ -157,6 +162,135 @@ namespace UnrealMcpTaskAtlasServiceTests
 			*CreatedUtc,
 			*ValidSha);
 		return WriteTextFile(FPaths::Combine(Root, ToolId, TEXT("tool.json")), ToolJson);
+	}
+
+	const FString Chunk4PassPy = TEXT("def execute(args):\n    return {\"ok\": True, \"dryRun\": args.get(\"dryRun\", False)}\n");
+	const FString Chunk4RaisePy = TEXT("def execute(args):\n    raise RuntimeError(\"chunk4 smoke boom\")\n");
+	const FString Chunk4ToolPrefix = TEXT("atlas_chunk4_");
+
+	struct FChunk4Fixture
+	{
+		FString Root;
+		FString SavedRoot;
+		FString PyToolsRoot;
+	};
+
+	FChunk4Fixture SetupChunk4Fixture(const FString& Leaf)
+	{
+		FChunk4Fixture Fixture;
+		Fixture.Root = TestRoot(FPaths::Combine(TEXT("Chunk4"), Leaf));
+		Fixture.SavedRoot = FPaths::Combine(Fixture.Root, TEXT("Saved/UnrealMcp"));
+		Fixture.PyToolsRoot = FPaths::Combine(Fixture.Root, TEXT("Tools/UnrealMcpPyTools"));
+		ResetDirectory(Fixture.Root);
+		IFileManager::Get().MakeDirectory(*Fixture.SavedRoot, true);
+		IFileManager::Get().MakeDirectory(*Fixture.PyToolsRoot, true);
+		UnrealMcp::TaskAtlasService::SetSavedRootDirForTests(Fixture.SavedRoot);
+		UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(Fixture.PyToolsRoot);
+		return Fixture;
+	}
+
+	void ClearChunk4Fixture(const FChunk4Fixture& Fixture)
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	}
+
+	FString RegistryUserToolsRoot()
+	{
+		UnrealMcp::UserRegistry::InitializeUserToolRegistry();
+		return UnrealMcp::UserRegistry::GetUserToolsRootDir();
+	}
+
+	void ReloadUserRegistryForTests()
+	{
+		UnrealMcp::UserToolLock::FExclusiveGuard Guard;
+		UnrealMcp::UserRegistry::ReloadUserToolRegistry(true);
+	}
+
+	bool RegistryHasTool(const FString& ToolName)
+	{
+		UnrealMcp::UserToolLock::FSharedGuard Guard;
+		return UnrealMcp::UserRegistry::FindUserTool(ToolName) != nullptr;
+	}
+
+	void DeleteChunk4RegistryTools()
+	{
+		const FString Root = RegistryUserToolsRoot();
+		TArray<FString> DirectoryNames;
+		IFileManager::Get().FindFiles(DirectoryNames, *FPaths::Combine(Root, TEXT("*")), false, true);
+		for (const FString& DirectoryName : DirectoryNames)
+		{
+			if (DirectoryName.StartsWith(Chunk4ToolPrefix, ESearchCase::CaseSensitive))
+			{
+				IFileManager::Get().DeleteDirectory(*FPaths::Combine(Root, DirectoryName), false, true);
+			}
+		}
+	}
+
+	bool WriteGeneratedToolWithPython(
+		const FString& Root,
+		const FString& ToolId,
+		const FString& MainPy,
+		const FString& Generator = TEXT("task_atlas_make_composite"),
+		const FString& ReplayStatus = TEXT("preview_ready"),
+		const FString& SourceTaskId = TEXT("task-fixture"))
+	{
+		const FString ToolDir = FPaths::Combine(Root, ToolId);
+		const FString MainPyPath = FPaths::Combine(ToolDir, TEXT("main.py"));
+		const FString ToolJsonPath = FPaths::Combine(ToolDir, TEXT("tool.json"));
+		const FString Sha = UnrealMcp::HashUtils::Sha256LowerHexFromUtf8(MainPy).ToLower();
+
+		TSharedPtr<FJsonObject> ToolJson = MakeShared<FJsonObject>();
+		ToolJson->SetStringField(TEXT("name"), FString::Printf(TEXT("user.%s"), *ToolId));
+		ToolJson->SetStringField(TEXT("title"), TEXT("Chunk4 Generated Tool"));
+		ToolJson->SetStringField(TEXT("description"), TEXT("Task Atlas service chunk4 fixture."));
+		ToolJson->SetStringField(TEXT("generator"), Generator);
+		ToolJson->SetStringField(TEXT("compositeKind"), TEXT("preview"));
+		ToolJson->SetStringField(TEXT("replayStatus"), ReplayStatus);
+		ToolJson->SetStringField(TEXT("replayEligibility"), TEXT("preview_ready"));
+		ToolJson->SetStringField(TEXT("createdUtc"), TEXT("2026-05-31T00:00:00Z"));
+		ToolJson->SetStringField(TEXT("sourceTaskId"), SourceTaskId);
+		ToolJson->SetStringField(TEXT("pythonHandlerSha256"), Sha);
+		ToolJson->SetArrayField(TEXT("importAllowlist"), TArray<TSharedPtr<FJsonValue>>());
+
+		TSharedPtr<FJsonObject> InputSchema = MakeShared<FJsonObject>();
+		InputSchema->SetStringField(TEXT("type"), TEXT("object"));
+		InputSchema->SetBoolField(TEXT("additionalProperties"), true);
+		ToolJson->SetObjectField(TEXT("inputSchema"), InputSchema);
+
+		TSharedPtr<FJsonObject> SmokeArgs = MakeShared<FJsonObject>();
+		SmokeArgs->SetStringField(TEXT("fixture"), ToolId);
+		ToolJson->SetObjectField(TEXT("smokeArgs"), SmokeArgs);
+
+		return WriteTextFile(MainPyPath, MainPy)
+			&& WriteTextFile(ToolJsonPath, JsonToPrettyString(ToolJson));
+	}
+
+	bool ReadToolJsonField(const FString& Root, const FString& ToolId, const FString& FieldName, FString& OutValue)
+	{
+		OutValue.Reset();
+		FString JsonText;
+		if (!FFileHelper::LoadFileToString(JsonText, *FPaths::Combine(Root, ToolId, TEXT("tool.json"))))
+		{
+			return false;
+		}
+		TSharedPtr<FJsonObject> Object;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+		return FJsonSerializer::Deserialize(Reader, Object) && Object.IsValid() && Object->TryGetStringField(FieldName, OutValue);
+	}
+
+	TArray<UnrealMcp::TaskAtlasService::FUserToolView> Chunk4IntrospectionViews()
+	{
+		TArray<UnrealMcp::TaskAtlasService::FUserToolView> Filtered;
+		for (const UnrealMcp::TaskAtlasService::FUserToolView& View : UnrealMcp::TaskAtlasService::IntrospectUserRegistry())
+		{
+			if (View.ToolName.StartsWith(FString(TEXT("user.")) + Chunk4ToolPrefix, ESearchCase::CaseSensitive))
+			{
+				Filtered.Add(View);
+			}
+		}
+		return Filtered;
 	}
 
 	bool CreateDirectorySymlink(const FString& Target, const FString& Link)
@@ -510,6 +644,413 @@ bool FUnrealMcpTaskAtlasServiceMakeCompositeCollisionTest::RunTest(const FString
 	TestTrue(TEXT("collision skipped"), Result.Outcome == UnrealMcp::TaskAtlasService::EMakeCompositeOutcome::Skipped);
 	TestEqual(TEXT("collision error code"), Result.ErrorCode, TEXT("collision_existing_target"));
 	TestTrue(TEXT("existing marker preserved"), FPaths::FileExists(FPaths::Combine(ExistingTarget, TEXT("marker.txt"))));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceDeleteSuccessGeneratedTest,
+	"UnrealMcp.TaskAtlasService.Delete.SuccessGenerated",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceDeleteSuccessGeneratedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("DeleteSuccessGenerated"));
+	const FString PyRoot = RegistryUserToolsRoot();
+	UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(PyRoot);
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("delete_success");
+	const FString ToolName = FString(TEXT("user.")) + ToolId;
+	TestTrue(TEXT("generated registry tool writes"), WriteGeneratedToolWithPython(PyRoot, ToolId, Chunk4PassPy));
+	ReloadUserRegistryForTests();
+	TestTrue(TEXT("registry loaded before delete"), RegistryHasTool(ToolName));
+
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult Result = UnrealMcp::TaskAtlasService::DeleteMadeTool(ToolName);
+	TestTrue(
+		TEXT("delete outcome completed"),
+		Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Deleted
+			|| Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::ReloadRejected);
+	TestFalse(TEXT("directory removed"), IFileManager::Get().DirectoryExists(*FPaths::Combine(PyRoot, ToolId)));
+	TestFalse(TEXT("registry unloaded after delete"), RegistryHasTool(ToolName));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceDeleteRefuseNonGeneratedTest,
+	"UnrealMcp.TaskAtlasService.Delete.RefuseNonGenerated",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceDeleteRefuseNonGeneratedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("DeleteRefuseNonGenerated"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("manual");
+	const FString ToolDir = FPaths::Combine(Fixture.PyToolsRoot, ToolId);
+	TestTrue(TEXT("manual tool writes"), WriteGeneratedToolWithPython(Fixture.PyToolsRoot, ToolId, Chunk4PassPy, TEXT("manual_fixture")));
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult Result = UnrealMcp::TaskAtlasService::DeleteMadeTool(FString(TEXT("user.")) + ToolId);
+	TestTrue(TEXT("refused outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Refused);
+	TestEqual(TEXT("refused error code"), Result.ErrorCode, TEXT("not_task_atlas_generated"));
+	TestTrue(TEXT("manual dir preserved"), IFileManager::Get().DirectoryExists(*ToolDir));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceDeleteRefusePathUnsafeTest,
+	"UnrealMcp.TaskAtlasService.Delete.RefusePathUnsafe",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceDeleteRefusePathUnsafeTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("DeleteRefusePathUnsafe"));
+	const FString OutsideRoot = TestRoot(TEXT("Chunk4/DeleteRefusePathUnsafeOutside"));
+	ResetDirectory(OutsideRoot);
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+		IFileManager::Get().DeleteDirectory(*OutsideRoot, false, true);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("escape");
+	TestTrue(TEXT("outside generated tool writes"), WriteGeneratedToolWithPython(OutsideRoot, ToolId, Chunk4PassPy));
+#if PLATFORM_MAC || PLATFORM_LINUX
+	TestTrue(TEXT("escape symlink creates"), CreateDirectorySymlink(FPaths::Combine(OutsideRoot, ToolId), FPaths::Combine(Fixture.PyToolsRoot, ToolId)));
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult Result = UnrealMcp::TaskAtlasService::DeleteMadeTool(FString(TEXT("user.")) + ToolId);
+	TestTrue(TEXT("path refused"), Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::Refused);
+	TestEqual(TEXT("path error code"), Result.ErrorCode, TEXT("path_unsafe"));
+	TestTrue(TEXT("outside dir preserved"), IFileManager::Get().DirectoryExists(*FPaths::Combine(OutsideRoot, ToolId)));
+#else
+	AddInfo(TEXT("Path-unsafe symlink test skipped on this platform."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceDeleteStaleEntryTest,
+	"UnrealMcp.TaskAtlasService.Delete.StaleEntry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceDeleteStaleEntryTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("DeleteStaleEntry"));
+	const FString PyRoot = RegistryUserToolsRoot();
+	UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(PyRoot);
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("stale");
+	const FString ToolName = FString(TEXT("user.")) + ToolId;
+	TestTrue(TEXT("stale registry fixture writes"), WriteGeneratedToolWithPython(PyRoot, ToolId, Chunk4PassPy));
+	ReloadUserRegistryForTests();
+	TestTrue(TEXT("registry loaded before stale delete"), RegistryHasTool(ToolName));
+	IFileManager::Get().DeleteDirectory(*FPaths::Combine(PyRoot, ToolId), false, true);
+
+	const UnrealMcp::TaskAtlasService::FDeleteMadeToolResult Result = UnrealMcp::TaskAtlasService::DeleteMadeTool(ToolName);
+	TestTrue(TEXT("stale flag"), Result.bWasStaleEntry);
+	TestTrue(
+		TEXT("stale outcome"),
+		Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::NotFound
+			|| Result.Outcome == UnrealMcp::TaskAtlasService::EDeleteMadeToolOutcome::ReloadRejected);
+	TestFalse(TEXT("registry removed stale entry"), RegistryHasTool(ToolName));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceSmokeDryRunTest,
+	"UnrealMcp.TaskAtlasService.Smoke.DryRun",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceSmokeDryRunTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("SmokeDryRun"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("smoke_dry_run");
+	TestTrue(TEXT("dry-run smoke fixture writes"), WriteGeneratedToolWithPython(Fixture.PyToolsRoot, ToolId, Chunk4PassPy));
+	UnrealMcp::TaskAtlasService::FSmokeRequest Request;
+	Request.ToolName = FString(TEXT("user.")) + ToolId;
+	Request.bDryRun = true;
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(Request);
+	TestTrue(TEXT("dry-run outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::DryRun);
+	TestTrue(TEXT("dry-run verdict placeholder"), Result.bVerdictMatchesEligibility);
+	TestFalse(TEXT("no marker written"), FPaths::FileExists(FPaths::Combine(Fixture.PyToolsRoot, ToolId, TEXT("_failure.marker"))));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceSmokeRealPassTest,
+	"UnrealMcp.TaskAtlasService.Smoke.RealPass",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceSmokeRealPassTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("SmokeRealPass"));
+	const FString PyRoot = RegistryUserToolsRoot();
+	UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(PyRoot);
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("smoke_pass");
+	TestTrue(TEXT("real-pass smoke fixture writes"), WriteGeneratedToolWithPython(PyRoot, ToolId, Chunk4PassPy));
+	ReloadUserRegistryForTests();
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(FString(TEXT("user.")) + ToolId);
+	TestTrue(TEXT("smoke passed"), Result.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::Passed);
+	TestEqual(TEXT("status unchanged"), Result.ReplayStatusAfter, TEXT("preview_ready"));
+	TestTrue(TEXT("verdict matches"), Result.bVerdictMatchesEligibility);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceSmokeRealFailTest,
+	"UnrealMcp.TaskAtlasService.Smoke.RealFail",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceSmokeRealFailTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("SmokeRealFail"));
+	const FString PyRoot = RegistryUserToolsRoot();
+	UnrealMcp::TaskAtlasService::SetMadeToolsRootDirForTests(PyRoot);
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		UnrealMcp::TaskAtlasService::ClearMadeToolsRootDirForTests();
+		UnrealMcp::TaskAtlasService::ClearSavedRootDirForTests();
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+		IFileManager::Get().DeleteDirectory(*Fixture.Root, false, true);
+	};
+
+	const FString ToolId = Chunk4ToolPrefix + TEXT("smoke_fail");
+	TestTrue(TEXT("real-fail smoke fixture writes"), WriteGeneratedToolWithPython(PyRoot, ToolId, Chunk4RaisePy));
+	ReloadUserRegistryForTests();
+	const UnrealMcp::TaskAtlasService::FSmokeResult Result = UnrealMcp::TaskAtlasService::SmokeMadeTool(FString(TEXT("user.")) + ToolId);
+	TestTrue(TEXT("smoke failed"), Result.Outcome == UnrealMcp::TaskAtlasService::ESmokeOutcome::Failed);
+	TestTrue(TEXT("marker written"), FPaths::FileExists(FPaths::Combine(PyRoot, ToolId, TEXT("_failure.marker"))));
+	TestTrue(TEXT("diagnostic written"), FPaths::FileExists(Result.FailureDiagnosticPath));
+	FString ReplayStatus;
+	TestTrue(TEXT("replay status reads"), ReadToolJsonField(PyRoot, ToolId, TEXT("replayStatus"), ReplayStatus));
+	TestEqual(TEXT("replay status failed"), ReplayStatus, TEXT("generated_smoke_failed"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServicePromoteDryRunTest,
+	"UnrealMcp.TaskAtlasService.Promote.DryRun",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServicePromoteDryRunTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("PromoteDryRun"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	TArray<TSharedPtr<FJsonValue>> StepRefs;
+	StepRefs.Add(MakeTaskStepRef(0, TEXT("unreal.editor_status"), TEXT("captured")));
+	TestTrue(TEXT("task fixture writes"), WriteTaskFixture(Fixture.SavedRoot, TEXT("promote-dry-run"), TEXT("Promote Dry Run"), StepRefs));
+	UnrealMcp::TaskAtlasService::FPromoteToRagRequest Request;
+	Request.TaskId = TEXT("promote-dry-run");
+	Request.bDryRun = true;
+	const UnrealMcp::TaskAtlasService::FPromoteToRagResult Result = UnrealMcp::TaskAtlasService::PromoteToRag(Request);
+	TestTrue(TEXT("dry-run outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::EPromoteToRagOutcome::DryRun);
+	TestTrue(TEXT("markdown length reported"), Result.MarkdownLength > 0);
+	TestFalse(TEXT("dry-run did not write markdown"), FPaths::FileExists(Result.KnowledgeSourcePath));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServicePromoteWriteSuccessTest,
+	"UnrealMcp.TaskAtlasService.Promote.WriteSuccess",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServicePromoteWriteSuccessTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("PromoteWriteSuccess"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	TArray<TSharedPtr<FJsonValue>> StepRefs;
+	StepRefs.Add(MakeTaskStepRef(0, TEXT("unreal.editor_status"), TEXT("captured")));
+	TestTrue(TEXT("task fixture writes"), WriteTaskFixture(Fixture.SavedRoot, TEXT("promote-write-success"), TEXT("Promote Write Success"), StepRefs));
+	const UnrealMcp::TaskAtlasService::FPromoteToRagResult Result = UnrealMcp::TaskAtlasService::PromoteToRag(TEXT("promote-write-success"));
+	TestTrue(TEXT("markdown written"), FPaths::FileExists(Result.KnowledgeSourcePath));
+	TestTrue(
+		TEXT("promote refresh completed or preserved source for manual refresh"),
+		Result.Outcome == UnrealMcp::TaskAtlasService::EPromoteToRagOutcome::Promoted
+			|| Result.Outcome == UnrealMcp::TaskAtlasService::EPromoteToRagOutcome::RefreshFailed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServicePromoteRefreshFailedTest,
+	"UnrealMcp.TaskAtlasService.Promote.RefreshFailed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServicePromoteRefreshFailedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	const FChunk4Fixture Fixture = SetupChunk4Fixture(TEXT("PromoteRefreshFailed"));
+	ON_SCOPE_EXIT
+	{
+		ClearChunk4Fixture(Fixture);
+	};
+
+	TArray<TSharedPtr<FJsonValue>> StepRefs;
+	StepRefs.Add(MakeTaskStepRef(0, TEXT("unreal.editor_status"), TEXT("captured")));
+	TestTrue(TEXT("task fixture writes"), WriteTaskFixture(Fixture.SavedRoot, TEXT("promote-refresh-failed"), TEXT("Promote Refresh Failed"), StepRefs));
+	UnrealMcp::TaskAtlasService::FailNextPromoteRefreshForTests();
+	const UnrealMcp::TaskAtlasService::FPromoteToRagResult Result = UnrealMcp::TaskAtlasService::PromoteToRag(TEXT("promote-refresh-failed"));
+	TestTrue(TEXT("refresh failed outcome"), Result.Outcome == UnrealMcp::TaskAtlasService::EPromoteToRagOutcome::RefreshFailed);
+	TestTrue(TEXT("markdown preserved"), FPaths::FileExists(Result.KnowledgeSourcePath));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceIntrospectMultipleToolsTest,
+	"UnrealMcp.TaskAtlasService.Introspect.MultipleTools",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceIntrospectMultipleToolsTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+	};
+
+	const FString PyRoot = RegistryUserToolsRoot();
+	TestTrue(TEXT("tool b writes"), WriteGeneratedToolWithPython(PyRoot, Chunk4ToolPrefix + TEXT("b"), Chunk4PassPy));
+	TestTrue(TEXT("tool a writes"), WriteGeneratedToolWithPython(PyRoot, Chunk4ToolPrefix + TEXT("a"), Chunk4PassPy));
+	ReloadUserRegistryForTests();
+	const TArray<UnrealMcp::TaskAtlasService::FUserToolView> Views = Chunk4IntrospectionViews();
+	TestEqual(TEXT("two chunk4 tools"), Views.Num(), 2);
+	if (Views.Num() == 2)
+	{
+		TestEqual(TEXT("sorted first"), Views[0].ToolName, FString(TEXT("user.")) + Chunk4ToolPrefix + TEXT("a"));
+		TestEqual(TEXT("sorted second"), Views[1].ToolName, FString(TEXT("user.")) + Chunk4ToolPrefix + TEXT("b"));
+		TestTrue(TEXT("loaded first"), Views[0].bLoaded);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceIntrospectSanitizedTest,
+	"UnrealMcp.TaskAtlasService.Introspect.Sanitized",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceIntrospectSanitizedTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	ON_SCOPE_EXIT
+	{
+		DeleteChunk4RegistryTools();
+		ReloadUserRegistryForTests();
+	};
+
+	const FString PyRoot = RegistryUserToolsRoot();
+	const FString ToolId = Chunk4ToolPrefix + TEXT("sanitized");
+	TestTrue(TEXT("sanitized tool writes"), WriteGeneratedToolWithPython(PyRoot, ToolId, Chunk4PassPy));
+	ReloadUserRegistryForTests();
+	const TArray<UnrealMcp::TaskAtlasService::FUserToolView> Views = Chunk4IntrospectionViews();
+	TestEqual(TEXT("one chunk4 tool"), Views.Num(), 1);
+	if (Views.Num() == 1)
+	{
+		const FString HomeDir = FPlatformProcess::UserDir();
+		TestFalse(TEXT("scaffold omits home"), !HomeDir.IsEmpty() && Views[0].ScaffoldDir.Contains(HomeDir, ESearchCase::IgnoreCase));
+		TestFalse(TEXT("python path omits home"), !HomeDir.IsEmpty() && Views[0].PythonPath.Contains(HomeDir, ESearchCase::IgnoreCase));
+		TestFalse(TEXT("no raw args in source kind"), Views[0].SourceKind.Contains(TEXT("fixture"), ESearchCase::IgnoreCase));
+		TestEqual(TEXT("source task id"), Views[0].SourceTaskId, TEXT("task-fixture"));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FUnrealMcpTaskAtlasServiceIntrospectEmptyRegistryTest,
+	"UnrealMcp.TaskAtlasService.Introspect.EmptyRegistry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUnrealMcpTaskAtlasServiceIntrospectEmptyRegistryTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	using namespace UnrealMcpTaskAtlasServiceTests;
+
+	DeleteChunk4RegistryTools();
+	ReloadUserRegistryForTests();
+	const TArray<UnrealMcp::TaskAtlasService::FUserToolView> Views = Chunk4IntrospectionViews();
+	TestEqual(TEXT("no chunk4 tools"), Views.Num(), 0);
 	return true;
 }
 
