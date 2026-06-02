@@ -186,7 +186,29 @@ CLI <-> Chat Panel sync tools (chat_inject_user_input, chat_history_tail,
 chat_tool_log_tail) and hardens Task Atlas eligibility against external-client
 registry-miss noise.
 
-Current project status: v0.31 Stage 2 is complete through Wave E docs:
+Current project status: v0.32.0 (2026-06-02) is the stable release after a
+9-chunk rework of Task Atlas Make Tool Set + CLI ↔ editor chat sync. The
+rework added 9 new MCP tools (6 task_atlas_* wrappers in chunk 5 +
+chat_inject_user_input/chat_history_tail/chat_tool_log_tail in chunk 9),
+introduced the `UnrealMcp::TaskAtlasService` backend namespace, switched
+STaskAtlasWindow handlers to thin invokers (net -483 LOC) with Test Now /
+Debug buttons and blocked-task disable + tooltip, added the
+`toolsListVersion` ETag on tools/list for external polling, and hardened
+the protocol against external-client stale-`task_list` poisoning (Fix B
+in `UnrealMcpProtocol.cpp` + Fix C in `UnrealMcpTaskAtlasService.cpp`).
+Tool count 181 → 190; 63/63 automation pass (49 baseline + 14 ChatSync);
+UE 5.6 + 5.7 dual-engine build pass; trilingual release notes at
+`Docs/Release-2026-06.md`; mac + win zip on GitHub release v0.32.0.
+Eligibility-based product split: `preview_ready` writes PyTools + explicit
+Test Now (no auto-smoke); `partial` / `skeleton_pre_capture` write markdown
+only at `Saved/UnrealMcp/TaskAtlasDrafts/`; `blocked` UI disables Make Tool
+Set with tooltip showing first blocked step + reason. R6 end-to-end GUI
+demo verified CLI ↔ editor chat sync: CLI-injected prompts appear in
+editor Chat Panel, AI's real responses + tool log show in editor, and
+`chat_history_tail` / `chat_tool_log_tail` return data byte-identical to
+what editor displays.
+
+Earlier project status: v0.31 Stage 2 was complete through Wave E docs:
 ActivityLog records now carry `eventId` plus public capture metadata; tool
 arguments are redacted for secret fields, home/project paths, per-tool skip
 rules, and size caps before optional storage in private
