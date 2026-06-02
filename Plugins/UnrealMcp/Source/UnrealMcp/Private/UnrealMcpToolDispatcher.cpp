@@ -1,5 +1,14 @@
 #include "UnrealMcpModule.h"
 
+#include "Async/Async.h"
+#include "HAL/CriticalSection.h"
+#include "HAL/Event.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
+#include "UnrealMcpChatPanel.h"
 #include "UnrealMcpPythonToolBridge.h"
 #include "UnrealMcpActorTools.h"
 #include "UnrealMcpAutomationTools.h"
@@ -18,6 +27,7 @@
 #include "UnrealMcpToolExecutionGuard.h"
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistry.h"
+#include "UnrealMcpSession.h"
 #include "UnrealMcpUserToolListVersion.h"
 #include "UnrealMcpUserToolRegistry.h"
 #include "UnrealMcpWidgetTools.h"
@@ -232,6 +242,420 @@ namespace UnrealMcp
 			return Object;
 		}
 
+		struct FChatInjectGameThreadState
+		{
+			FCriticalSection Mutex;
+			FEvent* Event = nullptr;
+			bool bPanelFound = false;
+			bool bMessageQueued = false;
+		};
+
+		int32 GetCountArgument(const FJsonObject& Arguments)
+		{
+			double CountDouble = 20.0;
+			Arguments.TryGetNumberField(TEXT("count"), CountDouble);
+			return FMath::Clamp(static_cast<int32>(CountDouble), 1, 100);
+		}
+
+		FString SanitizeChatSyncSessionId(FString Value)
+		{
+			Value = Value.TrimStartAndEnd().ToLower();
+			FString Result;
+			for (TCHAR Character : Value)
+			{
+				if (FChar::IsAlnum(Character))
+				{
+					Result.AppendChar(Character);
+				}
+				else if (Character == TEXT('-') || Character == TEXT('_') || Character == TEXT('.'))
+				{
+					Result.AppendChar(Character);
+				}
+				else if (FChar::IsWhitespace(Character))
+				{
+					Result.AppendChar(TEXT('-'));
+				}
+			}
+			while (Result.Contains(TEXT("--")))
+			{
+				Result = Result.Replace(TEXT("--"), TEXT("-"));
+			}
+			Result.RemoveFromStart(TEXT("-"));
+			Result.RemoveFromEnd(TEXT("-"));
+			return Result.IsEmpty() ? TEXT("activity-session") : Result.Left(80);
+		}
+
+		FString GetChatHistoryPath()
+		{
+			return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("ChatHistory.json")));
+		}
+
+		FString GetActivityLogRoot()
+		{
+			return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcp"), TEXT("ActivityLog")));
+		}
+
+		FString GetActivityLogPathForSession(const FString& SessionId)
+		{
+			return FPaths::Combine(GetActivityLogRoot(), SanitizeChatSyncSessionId(SessionId) + TEXT(".jsonl"));
+		}
+
+		bool TryResolveActivityLogSession(FString RequestedSessionId, FString& OutSessionId, FString& OutPath)
+		{
+			RequestedSessionId = RequestedSessionId.TrimStartAndEnd();
+			if (!RequestedSessionId.IsEmpty())
+			{
+				OutSessionId = SanitizeChatSyncSessionId(RequestedSessionId);
+				OutPath = GetActivityLogPathForSession(OutSessionId);
+				return FPaths::FileExists(OutPath);
+			}
+
+			const FString LaunchSessionId = UnrealMcp::GetLaunchSessionId().TrimStartAndEnd();
+			if (!LaunchSessionId.IsEmpty())
+			{
+				const FString LaunchPath = GetActivityLogPathForSession(LaunchSessionId);
+				if (FPaths::FileExists(LaunchPath))
+				{
+					OutSessionId = SanitizeChatSyncSessionId(LaunchSessionId);
+					OutPath = LaunchPath;
+					return true;
+				}
+			}
+
+			TArray<FString> ActivityFiles;
+			IFileManager::Get().FindFilesRecursive(ActivityFiles, *GetActivityLogRoot(), TEXT("*.jsonl"), true, false);
+			ActivityFiles.Sort([](const FString& Left, const FString& Right)
+			{
+				return IFileManager::Get().GetTimeStamp(*Left) > IFileManager::Get().GetTimeStamp(*Right);
+			});
+			if (ActivityFiles.Num() == 0)
+			{
+				OutSessionId.Reset();
+				OutPath.Reset();
+				return false;
+			}
+
+			OutPath = ActivityFiles[0];
+			OutSessionId = FPaths::GetBaseFilename(OutPath);
+			return true;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> CopyStringArrayField(const TSharedPtr<FJsonObject>& Object, const FString& FieldName)
+		{
+			TArray<TSharedPtr<FJsonValue>> Output;
+			const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+			if (!Object.IsValid() || !Object->TryGetArrayField(FieldName, Values) || !Values)
+			{
+				return Output;
+			}
+
+			for (const TSharedPtr<FJsonValue>& Value : *Values)
+			{
+				if (Value.IsValid() && Value->Type == EJson::String)
+				{
+					Output.Add(MakeShared<FJsonValueString>(Value->AsString()));
+				}
+			}
+			return Output;
+		}
+
+		bool InjectChatMessageOnGameThread(const FString& Text, bool& bOutPanelFound, bool& bOutMessageQueued)
+		{
+			if (IsInGameThread())
+			{
+				SUnrealMcpChatPanel* Panel = UnrealMcp::ChatPanelRegistry::TryGetActivePanel();
+				bOutPanelFound = Panel != nullptr;
+				bOutMessageQueued = Panel ? Panel->InjectUserMessage(Text) : false;
+				return true;
+			}
+
+			FEvent* Event = FPlatformProcess::GetSynchEventFromPool(true);
+			TSharedRef<FChatInjectGameThreadState, ESPMode::ThreadSafe> State = MakeShared<FChatInjectGameThreadState, ESPMode::ThreadSafe>();
+			State->Event = Event;
+			AsyncTask(ENamedThreads::GameThread, [State, Text]()
+			{
+				SUnrealMcpChatPanel* Panel = UnrealMcp::ChatPanelRegistry::TryGetActivePanel();
+				const bool bPanelFound = Panel != nullptr;
+				const bool bMessageQueued = Panel ? Panel->InjectUserMessage(Text) : false;
+
+				FScopeLock Lock(&State->Mutex);
+				State->bPanelFound = bPanelFound;
+				State->bMessageQueued = bMessageQueued;
+				if (State->Event)
+				{
+					State->Event->Trigger();
+				}
+			});
+
+			if (!Event->Wait(5000))
+			{
+				FScopeLock Lock(&State->Mutex);
+				State->Event = nullptr;
+				FPlatformProcess::ReturnSynchEventToPool(Event);
+				return false;
+			}
+
+			{
+				FScopeLock Lock(&State->Mutex);
+				bOutPanelFound = State->bPanelFound;
+				bOutMessageQueued = State->bMessageQueued;
+				State->Event = nullptr;
+			}
+			FPlatformProcess::ReturnSynchEventToPool(Event);
+			return true;
+		}
+
+		TSharedPtr<FJsonObject> MakeChatInjectContent(
+			bool bOk,
+			bool bPanelFound,
+			bool bMessageQueued,
+			const FString& SessionId,
+			bool bDryRun)
+		{
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("chat_inject_user_input"));
+			Content->SetBoolField(TEXT("ok"), bOk);
+			Content->SetBoolField(TEXT("panelFound"), bPanelFound);
+			Content->SetBoolField(TEXT("messageQueued"), bMessageQueued);
+			Content->SetStringField(TEXT("sessionId"), SessionId);
+			Content->SetBoolField(TEXT("dryRun"), bDryRun);
+			return Content;
+		}
+
+		FUnrealMcpExecutionResult ExecuteChatInjectUserInput(const FJsonObject& Arguments)
+		{
+			FString Text;
+			Arguments.TryGetStringField(TEXT("text"), Text);
+			FString SessionId;
+			Arguments.TryGetStringField(TEXT("sessionId"), SessionId);
+			const bool bDryRun = GetBoolArgument(Arguments, TEXT("dryRun"), false);
+
+			if (Text.TrimStartAndEnd().IsEmpty())
+			{
+				TSharedPtr<FJsonObject> Content = MakeChatInjectContent(false, false, false, SessionId, bDryRun);
+				return MakeExecutionResult(TEXT("chat_inject_user_input requires non-empty text."), Content, true);
+			}
+
+			if (bDryRun)
+			{
+				const bool bPanelFound = UnrealMcp::ChatPanelRegistry::TryGetActivePanel() != nullptr;
+				TSharedPtr<FJsonObject> Content = MakeChatInjectContent(bPanelFound, bPanelFound, false, SessionId, true);
+				if (!bPanelFound)
+				{
+					Content->SetStringField(TEXT("errorCode"), TEXT("chat_panel_not_open"));
+					Content->SetStringField(TEXT("errorMessage"), TEXT("Editor Chat Panel is not open."));
+				}
+				return MakeExecutionResult(
+					bPanelFound ? TEXT("Dry-run: chat panel available for injection.") : TEXT("Editor Chat Panel is not open."),
+					Content,
+					false);
+			}
+
+			bool bPanelFound = false;
+			bool bMessageQueued = false;
+			if (!InjectChatMessageOnGameThread(Text, bPanelFound, bMessageQueued))
+			{
+				TSharedPtr<FJsonObject> Content = MakeChatInjectContent(false, bPanelFound, bMessageQueued, SessionId, false);
+				Content->SetStringField(TEXT("errorCode"), TEXT("game_thread_timeout"));
+				Content->SetStringField(TEXT("errorMessage"), TEXT("Game-thread injection timed out after 5s."));
+				return MakeExecutionResult(TEXT("Game-thread injection timed out after 5s."), Content, true);
+			}
+
+			TSharedPtr<FJsonObject> Content = MakeChatInjectContent(bPanelFound && bMessageQueued, bPanelFound, bMessageQueued, SessionId, false);
+			if (!bPanelFound)
+			{
+				Content->SetStringField(TEXT("errorCode"), TEXT("chat_panel_not_open"));
+				Content->SetStringField(TEXT("errorMessage"), TEXT("Editor Chat Panel is not open."));
+				return MakeExecutionResult(TEXT("Editor Chat Panel is not open."), Content, false);
+			}
+			if (!bMessageQueued)
+			{
+				Content->SetStringField(TEXT("errorCode"), TEXT("injection_refused"));
+				Content->SetStringField(TEXT("errorMessage"), TEXT("Chat panel refused injection."));
+				return MakeExecutionResult(TEXT("Chat panel refused injection."), Content, false);
+			}
+
+			return MakeExecutionResult(TEXT("Queued user prompt into editor Chat Panel."), Content, false);
+		}
+
+		FUnrealMcpExecutionResult ExecuteChatHistoryTail(const FJsonObject& Arguments)
+		{
+			const int32 Count = GetCountArgument(Arguments);
+			FString SessionId;
+			Arguments.TryGetStringField(TEXT("sessionId"), SessionId);
+
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("chat_history_tail"));
+			Content->SetStringField(TEXT("sessionId"), SessionId);
+
+			const FString HistoryPath = GetChatHistoryPath();
+			FString JsonText;
+			if (!FFileHelper::LoadFileToString(JsonText, *HistoryPath))
+			{
+				Content->SetNumberField(TEXT("count"), 0);
+				Content->SetNumberField(TEXT("totalAvailable"), 0);
+				Content->SetArrayField(TEXT("entries"), TArray<TSharedPtr<FJsonValue>>());
+				Content->SetStringField(TEXT("note"), TEXT("Chat history file does not exist yet."));
+				return MakeExecutionResult(TEXT("Chat history file does not exist yet."), Content, false);
+			}
+
+			TSharedPtr<FJsonObject> RootObject;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonText);
+			if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+			{
+				Content->SetNumberField(TEXT("count"), 0);
+				Content->SetNumberField(TEXT("totalAvailable"), 0);
+				Content->SetArrayField(TEXT("entries"), TArray<TSharedPtr<FJsonValue>>());
+				Content->SetStringField(TEXT("note"), TEXT("Chat history file could not be parsed."));
+				return MakeExecutionResult(TEXT("Chat history file could not be parsed."), Content, false);
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+			if (!RootObject->TryGetArrayField(TEXT("entries"), Entries) || !Entries)
+			{
+				Content->SetNumberField(TEXT("count"), 0);
+				Content->SetNumberField(TEXT("totalAvailable"), 0);
+				Content->SetArrayField(TEXT("entries"), TArray<TSharedPtr<FJsonValue>>());
+				Content->SetStringField(TEXT("note"), TEXT("Chat history file has no entries array."));
+				return MakeExecutionResult(TEXT("Chat history file has no entries array."), Content, false);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> TailEntries;
+			const int32 StartIndex = FMath::Max(0, Entries->Num() - Count);
+			for (int32 Index = StartIndex; Index < Entries->Num(); ++Index)
+			{
+				const TSharedPtr<FJsonObject> EntryObject = (*Entries)[Index].IsValid() && (*Entries)[Index]->Type == EJson::Object ? (*Entries)[Index]->AsObject() : nullptr;
+				if (!EntryObject.IsValid())
+				{
+					continue;
+				}
+
+				FString Type;
+				FString Speaker;
+				FString Title;
+				FString Body;
+				FString ToolCallId;
+				bool bIsError = false;
+				EntryObject->TryGetStringField(TEXT("type"), Type);
+				EntryObject->TryGetStringField(TEXT("speaker"), Speaker);
+				EntryObject->TryGetStringField(TEXT("title"), Title);
+				EntryObject->TryGetStringField(TEXT("body"), Body);
+				EntryObject->TryGetStringField(TEXT("tool_call_id"), ToolCallId);
+				EntryObject->TryGetBoolField(TEXT("is_error"), bIsError);
+
+				TSharedPtr<FJsonObject> OutputEntry = MakeShared<FJsonObject>();
+				OutputEntry->SetStringField(TEXT("type"), Type);
+				OutputEntry->SetStringField(TEXT("speaker"), Speaker);
+				OutputEntry->SetStringField(TEXT("title"), Title);
+				OutputEntry->SetStringField(TEXT("body"), Body.Left(2000));
+				OutputEntry->SetStringField(TEXT("tool_call_id"), ToolCallId);
+				OutputEntry->SetBoolField(TEXT("is_error"), bIsError);
+				TailEntries.Add(MakeShared<FJsonValueObject>(OutputEntry));
+			}
+
+			Content->SetNumberField(TEXT("count"), TailEntries.Num());
+			Content->SetNumberField(TEXT("totalAvailable"), Entries->Num());
+			Content->SetArrayField(TEXT("entries"), TailEntries);
+			return MakeExecutionResult(FString::Printf(TEXT("Read %d chat history entries."), TailEntries.Num()), Content, false);
+		}
+
+		FUnrealMcpExecutionResult ExecuteChatToolLogTail(const FJsonObject& Arguments)
+		{
+			const int32 Count = GetCountArgument(Arguments);
+			FString RequestedSessionId;
+			Arguments.TryGetStringField(TEXT("sessionId"), RequestedSessionId);
+
+			TSharedPtr<FJsonObject> Content = MakeShared<FJsonObject>();
+			Content->SetStringField(TEXT("action"), TEXT("chat_tool_log_tail"));
+			Content->SetNumberField(TEXT("count"), 0);
+			Content->SetNumberField(TEXT("totalToolCallsInSession"), 0);
+			Content->SetArrayField(TEXT("toolCalls"), TArray<TSharedPtr<FJsonValue>>());
+
+			FString SessionId;
+			FString ActivityLogPath;
+			if (!TryResolveActivityLogSession(RequestedSessionId, SessionId, ActivityLogPath))
+			{
+				Content->SetStringField(TEXT("sessionId"), RequestedSessionId.TrimStartAndEnd());
+				Content->SetStringField(TEXT("note"), TEXT("ActivityLog session file does not exist."));
+				return MakeExecutionResult(TEXT("ActivityLog session file does not exist."), Content, false);
+			}
+			Content->SetStringField(TEXT("sessionId"), SessionId);
+
+			TArray<FString> Lines;
+			if (!FFileHelper::LoadFileToStringArray(Lines, *ActivityLogPath))
+			{
+				Content->SetStringField(TEXT("note"), TEXT("ActivityLog session file could not be read."));
+				return MakeExecutionResult(TEXT("ActivityLog session file could not be read."), Content, false);
+			}
+
+			TArray<TSharedPtr<FJsonObject>> ToolCallObjects;
+			for (const FString& Line : Lines)
+			{
+				const FString TrimmedLine = Line.TrimStartAndEnd();
+				if (TrimmedLine.IsEmpty())
+				{
+					continue;
+				}
+
+				TSharedPtr<FJsonObject> EventObject;
+				const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(TrimmedLine);
+				if (!FJsonSerializer::Deserialize(Reader, EventObject) || !EventObject.IsValid())
+				{
+					continue;
+				}
+
+				FString EventKind;
+				EventObject->TryGetStringField(TEXT("eventKind"), EventKind);
+				if (EventKind != TEXT("tool_call"))
+				{
+					continue;
+				}
+
+				const TSharedPtr<FJsonObject>* PayloadPtr = nullptr;
+				TSharedPtr<FJsonObject> Payload;
+				if (EventObject->TryGetObjectField(TEXT("payload"), PayloadPtr) && PayloadPtr)
+				{
+					Payload = *PayloadPtr;
+				}
+				if (!Payload.IsValid())
+				{
+					continue;
+				}
+
+				FString TimestampUtc;
+				if (!EventObject->TryGetStringField(TEXT("ts"), TimestampUtc))
+				{
+					EventObject->TryGetStringField(TEXT("timestampUtc"), TimestampUtc);
+				}
+				FString ToolName;
+				FString Summary;
+				bool bIsError = false;
+				Payload->TryGetStringField(TEXT("toolName"), ToolName);
+				EventObject->TryGetStringField(TEXT("summary"), Summary);
+				Payload->TryGetBoolField(TEXT("isError"), bIsError);
+
+				TSharedPtr<FJsonObject> OutputCall = MakeShared<FJsonObject>();
+				OutputCall->SetStringField(TEXT("ts"), TimestampUtc);
+				OutputCall->SetStringField(TEXT("tool"), ToolName);
+				OutputCall->SetArrayField(TEXT("argumentKeys"), CopyStringArrayField(Payload, TEXT("argumentKeys")));
+				OutputCall->SetBoolField(TEXT("isError"), bIsError);
+				OutputCall->SetStringField(TEXT("summary"), Summary.Left(200));
+				ToolCallObjects.Add(OutputCall);
+			}
+
+			TArray<TSharedPtr<FJsonValue>> TailCalls;
+			const int32 StartIndex = FMath::Max(0, ToolCallObjects.Num() - Count);
+			for (int32 Index = StartIndex; Index < ToolCallObjects.Num(); ++Index)
+			{
+				TailCalls.Add(MakeShared<FJsonValueObject>(ToolCallObjects[Index]));
+			}
+
+			Content->SetNumberField(TEXT("count"), TailCalls.Num());
+			Content->SetNumberField(TEXT("totalToolCallsInSession"), ToolCallObjects.Num());
+			Content->SetArrayField(TEXT("toolCalls"), TailCalls);
+			return MakeExecutionResult(FString::Printf(TEXT("Read %d chat tool log events."), TailCalls.Num()), Content, false);
+		}
+
 		bool TryExecute(const FString& ToolName, const FJsonObject& Arguments, FUnrealMcpExecutionResult& OutResult)
 		{
 			if (ToolName == TEXT("unreal.task_atlas_make_composite"))
@@ -433,6 +857,24 @@ namespace UnrealMcp
 				Content->SetArrayField(TEXT("tools"), ToolValues);
 				Content->SetArrayField(TEXT("rejected"), RejectedValues);
 				OutResult = MakeExecutionResult(FString::Printf(TEXT("Inspected %d loaded user registry tools."), ToolValues.Num()), Content, false);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.chat_inject_user_input"))
+			{
+				OutResult = ExecuteChatInjectUserInput(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.chat_history_tail"))
+			{
+				OutResult = ExecuteChatHistoryTail(Arguments);
+				return true;
+			}
+
+			if (ToolName == TEXT("unreal.chat_tool_log_tail"))
+			{
+				OutResult = ExecuteChatToolLogTail(Arguments);
 				return true;
 			}
 

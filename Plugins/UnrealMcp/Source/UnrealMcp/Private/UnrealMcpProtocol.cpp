@@ -19,6 +19,7 @@
 #include "UnrealMcpToolHandlerRegistry.h"
 #include "UnrealMcpToolRegistry.h"
 #include "UnrealMcpUserToolListVersion.h"
+#include "UnrealMcpUserToolRegistry.h"
 
 namespace UnrealMcp
 {
@@ -345,6 +346,9 @@ TUniquePtr<FHttpServerResponse> FUnrealMcpModule::HandleToolsCall(const TSharedP
 	const FJsonObject& Arguments = ArgumentsObject ? **ArgumentsObject : *EmptyArguments;
 	const FDateTime ToolStartTimeUtc = FDateTime::UtcNow();
 	const FUnrealMcpExecutionResult Result = ExecuteTool(ToolName, Arguments);
+	const bool bToolKnown = (UnrealMcp::FindToolRegistryEntry(ToolName) != nullptr)
+		|| (UnrealMcp::UserRegistry::FindUserTool(ToolName) != nullptr);
+	if (bToolKnown)
 	{
 		TArray<FString> ArgumentKeys;
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Arguments.Values)

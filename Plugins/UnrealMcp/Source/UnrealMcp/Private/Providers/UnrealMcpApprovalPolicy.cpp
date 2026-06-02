@@ -86,6 +86,7 @@ namespace UnrealMcp::Approval
 		if (ToolName == ::UnrealMcp::Extension::ControlToolUserRegistryReload) { return ERiskLevel::Medium; }
 		if (ToolName == ::UnrealMcp::Extension::ControlToolUserToolSmoke) { return ERiskLevel::Low; }
 		if (ToolName == TEXT("unreal.task_atlas_promote_to_rag")) { return ERiskLevel::Medium; }
+		if (ToolName == TEXT("unreal.chat_inject_user_input")) { return ERiskLevel::Medium; }
 		if (ToolName.StartsWith(TEXT("unreal.spawn_"))) { return ERiskLevel::Medium; }
 		if (ToolName.StartsWith(TEXT("unreal.set_"))) { return ERiskLevel::Medium; }
 		if (ToolName.StartsWith(TEXT("unreal.create_"))) { return ERiskLevel::Medium; }
@@ -247,6 +248,19 @@ namespace UnrealMcp::Approval
 			}
 			OutRiskLevel = ERiskLevel::High;
 			OutReason = TEXT("task_atlas_smoke_made_tool can execute user Python and write failure markers; requires approval");
+			return EDecision::RequireApproval;
+		}
+
+		if (ToolName == TEXT("unreal.chat_inject_user_input"))
+		{
+			if (GetDryRunDefaultFalse())
+			{
+				OutRiskLevel = ERiskLevel::Low;
+				OutReason = TEXT("chat_inject_user_input dryRun=true is preview-only; allowed");
+				return EDecision::Allow;
+			}
+			OutRiskLevel = ERiskLevel::Medium;
+			OutReason = TEXT("chat_inject_user_input writes chat state and can trigger an autonomous AI turn; requires approval");
 			return EDecision::RequireApproval;
 		}
 

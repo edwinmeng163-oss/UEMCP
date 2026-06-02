@@ -70,7 +70,10 @@ public:
 	SLATE_BEGIN_ARGS(SUnrealMcpChatPanel) {}
 	SLATE_END_ARGS()
 
+	~SUnrealMcpChatPanel();
+
 	void Construct(const FArguments& InArgs, FUnrealMcpModule* InOwnerModule);
+	bool InjectUserMessage(const FString& Text);
 
 private:
 	FReply HandleSendClicked();
@@ -199,3 +202,10 @@ private:
 	int32 DeferredToolLogScrollFrames = 0;
 	FString LastExportCopyDir;
 };
+
+namespace UnrealMcp::ChatPanelRegistry
+{
+	void RegisterActivePanel(SUnrealMcpChatPanel* Panel);
+	void UnregisterActivePanel(SUnrealMcpChatPanel* Panel);
+	SUnrealMcpChatPanel* TryGetActivePanel();
+}

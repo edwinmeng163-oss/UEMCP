@@ -1515,6 +1515,76 @@ namespace UnrealMcp
 
 			{
 				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				Properties->SetObjectField(TEXT("text"), MakeStringProperty(TEXT("User prompt to inject into the editor Chat Panel as if the user typed it and pressed Enter."), FString()));
+				Properties->SetObjectField(TEXT("sessionId"), MakeStringProperty(TEXT("Optional ActivityLog sessionId. Default: current process session."), FString()));
+				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("When true, report whether a panel is available without actually queuing the prompt."), false));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.chat_inject_user_input"),
+					TEXT("Inject Chat Panel User Input"),
+					TEXT("Inject a user prompt into the editor Chat Panel as if the user typed Enter, triggering the normal AI assistant flow."),
+					TEXT("editor"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::Medium);
+				Descriptor.bRequiresWrite = true;
+				Descriptor.bRequiresLock = true;
+				Descriptor.bDryRunSupport = true;
+				Descriptor.bPreflightSupport = true;
+				Descriptor.bPostcheckSupport = true;
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/ChatSync.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 R4 chunk 9 CLI to editor Chat Panel user-input injection.");
+				Registrar.Add(Descriptor, MakeSchemaWithRequired(Properties, TArray<FString>{ TEXT("text") }));
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				TSharedPtr<FJsonObject> CountProperty = MakeIntegerProperty(TEXT("Maximum chat history entries to return."), 20);
+				CountProperty->SetNumberField(TEXT("minimum"), 1.0);
+				CountProperty->SetNumberField(TEXT("maximum"), 100.0);
+				Properties->SetObjectField(TEXT("count"), CountProperty);
+				Properties->SetObjectField(TEXT("sessionId"), MakeStringProperty(TEXT("Optional ActivityLog sessionId. Default: current process session."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.chat_history_tail"),
+					TEXT("Tail Chat Panel History"),
+					TEXT("Read the last N entries from the editor Chat Panel persisted history (Saved/UnrealMcp/ChatHistory.json)."),
+					TEXT("editor"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/ChatSync.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 R4 chunk 9 read-only editor Chat Panel history tail.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
+				TSharedPtr<FJsonObject> CountProperty = MakeIntegerProperty(TEXT("Maximum tool_call events to return."), 20);
+				CountProperty->SetNumberField(TEXT("minimum"), 1.0);
+				CountProperty->SetNumberField(TEXT("maximum"), 100.0);
+				Properties->SetObjectField(TEXT("count"), CountProperty);
+				Properties->SetObjectField(TEXT("sessionId"), MakeStringProperty(TEXT("Optional ActivityLog sessionId. Default: current process session."), FString()));
+
+				FUnrealMcpToolDescriptor Descriptor = MakeDescriptor(
+					TEXT("unreal.chat_tool_log_tail"),
+					TEXT("Tail Chat Tool Log"),
+					TEXT("Read the last N tool_call events from the current ActivityLog session (the events shown beside the chat dialog)."),
+					TEXT("editor"),
+					TEXT("UnrealMcpToolDispatcher.cpp"),
+					EUnrealMcpToolRisk::ReadOnly);
+				Descriptor.TestCoverage = EUnrealMcpToolTestCoverage::Category;
+				Descriptor.DocsPath = TEXT("Docs/ChatSync.md");
+				Descriptor.Reason = TEXT("Descriptor: v0.31 R4 chunk 9 read-only editor Chat tool log tail.");
+				TSharedPtr<FJsonObject> Schema = MakeObjectSchema();
+				Schema->SetObjectField(TEXT("properties"), Properties);
+				Registrar.Add(Descriptor, Schema);
+			}
+
+			{
+				TSharedPtr<FJsonObject> Properties = MakeShared<FJsonObject>();
 				Properties->SetObjectField(TEXT("taskId"), MakeStringProperty(TEXT("Task Atlas task id to promote."), FString()));
 				Properties->SetObjectField(TEXT("dryRun"), MakeBoolProperty(TEXT("When true, report source/target paths and refresh plan without writing KnowledgeSources."), false));
 				Properties->SetObjectField(TEXT("refreshIndex"), MakeBoolProperty(TEXT("Run knowledge_index_refresh after writing the source."), true));

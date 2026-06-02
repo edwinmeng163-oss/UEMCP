@@ -171,7 +171,7 @@ The explicit ToolRegistry is central. Do not bypass it:
 `Tools/UnrealMcpToolRegistry/schema.json`, and
 `Schemas/UnrealMcpToolRegistry.schema.json`.
 
-At the time this file was written, the registry contained 187 entries across:
+At the time this file was written, the registry contained 190 entries across:
 actors, blueprint, code, editor, material, memory, scaffold, self-extension,
 skills, task-atlas, verification, and widget.
 
@@ -181,7 +181,10 @@ matrix, migration tools, install doctor, UMG/material parity tools, Task Atlas
 foundation/backfill tools, verification foundation tools, diagnostics, PIE
 smoke, AI provider presets, Kimi `reasoning_content` compatibility, enriched
 input schemas, generated per-tool docs under `Tools/UnrealMcpToolDocs/`, and
-the `Tools/UEAtelierCli/` CLI-Anything package.
+the `Tools/UEAtelierCli/` CLI-Anything package. v0.31 R4 chunk 9 adds
+CLI <-> Chat Panel sync tools (chat_inject_user_input, chat_history_tail,
+chat_tool_log_tail) and hardens Task Atlas eligibility against external-client
+registry-miss noise.
 
 Current project status: v0.31 Stage 2 is complete through Wave E docs:
 ActivityLog records now carry `eventId` plus public capture metadata; tool

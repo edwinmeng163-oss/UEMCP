@@ -1584,11 +1584,19 @@ namespace UnrealMcp::TaskAtlasService
 			}
 			else if (Step.PolicyDecision == TEXT("deny"))
 			{
-				++Result.DenyCount;
-				if (Result.BlockedFirstStep < 0)
+				// Skip not_visible denies: these are external-client lookup misses
+				// (e.g. bare 'task_list' w/o 'unreal.' prefix) and represent
+				// protocol noise, not user-meaningful policy denial. Other deny
+				// reasons (user_tool_forbidden, workflow_run_forbidden,
+				// dangerous_no_dryrun) still count.
+				if (Step.DenyReason != TEXT("not_visible"))
 				{
-					Result.BlockedFirstStep = Step.Ordinal;
-					Result.BlockedFirstReason = Step.DenyReason;
+					++Result.DenyCount;
+					if (Result.BlockedFirstStep < 0)
+					{
+						Result.BlockedFirstStep = Step.Ordinal;
+						Result.BlockedFirstReason = Step.DenyReason;
+					}
 				}
 			}
 

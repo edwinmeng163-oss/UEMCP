@@ -7903,6 +7903,140 @@
       "notes": "Does not set texture or static switch parameters; those are future v0.16.x work because they need asset-reference and permutation invalidation discipline."
     },
     {
+      "name": "unreal.chat_history_tail",
+      "category": "editor",
+      "handlerName": "unreal.chat_history_tail",
+      "title": "Tail Chat Panel History",
+      "description": "Read the last N entries from the editor Chat Panel persisted history (Saved/UnrealMcp/ChatHistory.json).",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/ChatSync.md",
+      "reason": "v0.31 R4 chunk 9 read-only editor Chat Panel history tail.",
+      "summaryTemplate": "Read chat history tail",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Maximum chat history entries to return."
+          },
+          "sessionId": {
+            "type": "string",
+            "default": "",
+            "description": "Optional ActivityLog sessionId. Default: current process session."
+          }
+        },
+        "required": []
+      },
+      "notes": "AssistantRun approval: not_required. Read-only chat dialog and tool log surfaces with body truncation and argument-value redaction."
+    },
+    {
+      "name": "unreal.chat_inject_user_input",
+      "category": "editor",
+      "handlerName": "unreal.chat_inject_user_input",
+      "title": "Inject Chat Panel User Input",
+      "description": "Inject a user prompt into the editor Chat Panel as if the user typed Enter, triggering the normal AI assistant flow.",
+      "exposure": "visible",
+      "riskLevel": "medium",
+      "requiresWrite": true,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": true,
+      "dryRunSupport": true,
+      "preflightSupport": true,
+      "postcheckSupport": true,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/ChatSync.md",
+      "reason": "v0.31 R4 chunk 9 CLI to editor Chat Panel user-input injection.",
+      "summaryTemplate": "Injected user prompt into Chat Panel",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "User prompt to inject into the editor Chat Panel as if the user typed it and pressed Enter."
+          },
+          "sessionId": {
+            "type": "string",
+            "default": "",
+            "description": "Optional ActivityLog sessionId. Default: current process session."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, report whether a panel is available without actually queuing the prompt."
+          }
+        }
+      },
+      "notes": "AssistantRun approval: required. Writes to editor chat state and can trigger an AI request that invokes additional tools."
+    },
+    {
+      "name": "unreal.chat_tool_log_tail",
+      "category": "editor",
+      "handlerName": "unreal.chat_tool_log_tail",
+      "title": "Tail Chat Tool Log",
+      "description": "Read the last N tool_call events from the current ActivityLog session (the events shown beside the chat dialog).",
+      "exposure": "visible",
+      "riskLevel": "read_only",
+      "requiresWrite": false,
+      "requiresBuild": false,
+      "requiresExternalProcess": false,
+      "requiresRestart": false,
+      "requiresProjectMemory": false,
+      "requiresLock": false,
+      "dryRunSupport": false,
+      "preflightSupport": false,
+      "postcheckSupport": false,
+      "testCoverage": "category",
+      "owner": "UEAtelier Core",
+      "docsPath": "Docs/ChatSync.md",
+      "reason": "v0.31 R4 chunk 9 read-only editor Chat tool log tail.",
+      "summaryTemplate": "Read chat tool log tail",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Maximum tool_call events to return."
+          },
+          "sessionId": {
+            "type": "string",
+            "default": "",
+            "description": "Optional ActivityLog sessionId. Default: current process session."
+          }
+        },
+        "required": []
+      },
+      "notes": "AssistantRun approval: not_required. Read-only chat dialog and tool log surfaces with body truncation and argument-value redaction."
+    },
+    {
       "name": "unreal.chat_label_active_task",
       "category": "skills",
       "handlerName": "unreal.chat_label_active_task",

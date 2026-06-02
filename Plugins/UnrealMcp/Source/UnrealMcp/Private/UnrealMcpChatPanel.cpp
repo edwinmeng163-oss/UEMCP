@@ -6,6 +6,7 @@
 #include "Dom/JsonValue.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "HAL/CriticalSection.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProcess.h"
@@ -16,6 +17,7 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
 #include "Modules/ModuleManager.h"
 #include "Policies/PrettyJsonPrintPolicy.h"
 #include "Serialization/JsonReader.h"
@@ -54,6 +56,39 @@
 #endif
 
 #define LOCTEXT_NAMESPACE "UnrealMcpChatPanel"
+
+namespace
+{
+	TArray<SUnrealMcpChatPanel*> GActivePanels;
+	FCriticalSection GActivePanelsCs;
+}
+
+namespace UnrealMcp::ChatPanelRegistry
+{
+	void RegisterActivePanel(SUnrealMcpChatPanel* Panel)
+	{
+		if (!Panel)
+		{
+			return;
+		}
+
+		FScopeLock Lock(&GActivePanelsCs);
+		GActivePanels.AddUnique(Panel);
+	}
+
+	void UnregisterActivePanel(SUnrealMcpChatPanel* Panel)
+	{
+		FScopeLock Lock(&GActivePanelsCs);
+		GActivePanels.Remove(Panel);
+	}
+
+	SUnrealMcpChatPanel* TryGetActivePanel()
+	{
+		FScopeLock Lock(&GActivePanelsCs);
+		// If the user opens multiple Chat tabs, injection targets the most recently constructed.
+		return GActivePanels.Num() > 0 ? GActivePanels.Last() : nullptr;
+	}
+}
 
 namespace UnrealMcpChat
 {
@@ -1313,6 +1348,11 @@ private:
 	FUnrealMcpApprovalDecisionDelegate OnDecision;
 };
 
+SUnrealMcpChatPanel::~SUnrealMcpChatPanel()
+{
+	UnrealMcp::ChatPanelRegistry::UnregisterActivePanel(this);
+}
+
 void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* InOwnerModule)
 {
 	OwnerModule = InOwnerModule;
@@ -1972,6 +2012,7 @@ void SUnrealMcpChatPanel::Construct(const FArguments& InArgs, FUnrealMcpModule* 
 		ResetHistory(true);
 	}
 	RefreshSkillOptions(false);
+	UnrealMcp::ChatPanelRegistry::RegisterActivePanel(this);
 }
 
 FReply SUnrealMcpChatPanel::HandleSendClicked()
@@ -3499,6 +3540,35 @@ void SUnrealMcpChatPanel::SendCurrentInput()
 	const FString CommandText = InputTextBox->GetText().ToString().TrimStartAndEnd();
 	InputTextBox->SetText(FText::GetEmpty());
 	SendCommand(CommandText);
+}
+
+bool SUnrealMcpChatPanel::InjectUserMessage(const FString& Text)
+{
+	check(IsInGameThread());
+	if (!IsInGameThread())
+	{
+		return false;
+	}
+
+	const FString TrimmedCommand = Text.TrimStartAndEnd();
+	if (TrimmedCommand.IsEmpty())
+	{
+		return false;
+	}
+
+	if (bAssistantRequestInFlight
+		&& !TrimmedCommand.StartsWith(TEXT("/steer"), ESearchCase::IgnoreCase)
+		&& !TrimmedCommand.Equals(TEXT("/stop_ai"), ESearchCase::IgnoreCase))
+	{
+		return false;
+	}
+
+	if (InputTextBox.IsValid())
+	{
+		InputTextBox->SetText(FText::GetEmpty());
+	}
+	SendCommand(Text);
+	return true;
 }
 
 void SUnrealMcpChatPanel::SendCommand(const FString& CommandText)
